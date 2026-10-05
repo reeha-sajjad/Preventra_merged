@@ -160,11 +160,11 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
             <label className="relative block">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input type="search" value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search doctors and nurses" aria-label="Search staff"
+                placeholder="Search doctors and hospital nurses" aria-label="Search staff"
                 className="w-full text-sm rounded-lg border border-gray-200 pl-8 pr-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400" />
             </label>
             {section('doctor', 'Doctors')}
-            {section('nurse', 'Nurses')}
+            {section('nurse', 'Hospital nurses')}
           </>)}
           {error && <p className="rounded-md px-3 py-2 text-sm" style={{ background: '#FFEBEE', color: '#C62828' }}>{error}</p>}
         </div>

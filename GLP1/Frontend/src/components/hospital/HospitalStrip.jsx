@@ -72,14 +72,14 @@ export default function HospitalStrip() {
               data.no_doctor ? `${data.no_doctor.toLocaleString()} patients without a doctor` : 'All patients assigned',
               data.no_doctor ? '#EF6C00' : '#2E7D32',
               data.no_doctor ? '/patients?unassigned=doctor' : '/staff')}
-        {tile(HeartPulse, 'Nurses', data.staff.nurses.toLocaleString(),
-              data.no_nurse ? `${data.no_nurse.toLocaleString()} patients without a nurse` : 'All patients assigned',
+        {tile(HeartPulse, 'Hospital nurses', data.staff.nurses.toLocaleString(),
+              data.no_nurse ? `${data.no_nurse.toLocaleString()} patients without a hospital nurse` : 'All patients assigned',
               data.no_nurse ? '#EF6C00' : '#2E7D32',
               data.no_nurse ? '/patients?unassigned=nurse' : '/staff')}
       </>) : (<>
         {tile(Stethoscope, 'No doctor', data.no_doctor.toLocaleString(), `${pct(data.no_doctor)}% of patients`,
               data.no_doctor ? '#EF6C00' : '#2E7D32', '/patients?unassigned=doctor')}
-        {tile(HeartPulse, 'No nurse', data.no_nurse.toLocaleString(), `${pct(data.no_nurse)}% of patients`,
+        {tile(HeartPulse, 'No hospital nurse', data.no_nurse.toLocaleString(), `${pct(data.no_nurse)}% of patients`,
               data.no_nurse ? '#EF6C00' : '#2E7D32', '/patients?unassigned=nurse')}
       </>)}
       </div>

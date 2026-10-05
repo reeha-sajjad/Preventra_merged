@@ -241,9 +241,9 @@ export default function PatientRiskPanel() {
 
   // The care-team filter, named rather than shown as an id.
   const careLabel = care.doctor ? `Doctor: ${patients.flatMap(doctorsOf).find(x => x.id === care.doctor)?.name || 'selected'}`
-    : care.nurse ? `Nurse: ${patients.flatMap(p => p.nurses || []).find(n => n.id === care.nurse)?.name || 'selected'}`
+    : care.nurse ? `Hospital nurse: ${patients.flatMap(p => p.nurses || []).find(n => n.id === care.nurse)?.name || 'selected'}`
     : care.unassigned === 'doctor' ? 'No doctor assigned'
-    : care.unassigned === 'nurse' ? 'No nurse assigned' : null;
+    : care.unassigned === 'nurse' ? 'No hospital nurse assigned' : null;
   const clearCare = () => {
     const next = new URLSearchParams(searchParams);
     ['doctor', 'nurse', 'unassigned'].forEach(k => next.delete(k));
@@ -314,7 +314,7 @@ export default function PatientRiskPanel() {
               {doctorsOf(p).length ? doctorsOf(p).map(x => x.name).join(', ') : 'No doctor'}
             </div>
             <div className="text-[10px] text-gray-400 truncate mt-0.5">
-              {(p.nurses || []).length ? p.nurses.map(n => n.name).join(', ') : 'No nurse'}
+              {(p.nurses || []).length ? p.nurses.map(n => n.name).join(', ') : 'No hospital nurse'}
             </div>
           </div>
         );

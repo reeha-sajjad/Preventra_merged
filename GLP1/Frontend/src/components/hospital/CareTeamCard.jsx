@@ -40,7 +40,7 @@ export default function CareTeamCard({ team, patientIdx, canAssign, onChanged })
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {item(Stethoscope, doctors.length > 1 ? 'Doctors' : 'Doctor', doctors.map((d) => d.name).join(', '), true)}
-        {item(HeartPulse, nurses.length > 1 ? 'Nurses' : 'Nurse', nurses.map((n) => n.name).join(', '), true)}
+        {item(HeartPulse, nurses.length > 1 ? 'Hospital nurses' : 'Hospital nurse', nurses.map((n) => n.name).join(', '), true)}
         {item(Building, 'Insurer', insurer?.name, false)}
         {pharmacy !== undefined && item(Store, 'Pharmacy', pharmacy, false)}
       </div>
