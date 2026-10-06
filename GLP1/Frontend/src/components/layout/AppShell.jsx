@@ -13,6 +13,7 @@ import HospitalPicker from '../hospital/HospitalPicker';
 // hidden, not dimmed (the backend refuses them anyway).
 const NAV_ITEMS = [
   { to: '/',         icon: LayoutDashboard, label: 'Overview',             primary: null, only: 'hasOverview' },
+  { to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
   { to: '/patients', icon: Users,           label: 'Patients',             primary: null },
   { to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
   { to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },
@@ -64,7 +65,7 @@ export default function AppShell({ children }) {
   const location = useLocation();
   const allowed = (item) => !item.only || roleFlags[item.only];
 
-  const pageTitle = NAV_ITEMS.find(n => n.to === location.pathname)?.label
+  const pageTitle = NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
     ?? PAGE_TITLES[location.pathname]
     ?? (location.pathname.startsWith('/patients/') ? 'Patient detail' : 'GLP-1 Platform');
 
@@ -145,14 +146,14 @@ export default function AppShell({ children }) {
           ) : (<>
           {/* Section: Overview */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-3 pb-1">Overview</div>}
-          {NAV_ITEMS.slice(0, 3).filter(allowed).map(item => (
+          {NAV_ITEMS.slice(0, 4).filter(allowed).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView}
               extra={item.to === '/' ? { end: true } : {}} />
           ))}
 
           {/* Section: Analytics */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-4 pb-1">Analytics</div>}
-          {NAV_ITEMS.slice(3, 5).map(item => (
+          {NAV_ITEMS.slice(4, 6).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
@@ -164,7 +165,7 @@ export default function AppShell({ children }) {
               <div className="text-[9px] bg-blue-500/30 text-blue-300 px-1.5 py-0.5 rounded-full">Primary</div>
             </div>
           )}
-          {isCostView && NAV_ITEMS.slice(5, 7).map(item => (
+          {isCostView && NAV_ITEMS.slice(6, 8).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
@@ -184,7 +185,7 @@ export default function AppShell({ children }) {
             Switch App
           </div>
           <a
-            href={`${import.meta.env.VITE_READMISSIONS_URL ?? 'https://preventra-merged-q2da.vercel.app'}/#token=${encodeURIComponent(token)}`}
+            href={`${import.meta.env.VITE_READMISSIONS_URL ?? 'https://readmission-frontend-production.up.railway.app'}/#token=${encodeURIComponent(token)}`}
             className="flex items-center justify-between px-3 py-2 rounded-lg text-xs text-white/70 hover:bg-white/08 hover:text-white transition-colors"
           >
             <span className="flex items-center gap-2">

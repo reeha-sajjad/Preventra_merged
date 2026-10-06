@@ -9,10 +9,10 @@ const USER_KEY  = 'glp1_user';
 // Portal is a different origin — leaving the app entirely requires a real
 // browser navigation, not a React Router route change.
 export const PORTAL_URL =
-  import.meta.env.VITE_PORTAL_URL ?? 'https://preventra-merged-ixbe.vercel.app';
+  import.meta.env.VITE_PORTAL_URL ?? 'https://portal-frontend-production-815a.up.railway.app';
 
 const READMISSIONS_URL =
-  (import.meta.env.VITE_READMISSIONS_URL ?? 'https://preventra-merged-q2da.vercel.app').replace(/\/$/, '');
+  (import.meta.env.VITE_READMISSIONS_URL ?? 'https://readmission-frontend-production.up.railway.app').replace(/\/$/, '');
 
 /**
  * Called from main.jsx before anything renders. Handles an incoming

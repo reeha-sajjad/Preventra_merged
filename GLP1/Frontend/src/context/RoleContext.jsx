@@ -24,6 +24,8 @@ const STAFF_ROLES    = ['superadmin', 'hospital_admin', 'case_manager'];
 const ASSIGN_ROLES   = ['superadmin', 'hospital_admin', 'case_manager'];
 // Hospital admins and insurers open a patient's clinical details with a reason.
 const REASON_ROLES   = ['hospital_admin', 'insurer'];
+// The people who look after patients directly.
+const CARE_TEAM_ROLES = ['doctor', 'nurse'];
 
 // The role is the one an administrator assigned to the account - read from the
 // signed-in user, never chosen here. Hiding a panel is a courtesy; the backend
@@ -44,6 +46,8 @@ export function RoleProvider({ children }) {
       canAssign:    ASSIGN_ROLES.includes(role),
       needsReason:  REASON_ROLES.includes(role),
       isManager:    role === 'superadmin' || role === 'hospital_admin',
+      // Doctors and hospital nurses: their home page is "My patients".
+      isCareTeam:   CARE_TEAM_ROLES.includes(role),
     }}>
       {children}
     </RoleContext.Provider>

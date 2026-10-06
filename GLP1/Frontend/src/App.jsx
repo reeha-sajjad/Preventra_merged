@@ -8,6 +8,7 @@ import LoadingScreen from './components/shared/LoadingScreen';
 import ChatWidget from './components/chatbot/ChatWidget';
 import { useAppLoader } from './hooks/useAppLoader';
 import ExecutiveSummary from './pages/ExecutiveSummary';
+import CareHome from './pages/CareHome';
 import PatientRiskPanel from './pages/PatientRiskPanel';
 import PatientDetail from './pages/PatientDetail';
 import SegmentExplorer from './pages/SegmentExplorer';
@@ -43,7 +44,7 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, hasOverview, hasStaff } = useRole();
+  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam } = useRole();
 
   if (isPatient) {
     return (
@@ -58,7 +59,9 @@ function RoleRoutes() {
   return (
     <>
       <Routes>
-        <Route path="/"             element={hasOverview ? <ExecutiveSummary /> : <Navigate to="/patients" replace />} />
+        <Route path="/"             element={hasOverview ? <ExecutiveSummary />
+                                             : isCareTeam ? <CareHome />
+                                             : <Navigate to="/patients" replace />} />
         <Route path="/patients"     element={<PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}
         <Route path="/patients/:id" element={<PatientDetail />} />
