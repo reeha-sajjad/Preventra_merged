@@ -108,7 +108,56 @@ def test_the_care_team_is_never_asked(world):
         c = client(world, email)
         assert c.get("/api/patients/0").status_code == 200
         assert c.get("/api/patients/0/summary").json()["detail_access"] == "open"
+    # Doctors and nurses are logged (below); the case manager is not, as before.
+    assert {e["email"] for e in log(world)} == {"doc@a.test", "nurse@a.test"}
+
+
+@pytest.mark.parametrize("email", ["doc@a.test", "nurse@a.test"])
+def test_a_doctor_or_nurse_opening_a_patient_is_logged_once_as_treatment(world, email):
+    c = client(world, email)
+    for _ in range(2):
+        assert c.get("/api/patients/0").status_code == 200
+    c.get("/api/patients/1")
+    entries = sorted(log(world), key=lambda e: e["patient_id"])
+    assert [(e["email"], e["patient_id"], e["hospital_id"], e["reason"], e["reason_label"], e["app"])
+            for e in entries] == [
+        (email, "0", "hosp-a", "treatment", "Treatment (care team)", "glp1"),
+        (email, "1", "hosp-a", "treatment", "Treatment (care team)", "glp1"),
+    ]
+    assert {e["role"] for e in entries} == {access.CARE_TEAM_ROLES[email.startswith("nurse")]}
+
+
+def test_a_new_sign_in_is_logged_again(world):
+    import time
+    from jose import jwt
+    doctor = uid(world, "doc@a.test")
+    for sid in ("monday", "tuesday"):
+        token = jwt.encode({"sub": doctor, "sid": sid, "exp": int(time.time()) + 3600},
+                           settings.shared_secret_key, algorithm="HS256")
+        assert client(world, "doc@a.test").get(
+            "/api/patients/0", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    assert len(log(world)) == 2
+
+
+def test_lists_and_summaries_are_not_logged_as_openings(world):
+    c = client(world, "doc@a.test")
+    c.get("/api/patients")
+    c.get("/api/patients/0/summary")
     assert log(world) == []
+
+
+def test_another_doctors_patient_is_refused_and_not_logged(world):
+    c = client(world, "doc@a.test")
+    assert c.get("/api/patients/2").status_code == 404     # nurse's patient only
+    assert c.get("/api/patients/4").status_code == 404     # another hospital's
+    assert log(world) == []
+
+
+def test_the_shared_reason_list_is_unchanged(world):
+    """The list people pick from must stay the same in both apps; treatment is
+    recorded automatically, never offered."""
+    assert set(access.REASONS) == {"care_coordination", "incident_review", "audit", "billing"}
+    assert access.TREATMENT_REASON not in access.REASONS
 
 
 def test_the_superadmin_is_logged_once_without_being_asked(world):

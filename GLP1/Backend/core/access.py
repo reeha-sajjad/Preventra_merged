@@ -28,8 +28,9 @@ The superadmin can look at one hospital at a time through the hospital picker
 Two layers of detail. Hospital admins and insurers get the overview layer of
 their patients - adherence risk, care team, insurer - and open the clinical
 layer (vitals, drug, pharmacy, risk drivers) one patient at a time with a
-reason, which is logged (core/access_log.py). The superadmin is never asked but
-is logged too.
+reason, which is logged (core/access_log.py). The superadmin, doctors and
+nurses are never asked but are logged too: a doctor's or nurse's first look at
+each of their patients per sign-in is recorded as "Treatment (care team)".
 
 Model-wide outputs (survival curves, feature importance, segment profiles, model
 info) describe the model rather than any patient and are not filtered. Cost and
@@ -62,6 +63,16 @@ REASONS = {
     "billing":           "Billing query",
 }
 SUPERADMIN_REASON = "superadmin"
+
+# Doctors and nurses open only their own patients (patient_scope), so treatment
+# is already the reason (45 CFR 164.506) and they are never asked. Their first
+# look at each patient per sign-in is still logged, for the audit trail
+# (45 CFR 164.312(b)). Like SUPERADMIN_REASON this is not in REASONS: nobody
+# picks it, so the list both apps share stays as it is.
+CARE_TEAM_ROLES = ("doctor", "nurse")
+TREATMENT_REASON = "treatment"
+LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
+                  TREATMENT_REASON: "Treatment (care team)"}
 
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
@@ -178,12 +189,15 @@ async def detail_access(user: dict, patient_idx: int) -> str:
 async def require_detail(user: dict, scope: Optional[list], patient_idx: int) -> None:
     """The clinical layer of one patient: 404 outside the caller's patients; a
     hospital admin or insurer then needs a reason given this sign-in. The
-    superadmin's first look each sign-in is logged without asking."""
+    superadmin's, a doctor's and a nurse's first look each sign-in is logged
+    without asking."""
     require_patient(scope, patient_idx)
-    if user["role"] == "superadmin":
+    automatic = (SUPERADMIN_REASON if user["role"] == "superadmin"
+                 else TREATMENT_REASON if user["role"] in CARE_TEAM_ROLES else None)
+    if automatic:
         if not await access_log.has_opened(user, patient_idx):
             await access_log.record(user, patient_idx, await patient_hospital(patient_idx),
-                                    SUPERADMIN_REASON)
+                                    automatic)
         return
     if await detail_access(user, patient_idx) == "reason_required":
         raise HTTPException(status_code=403, detail=REASON_REQUIRED)
