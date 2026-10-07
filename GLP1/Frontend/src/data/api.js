@@ -140,6 +140,11 @@ export const api = {
   /** Open one patient's clinical details with a reason (hospital admins, insurers). */
   openPatient:          (id, reason) => post(`/api/patients/${id}/open`, { reason }),
 
+  // The bell - doctors and hospital nurses (Backend/core/notifications.py)
+  getNotifications:     (limit = 20) => get(`/api/notifications?limit=${limit}`),
+  /** { patient_ids } or { all: true } */
+  markNotificationsSeen: (body)  => post("/api/notifications/seen", body),
+
   // Consequence Model (Phase 4 "Cost of Inaction" screen)
   getDownstreamCost:    ()       => get("/api/consequence/downstream-cost"),
   getReboundRisk:       ()       => get("/api/consequence/rebound-risk"),

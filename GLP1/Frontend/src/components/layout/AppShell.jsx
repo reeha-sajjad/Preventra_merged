@@ -8,6 +8,7 @@ import {
   Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink,
 } from 'lucide-react';
 import HospitalPicker from '../hospital/HospitalPicker';
+import NotificationBell from './NotificationBell';
 
 // `only` names the RoleContext flag a page needs; pages for other roles are
 // hidden, not dimmed (the backend refuses them anyway).
@@ -60,7 +61,7 @@ export default function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const roleFlags = useRole();
-  const { roleLabel, isCostView, isPatient } = roleFlags;
+  const { roleLabel, isCostView, isPatient, isCareTeam } = roleFlags;
   const { logout, user, token } = useAuth();
   const location = useLocation();
   const allowed = (item) => !item.only || roleFlags[item.only];
@@ -243,6 +244,7 @@ export default function AppShell({ children }) {
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <HospitalPicker />
+            {isCareTeam && <NotificationBell />}
             {/* Role indicator pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
                  style={{ background: isCostView ? '#E3F2FD' : '#E8F5E9', color: isCostView ? '#1B4F8A' : '#2E7D32' }}>

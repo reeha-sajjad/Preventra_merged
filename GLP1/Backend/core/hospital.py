@@ -196,6 +196,11 @@ async def assign(user: dict, scope: Optional[list], patient_idxs: list,
             if len(after) > MAX_TEAM:
                 raise HTTPException(status_code=422,
                                     detail=f"Patient {idx} would have more than {MAX_TEAM} {kind}s")
+            # When each person joined, for their "new patient" notification
+            # (core/notifications.py). Only for people newly added.
+            for person in after:
+                if person not in before:
+                    fields[f"care_team_added_at.{person}"] = stamp["care_team_updated_at"]
             if kind == "doctor":
                 fields["assigned_doctor_ids"] = after
                 fields["assigned_doctor_id"] = after[0] if after else None

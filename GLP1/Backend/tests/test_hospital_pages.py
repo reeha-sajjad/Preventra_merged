@@ -108,8 +108,17 @@ def test_the_care_team_is_never_asked(world):
         c = client(world, email)
         assert c.get("/api/patients/0").status_code == 200
         assert c.get("/api/patients/0/summary").json()["detail_access"] == "open"
-    # Doctors and nurses are logged (below); the case manager is not, as before.
-    assert {e["email"] for e in log(world)} == {"doc@a.test", "nurse@a.test"}
+    # ...but every one of them is logged (below).
+    assert {e["email"] for e in log(world)} == {"doc@a.test", "nurse@a.test", "cm@a.test"}
+
+
+def test_a_case_managers_opening_is_logged_as_care_coordination(world):
+    c = client(world, "cm@a.test")
+    for _ in range(2):
+        assert c.get("/api/patients/2").status_code == 200
+    entries = log(world)
+    assert [(e["email"], e["patient_id"], e["reason"], e["reason_label"]) for e in entries] == \
+        [("cm@a.test", "2", "case_management", "Care coordination (case manager)")]
 
 
 @pytest.mark.parametrize("email", ["doc@a.test", "nurse@a.test"])
@@ -157,7 +166,7 @@ def test_the_shared_reason_list_is_unchanged(world):
     """The list people pick from must stay the same in both apps; treatment is
     recorded automatically, never offered."""
     assert set(access.REASONS) == {"care_coordination", "incident_review", "audit", "billing"}
-    assert access.TREATMENT_REASON not in access.REASONS
+    assert not set(access.LOGGED_REASONS) & set(access.REASONS)
 
 
 def test_the_superadmin_is_logged_once_without_being_asked(world):
