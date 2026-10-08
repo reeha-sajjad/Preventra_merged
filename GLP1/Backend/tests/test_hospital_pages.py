@@ -385,3 +385,13 @@ def test_an_account_with_no_patients_gets_zeros_not_errors(world):
     body = ops.get("/api/overview", headers=empty).json()
     assert body["total_patients"] == 0 and body["drug_mix"] == []
     assert c.get("/api/patients").json()["total"] == 0
+
+# ------------------------------------------------------------- my account
+def test_everyone_sees_their_own_account_and_nobody_elses(world):
+    body = client(world, "doc@a.test").get("/api/me").json()
+    assert (body["email"], body["role"], body["hospital"]["id"], body["patients"]) == \
+        ("doc@a.test", "doctor", "hosp-a", 2)
+    assert "password_hash" not in body and "app_access" not in body
+    assert client(world, "claims@acme.test").get("/api/me").json()["insurer"]["id"] == "acme"
+    assert client(world, "ops@team.test").get("/api/me").json()["patients"] is None   # every patient
+    assert client(world, "floating@x.test").get("/api/me").json()["patients"] == 0

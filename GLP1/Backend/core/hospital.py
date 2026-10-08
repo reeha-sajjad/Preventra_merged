@@ -211,6 +211,24 @@ async def assign(user: dict, scope: Optional[list], patient_idxs: list,
     return {"updated": result.matched_count, "patient_ids": idxs}
 
 
+# --------------------------------------------------------------- my account
+async def me(user: dict, scope: Optional[list]) -> dict:
+    """The signed-in person's own account, for Settings: who they are, where
+    they work, and how many patients they can see. Their own details only."""
+    ident = get_shared_identity_db()
+    ids = _object_ids([user["id"]])
+    account = (await ident.users.find_one({"_id": ids[0]}, {"name": 1, "created_at": 1}) if ids else None) or {}
+    insurer = None
+    if user.get("insurer_id"):
+        doc = await ident.insurers.find_one({"_id": user["insurer_id"]})
+        insurer = {"id": user["insurer_id"], "name": (doc or {}).get("name", user["insurer_id"])}
+    created = account.get("created_at")
+    return {"id": user["id"], "name": account.get("name") or "", "email": user.get("email", ""),
+            "role": user["role"], "hospital": await _hospital_name(user.get("hospital_id")),
+            "insurer": insurer, "patients": None if scope is None else len(scope),
+            "member_since": created.isoformat() if hasattr(created, "isoformat") else None}
+
+
 # --------------------------------------------------------------- overview
 async def overview(user: dict, scope: Optional[list]) -> dict:
     """How is my hospital doing - or, for an insurer, how are my members."""

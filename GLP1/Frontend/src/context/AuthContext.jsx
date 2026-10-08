@@ -140,6 +140,13 @@ export function AuthProvider({ children }) {
   // is leaving anyway; there is nothing to re-render for.
   const logout = useCallback(() => endSession(), []);
 
+  // A fresh token for the same sign-in (after a password change): same
+  // person, same session, same expiry.
+  const replaceToken = useCallback((accessToken) => {
+    localStorage.setItem(TOKEN_KEY, accessToken);
+    setToken(accessToken);
+  }, []);
+
   return (
     <AuthContext.Provider
       // A pending account, or one still on a temporary password, is not signed
@@ -148,7 +155,7 @@ export function AuthProvider({ children }) {
       // backend refuses it data regardless; this only avoids a dead screen.
       value={{ token, user,
                isAuthenticated: !!token && user?.status !== 'pending' && !user?.must_change_password,
-               login, register, logout }}
+               login, register, logout, replaceToken }}
     >
       {children}
     </AuthContext.Provider>

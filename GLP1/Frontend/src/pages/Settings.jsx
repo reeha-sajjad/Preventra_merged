@@ -1,4 +1,4 @@
-import { Activity, Info, Stethoscope, Building2 } from 'lucide-react';
+import { Activity, Info } from 'lucide-react';
 import { useModelInfo } from '../hooks/useModelInfo';
 import { ProgressBar } from '../components/shared';
 import { useRole } from '../context/RoleContext';
@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { AUTH_BASE } from '../data/api';
 import UserManagement from '../components/shared/UserManagement';
 import PageState from '../components/shared/PageState';
+import { AccountCard, PasswordCard } from '../components/settings/AccountCards';
 
 // Stable, module-level: UserManagement reloads whenever this function changes.
 const getToken = () => localStorage.getItem('glp1_token');
@@ -18,13 +19,13 @@ const METRIC_TARGET = 0.75;
  *
  *   superadmin      User Management, About the model, full Model performance
  *   hospital_admin  User Management, About the model
- *   everyone else   their role
+ *   everyone        their account and their password
  *
  * The model's technical details (metrics, parameters, data pipeline notes) are
  * for our own team; hospitals get a plain-language summary instead.
  */
 export default function Settings() {
-  const { roleLabel, isCostView, isSuperadmin, isManager } = useRole();
+  const { isSuperadmin, isManager } = useRole();
   const { user } = useAuth();
   const { data: modelInfo, error: modelError } = useModelInfo();
 
@@ -46,18 +47,9 @@ export default function Settings() {
       {/* ── Model performance (superadmin only) ──────────────── */}
       {isSuperadmin && modelInfo && <ModelPerformance info={modelInfo} />}
 
-      {/* ── Role ─────────────────────────────────────────────── */}
-      <div className="card p-6">
-        <div className="font-semibold text-gray-800 mb-1">Role</div>
-        <div className="text-xs text-gray-400 mb-5">
-          Assigned by your administrator. It decides which panels are foregrounded
-          and which data you can open; ask them if it needs to change.
-        </div>
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          {isCostView ? <Building2 size={14} /> : <Stethoscope size={14} />}
-          {roleLabel}
-        </div>
-      </div>
+      {/* ── Your account and password (everyone) ──────────────── */}
+      <AccountCard />
+      <PasswordCard />
     </div>
   );
 }

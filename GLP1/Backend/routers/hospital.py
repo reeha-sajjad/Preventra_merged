@@ -9,9 +9,15 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from core import hospital
-from core.access import ASSIGN_ROLES, OVERVIEW_ROLES, STAFF_ROLES, require_role, scope_of
+from core.access import ASSIGN_ROLES, OVERVIEW_ROLES, STAFF_ROLES, actor, require_role, scope_of
 
 router = APIRouter()
+
+
+@router.get("/me")
+async def get_me(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
+    """Your own account, for Settings. Name, role, hospital, how many patients."""
+    return await hospital.me(user, scope)
 
 
 @router.get("/overview")

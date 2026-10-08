@@ -167,6 +167,19 @@ export const api = {
   postChatMessage:  (body)  => post("/api/chatbot/message", body),
   getChatSession:   (id)    => get(`/api/chatbot/session/${id}`),
   clearChatSession: (id)    => del(`/api/chatbot/session/${id}`),
+  /** Your own account, for Settings (Backend/core/hospital.me). */
+  getMe:                ()       => get("/api/me"),
+  /** Replace your own password at the shared sign-in service; returns a fresh token. */
+  changePassword: async (token, current_password, new_password) => {
+    const res = await fetch(`${AUTH_BASE}/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ current_password, new_password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Could not change the password (${res.status})`);
+    return data;
+  },
   signup: (body) => authPost("/auth/signup", body),
   login:  (body) => authPost("/auth/login", body),
 };
