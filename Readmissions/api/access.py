@@ -74,6 +74,10 @@ ACTIONS = {
     # The rising-risk watchlist (api/risk_watch.py): the care team's own
     # patients whose latest week got worse. Clinical, so not for reason roles.
     "watch_risk":     ("superadmin", "doctor", "nurse", "case_manager"),
+    # Model Studio (api/model_studio.py): training on uploaded hospital data and
+    # choosing which model scores that hospital's patients. An administrative
+    # decision about the hospital's tooling, so the roles that run the account.
+    "manage_models":  ("superadmin", "hospital_admin"),
 }
 
 # ------------------------------------------------ overview and clinical layer

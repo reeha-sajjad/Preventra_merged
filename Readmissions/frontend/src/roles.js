@@ -17,6 +17,9 @@ export const CONSOLE_ROLES = ['superadmin', 'doctor', 'case_manager'];
 // Who is told when their patients' risk goes up (api/access.py watch_risk).
 // A doctor or nurse hears about their own patients only.
 export const WATCH_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
+// Model Studio: training, comparing and deploying the hospital's own models
+// (api/access.py manage_models).
+export const STUDIO_ROLES = ['superadmin', 'hospital_admin'];
 
 export const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Nurse',

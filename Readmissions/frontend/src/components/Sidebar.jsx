@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, Users, UsersRound, ClipboardList, X } from 'lucide-react';
+import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, Users, UsersRound, ClipboardList, X,
+         FlaskConical } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED } from '../api';
 import { readClaims } from '../api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, MANAGER_ROLES, ROLE_LABELS } from '../roles';
+import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, MANAGER_ROLES, STUDIO_ROLES,
+         ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
 // Below `md` the sidebar is an off-canvas drawer; at `md` and above it is the
@@ -44,6 +46,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       ? [{ name: 'Manual Entry', path: '/manual-entry', icon: <UserPlus size={20} /> }]
       : []),
     { name: 'Analytics', path: '/analytics', icon: <BarChart size={20} /> },
+    ...(can(STUDIO_ROLES) ? [{ name: 'Model Studio', path: '/model-studio', icon: <FlaskConical size={20} /> }] : []),
     ...(can(CONSOLE_ROLES) ? [{ name: 'Clinician Console', path: '/doctor', icon: <Stethoscope size={20} /> }] : []),
     { name: 'About Preventra', path: '/about', icon: <Info size={20} /> },
     ...(can(MANAGER_ROLES) ? [{ name: 'User Management', path: '/settings', icon: <Users size={20} /> }] : []),

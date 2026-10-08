@@ -13,7 +13,8 @@ import certifi
 from dotenv import load_dotenv
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile, File
+from fastapi import (Body, Depends, FastAPI, File, Form, Header, HTTPException, Query,
+                     Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -1925,6 +1926,104 @@ def get_pipeline_status(run_id: str, request: Request):
     if not run:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
     return run
+
+
+# ---------------------------------------------------------------------------
+# Model Studio: train, compare, save and deploy models on a hospital's own data
+# ---------------------------------------------------------------------------
+# The flow, the sandbox and the deploy rules live in api/model_studio.py; these
+# routes only check the role and translate errors. A hospital admin works on
+# their own hospital's models; the superadmin sees every hospital's.
+from api import model_studio  # noqa: E402
+
+
+def _studio_user(request: Request) -> dict:
+    _require(request, "manage_models")
+    return request.state.user
+
+
+def _studio_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'\""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/studio/overview")
+def studio_overview(request: Request):
+    return _studio_call(model_studio.overview, db, _studio_user(request))
+
+
+@app.get("/api/studio/models")
+def studio_models(request: Request, target: Optional[str] = Query(None)):
+    return _studio_call(model_studio.list_models, db, _studio_user(request), target)
+
+
+@app.get("/api/studio/models/{model_id}")
+def studio_model(model_id: str, request: Request):
+    return _studio_call(model_studio.get_model, db, model_id, _studio_user(request))
+
+
+@app.post("/api/studio/models/{model_id}/deploy")
+def studio_deploy(model_id: str, request: Request):
+    return _studio_call(model_studio.deploy_model, db, model_id, _studio_user(request))
+
+
+@app.delete("/api/studio/models/{model_id}")
+def studio_delete(model_id: str, request: Request):
+    _studio_call(model_studio.delete_model, db, model_id, _studio_user(request))
+    return {"deleted": model_id}
+
+
+@app.post("/api/studio/jobs")
+def studio_start(request: Request, file: UploadFile = File(...),
+                 target: str = Form(...), mode: str = Form("new"),
+                 algorithm: str = Form("auto"), name: str = Form(""),
+                 base_model_id: Optional[str] = Form(None)):
+    user = _studio_user(request)
+    path = _studio_call(model_studio.save_upload, file.file, file.filename or "")
+    try:
+        return _studio_call(model_studio.create_job, db, user, path, file.filename,
+                            target=target, mode=mode, base_model_id=base_model_id or None,
+                            algorithm=algorithm, name=name)
+    finally:
+        if os.path.exists(path):  # moved into the job's directory on success
+            os.remove(path)
+
+
+@app.get("/api/studio/jobs/{job_id}")
+def studio_job(job_id: str, request: Request):
+    user = _studio_user(request)
+    return _studio_call(lambda: model_studio.public_job(model_studio.get_job(job_id, user)))
+
+
+@app.post("/api/studio/jobs/{job_id}/confirm")
+def studio_confirm(job_id: str, request: Request, plan: dict = Body(default={})):
+    return _studio_call(model_studio.confirm_job, db, job_id, _studio_user(request), plan)
+
+
+@app.post("/api/studio/jobs/{job_id}/save")
+def studio_save(job_id: str, request: Request, body: dict = Body(default={})):
+    return _studio_call(model_studio.save_job_model, db, job_id, _studio_user(request),
+                        (body or {}).get("name"))
+
+
+@app.delete("/api/studio/jobs/{job_id}")
+def studio_discard(job_id: str, request: Request):
+    _studio_call(model_studio.discard_job, job_id, _studio_user(request))
+    return {"discarded": job_id}
+
+
+@app.post("/api/studio/score")
+def studio_score(request: Request, file: UploadFile = File(...), target: str = Form(...)):
+    user = _studio_user(request)
+    path = _studio_call(model_studio.save_upload, file.file, file.filename or "")
+    try:
+        return _studio_call(model_studio.score_file, db, user, target, path)
+    finally:
+        os.remove(path)
 
 
 # ---------------------------------------------------------------------------
