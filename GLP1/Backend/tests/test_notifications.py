@@ -44,9 +44,13 @@ def uid(world, email):
 
 
 @pytest.mark.parametrize("email", ["admin@a.test", "cm@a.test", "claims@acme.test", "me@patient.test"])
-def test_the_bell_is_for_doctors_and_nurses_only(world, email):
+def test_patient_alerts_are_for_doctors_and_nurses_only(world, email):
+    """Others get no patient alerts (a case manager's bell holds follow-up
+    requests only - tests/test_followups.py), and cannot dismiss any."""
     c = client(world, email)
-    assert c.get("/api/notifications").status_code == 403
+    r = c.get("/api/notifications")
+    assert r.status_code == 200 and r.json()["items"] == []
+    assert r.json()["enabled"] is (email == "cm@a.test")
     assert c.post("/api/notifications/seen", json={"all": True}).status_code == 403
 
 
@@ -141,5 +145,5 @@ def test_counts_and_order(world):
     client(world, "admin@a.test").post("/api/care-team", json={"patient_ids": [3], "add_doctor_ids": [doc]})
     body = client(world, "doc@a.test").get("/api/notifications").json()
     assert [i["patient_idx"] for i in body["items"]] == [1, 3, 0]       # risen, new, unreviewed
-    assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1}
+    assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0}
     assert not {"name", "email", "BMXBMI"} & set().union(*body["items"])

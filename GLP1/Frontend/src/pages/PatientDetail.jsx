@@ -8,6 +8,7 @@ import { useSurvival } from '../hooks/useSurvival';
 import { useRole } from '../context/RoleContext';
 import { usePatients } from '../hooks/usePatients';
 import CareTeamCard from '../components/hospital/CareTeamCard';
+import FollowUpCard from '../components/followups/FollowUpCard';
 import ClinicalGate from '../components/hospital/ClinicalGate';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
@@ -303,6 +304,13 @@ export default function PatientDetail() {
         <CareTeamCard team={patient} patientIdx={patient.patient_idx}
           canAssign={canAssign && !isPatient} onChanged={careTeamChanged} />
       </div>
+
+      {/* ── Follow-up request (care team asks, case manager handles) ── */}
+      {!isPatient && (
+        <div className="mb-6">
+          <FollowUpCard patientIdx={patient.patient_idx} />
+        </div>
+      )}
 
       {/* ── Top 2-col grid: profile/financial/rec  |  drivers ──────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

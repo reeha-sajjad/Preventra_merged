@@ -8,16 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core import notifications
-from core.access import CARE_TEAM_ROLES, require_patient, require_role, scope_of
+from core.access import CARE_TEAM_ROLES, actor, require_patient, require_role, scope_of
 
 router = APIRouter()
 
 
 @router.get("/notifications")
 async def get_notifications(limit: int = 20,
-                            user: dict = Depends(require_role(*CARE_TEAM_ROLES)),
+                            user: dict = Depends(actor),
                             scope: Optional[list] = Depends(scope_of)):
-    """The caller's own patients that need a look, most serious first."""
+    """What needs the caller's attention, most serious first. Doctors and nurses:
+    their own patients. Case managers: new follow-up requests (a hospital admin
+    too, if the hospital has none). Everyone else: `enabled` is false."""
     return await notifications.bell(user, scope, limit=limit)
 
 

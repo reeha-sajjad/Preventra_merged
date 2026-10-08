@@ -26,6 +26,9 @@ const ASSIGN_ROLES   = ['superadmin', 'hospital_admin', 'case_manager'];
 const REASON_ROLES   = ['hospital_admin', 'insurer'];
 // The people who look after patients directly.
 const CARE_TEAM_ROLES = ['doctor', 'nurse'];
+// Who handles follow-up requests (Backend/core/followups.py HANDLE_ROLES).
+// Case managers are the ones they are for; admins can step in.
+const FOLLOW_UP_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 
 // The role is the one an administrator assigned to the account - read from the
 // signed-in user, never chosen here. Hiding a panel is a courtesy; the backend
@@ -48,6 +51,8 @@ export function RoleProvider({ children }) {
       isManager:    role === 'superadmin' || role === 'hospital_admin',
       // Doctors and hospital nurses: their home page is "My patients".
       isCareTeam:   CARE_TEAM_ROLES.includes(role),
+      handlesFollowUps: FOLLOW_UP_ROLES.includes(role),
+      isCaseManager: role === 'case_manager',
     }}>
       {children}
     </RoleContext.Provider>

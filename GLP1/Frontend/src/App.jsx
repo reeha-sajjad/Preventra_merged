@@ -19,6 +19,7 @@ import CostOfInaction from './pages/CostOfInaction';
 import Settings from './pages/Settings';
 import MyRecord from './pages/MyRecord';
 import Staff from './pages/Staff';
+import FollowUps from './pages/FollowUps';
 import { useRole } from './context/RoleContext';
 
 function AuthenticatedApp() {
@@ -44,7 +45,7 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam } = useRole();
+  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps } = useRole();
 
   if (isPatient) {
     return (
@@ -64,6 +65,7 @@ function RoleRoutes() {
                                              : <Navigate to="/patients" replace />} />
         <Route path="/patients"     element={<PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}
+        {handlesFollowUps && <Route path="/follow-ups" element={<FollowUps />} />}
         <Route path="/patients/:id" element={<PatientDetail />} />
         <Route path="/segments"     element={<SegmentExplorer />} />
         <Route path="/survival"     element={<SurvivalAnalysis />} />

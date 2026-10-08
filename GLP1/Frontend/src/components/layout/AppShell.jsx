@@ -5,8 +5,9 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, UserCircle, PieChart, TrendingDown, UsersRound,
   Calculator, Settings, ChevronLeft, ChevronRight,
-  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink,
+  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock,
 } from 'lucide-react';
+import { api } from '../../data/api';
 import HospitalPicker from '../hospital/HospitalPicker';
 import NotificationBell from './NotificationBell';
 
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
   { to: '/patients', icon: Users,           label: 'Patients',             primary: null },
   { to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
+  { to: '/follow-ups', icon: CalendarClock, label: 'Follow-ups',           primary: null, only: 'handlesFollowUps', badge: 'followups' },
   { to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },
   { to: '/survival', icon: TrendingDown,    label: 'Survival Analysis',    primary: null },
   // { to: '/cost',     icon: DollarSign,      label: 'Cost-Effectiveness',   primary: 'cost' },
@@ -30,7 +32,7 @@ const PAGE_TITLES = { '/settings': 'Settings', '/my-record': 'My record' };
 // `primary` marks who a page is mainly for: 'cost' pages for the roles that own
 // the budget, 'care_team' pages for the people looking after patients. Pages
 // meant for the other group are dimmed and badged, not hidden.
-function NavItem({ item, collapsed, isCostView, extra = {} }) {
+function NavItem({ item, collapsed, isCostView, extra = {}, badges = {} }) {
   const { to, icon: Icon, label, primary } = item;
   const mismatch = primary && (
     (primary === 'cost'      && !isCostView) ||
@@ -47,6 +49,12 @@ function NavItem({ item, collapsed, isCostView, extra = {} }) {
     >
       <Icon size={17} className="nav-icon flex-shrink-0" />
       {!collapsed && <span className="animate-fade-in truncate flex-1">{label}</span>}
+      {!collapsed && item.badge && badges[item.badge] > 0 && (
+        <span className="text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center flex-shrink-0 ml-1"
+              style={{ background: '#C62828', color: 'white' }}>
+          {badges[item.badge] > 99 ? '99+' : badges[item.badge]}
+        </span>
+      )}
       {!collapsed && mismatch && (
         <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1"
               style={{ background: `${badgeColor}28`, color: `${badgeColor}cc` }}>
@@ -61,10 +69,22 @@ export default function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const roleFlags = useRole();
-  const { roleLabel, isCostView, isPatient, isCareTeam } = roleFlags;
+  const { roleLabel, isCostView, isPatient, isCareTeam, handlesFollowUps, role } = roleFlags;
   const { logout, user, token } = useAuth();
   const location = useLocation();
   const allowed = (item) => !item.only || roleFlags[item.only];
+
+  // Follow-ups waiting for someone to take them - the sidebar badge.
+  const [badges, setBadges] = useState({});
+  useEffect(() => {
+    if (!handlesFollowUps) return undefined;
+    let live = true;
+    const load = () => api.getFollowUps('active')
+      .then((d) => { if (live) setBadges({ followups: d.counts.open }); }).catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { live = false; clearInterval(t); };
+  }, [handlesFollowUps, location.pathname]);
 
   const pageTitle = NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
     ?? PAGE_TITLES[location.pathname]
@@ -147,14 +167,14 @@ export default function AppShell({ children }) {
           ) : (<>
           {/* Section: Overview */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-3 pb-1">Overview</div>}
-          {NAV_ITEMS.slice(0, 4).filter(allowed).map(item => (
+          {NAV_ITEMS.slice(0, 5).filter(allowed).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView}
-              extra={item.to === '/' ? { end: true } : {}} />
+              extra={item.to === '/' ? { end: true } : {}} badges={badges} />
           ))}
 
           {/* Section: Analytics */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-4 pb-1">Analytics</div>}
-          {NAV_ITEMS.slice(4, 6).map(item => (
+          {NAV_ITEMS.slice(5, 7).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
@@ -166,7 +186,7 @@ export default function AppShell({ children }) {
               <div className="text-[9px] bg-blue-500/30 text-blue-300 px-1.5 py-0.5 rounded-full">Primary</div>
             </div>
           )}
-          {isCostView && NAV_ITEMS.slice(6, 8).map(item => (
+          {isCostView && NAV_ITEMS.slice(7, 9).map(item => (
             <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
@@ -244,7 +264,7 @@ export default function AppShell({ children }) {
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <HospitalPicker />
-            {isCareTeam && <NotificationBell />}
+            {(isCareTeam || role === 'case_manager' || role === 'hospital_admin') && <NotificationBell />}
             {/* Role indicator pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
                  style={{ background: isCostView ? '#E3F2FD' : '#E8F5E9', color: isCostView ? '#1B4F8A' : '#2E7D32' }}>

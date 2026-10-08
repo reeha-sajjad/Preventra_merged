@@ -29,6 +29,7 @@ from typing import Iterable, Optional
 
 from pymongo import UpdateOne
 
+from core import followups
 from core.access import CARE_TEAM_ROLES, scope_query
 from core.mongo import get_db
 
@@ -36,7 +37,7 @@ SEEN_COLLECTION = "notification_seen"
 CRITICAL = 0.75
 RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
-KIND_ORDER = {"risk_up": 0, "new": 1, "unreviewed": 2}
+KIND_ORDER = {"followup_new": 0, "risk_up": 1, "followup_done": 2, "new": 3, "unreviewed": 4}
 MAX_ITEMS = 50
 
 
@@ -66,10 +67,22 @@ def _assess(prob: float, seen: Optional[dict], added_at: Optional[datetime]) -> 
     return kinds
 
 
+async def _followup_requests(user: dict) -> list:
+    """A case manager's bell: new follow-up requests nobody has taken yet,
+    urgent first, then oldest. They leave the bell when someone takes them."""
+    items = [{"patient_idx": f["patient_idx"], "dropout_prob": f.get("dropout_prob", 0.0),
+              "kinds": ["followup_new"], "followup_id": f["id"], "urgency": f["urgency"],
+              "requested_by": f["requested_by"]["name"], "overdue": f["overdue"],
+              "requested_at": f["requested_at"], "urgent": f["urgency"] == "urgent"}
+             for f in await followups.open_for_bell(user)]
+    items.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
+    return items
+
+
 async def alerts(user: dict, scope: Optional[list]) -> list:
     """Every alert the caller has, most serious first."""
     if user["role"] not in CARE_TEAM_ROLES:
-        return []
+        return await _followup_requests(user) if await followups.notifies(user) else []
     db = get_db()
     mine = scope_query(scope)
     patients = await db.patients.find(mine, {"_id": 0, "patient_idx": 1, "dropout_prob": 1,
@@ -79,26 +92,38 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
                  mine, {"_id": 0, "patient_idx": 1, "care_team_added_at": 1}).to_list(length=None)}
     seen = {d["patient_idx"]: d for d in await db[SEEN_COLLECTION].find(
         {"user_id": user["id"]}, {"_id": 0}).to_list(length=None)}
+    # Follow-ups finished since the caller last looked at the patient.
+    done = await followups.done_since(scope)
 
     items = []
     for p in patients:
         idx, prob = int(p["patient_idx"]), float(p.get("dropout_prob") or 0)
         kinds = _assess(prob, seen.get(idx), added.get(idx))
+        finished = done.get(idx)
+        seen_at = _naive(seen.get(idx, {}).get("at"))
+        if finished and (seen_at is None or seen_at < _naive(finished["done_at"])):
+            kinds.insert(0, "followup_done")
         if not kinds:
             continue
         before = seen.get(idx, {}).get("dropout_prob")
-        items.append({"patient_idx": idx, "dropout_prob": prob, "main_reason": p.get("driver_1"),
-                      "kinds": kinds, "previous_prob": before if "risk_up" in kinds else None,
-                      "urgent": prob >= CRITICAL})
+        item = {"patient_idx": idx, "dropout_prob": prob, "main_reason": p.get("driver_1"),
+                "kinds": sorted(kinds, key=KIND_ORDER.get),
+                "previous_prob": before if "risk_up" in kinds else None, "urgent": prob >= CRITICAL}
+        if "followup_done" in kinds:
+            item["followup"] = {"outcome": finished["outcome"],
+                                "outcome_label": followups.OUTCOMES[finished["outcome"]],
+                                "done_by": finished["done_by"]["name"]}
+        items.append(item)
     items.sort(key=lambda i: (min(KIND_ORDER[k] for k in i["kinds"]), -i["dropout_prob"]))
     return items
 
 
 async def bell(user: dict, scope: Optional[list], limit: int = 20) -> dict:
     """The first `limit` alerts, the total, and how many of each kind."""
-    items = await alerts(user, scope)
+    enabled = user["role"] in CARE_TEAM_ROLES or await followups.notifies(user)
+    items = await alerts(user, scope) if enabled else []
     counts = {k: sum(k in i["kinds"] for i in items) for k in KIND_ORDER}
-    return {"total": len(items), "counts": counts,
+    return {"enabled": enabled, "total": len(items), "counts": counts,
             "items": items[:max(1, min(int(limit), MAX_ITEMS))]}
 
 

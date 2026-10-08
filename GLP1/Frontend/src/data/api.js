@@ -145,6 +145,17 @@ export const api = {
   /** { patient_ids } or { all: true } */
   markNotificationsSeen: (body)  => post("/api/notifications/seen", body),
 
+  // Follow-up requests (Backend/core/followups.py)
+  getPatientFollowUp:   (id)     => get(`/api/patients/${id}/followup`),
+  /** { urgency: 'urgent' | 'routine', note? } - doctors and hospital nurses */
+  requestFollowUp:      (id, body) => post(`/api/patients/${id}/followup`, body),
+  /** status: 'active' | 'done' - case managers, hospital admins */
+  getFollowUps:         (status = 'active') => get(`/api/followups?status=${status}`),
+  addFollowUpNote:      (fid, text) => post(`/api/followups/${fid}/note`, { text }),
+  takeFollowUp:         (fid)    => post(`/api/followups/${fid}/take`, {}),
+  /** { outcome: 'booked' | 'unreachable' | 'not_needed', note? } */
+  finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
+
   // Consequence Model (Phase 4 "Cost of Inaction" screen)
   getDownstreamCost:    ()       => get("/api/consequence/downstream-cost"),
   getReboundRisk:       ()       => get("/api/consequence/rebound-risk"),

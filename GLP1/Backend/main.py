@@ -7,7 +7,7 @@ from core.config import settings
 from core import loader, mongo
 from core.model import init_startup_caches
 from core.security import current_user
-from routers import summary, patients, segments, survival, cost, budget, shap, info, consequence, chatbot, hospital, notifications
+from routers import summary, patients, segments, survival, cost, budget, shap, info, consequence, chatbot, hospital, notifications, followups
 
 
 @asynccontextmanager
@@ -58,6 +58,7 @@ app.include_router(consequence.router, prefix="/api", dependencies=_signed_in)
 app.include_router(chatbot.router, prefix="/api", dependencies=_signed_in)
 app.include_router(hospital.router, prefix="/api", dependencies=_signed_in)
 app.include_router(notifications.router, prefix="/api", dependencies=_signed_in)
+app.include_router(followups.router, prefix="/api", dependencies=_signed_in)
 
 @app.get("/health")
 def health():
