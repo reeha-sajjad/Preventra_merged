@@ -19,7 +19,9 @@ const METRIC_TARGET = 0.75;
  *
  *   superadmin      User Management, About the model, full Model performance
  *   hospital_admin  User Management, About the model
- *   everyone        their account and their password
+ *   everyone        their account and their password, first (patients too:
+ *                   it is their "Account" page), first (patients too:
+ *                   it is their "Account" page)
  *
  * The model's technical details (metrics, parameters, data pipeline notes) are
  * for our own team; hospitals get a plain-language summary instead.
@@ -31,6 +33,10 @@ export default function Settings() {
 
   return (
     <div className="max-w-[900px] mx-auto space-y-6 animate-fade-in">
+
+      {/* ── Your account and password (everyone, patients too) ─ */}
+      <AccountCard />
+      <PasswordCard />
 
       {/* ── User Management (superadmin, hospital admin) ─────── */}
       {isManager && (
@@ -47,9 +53,6 @@ export default function Settings() {
       {/* ── Model performance (superadmin only) ──────────────── */}
       {isSuperadmin && modelInfo && <ModelPerformance info={modelInfo} />}
 
-      {/* ── Your account and password (everyone) ──────────────── */}
-      <AccountCard />
-      <PasswordCard />
     </div>
   );
 }

@@ -65,7 +65,7 @@ export function AccountCard() {
 export function PasswordCard() {
   const { token, replaceToken } = useAuth();
   const [form, setForm] = useState({ current: '', next: '', again: '' });
-  const [show, setShow] = useState(false);
+  const [shown, setShown] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
@@ -90,12 +90,22 @@ export function PasswordCard() {
     }
   };
 
+  // Each field has its own show/hide eye, inside the field like most sign-in
+  // forms. The eye is outside the <label>, so the field's name stays just its label.
   const input = (k, label, autoComplete) => (
-    <label className="block">
-      <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">{label}</span>
-      <input type={show ? 'text' : 'password'} value={form[k]} onChange={set(k)} autoComplete={autoComplete} required
-        className="mt-1.5 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400" />
-    </label>
+    <div>
+      <label htmlFor={`pw-${k}`} className="text-xs font-semibold uppercase tracking-wider text-gray-400">{label}</label>
+      <div className="relative mt-1.5">
+        <input id={`pw-${k}`} type={shown[k] ? 'text' : 'password'} value={form[k]} onChange={set(k)}
+          autoComplete={autoComplete} required
+          className="w-full text-sm rounded-lg border border-gray-200 pl-3 pr-10 py-2 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        <button type="button" onClick={() => setShown((s) => ({ ...s, [k]: !s[k] }))}
+          aria-label={`${shown[k] ? 'Hide' : 'Show'} ${label.toLowerCase()}`}
+          className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded-r-lg">
+          {shown[k] ? <EyeOff size={15} /> : <Eye size={15} />}
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -105,11 +115,7 @@ export function PasswordCard() {
       <form onSubmit={save} className="space-y-4 max-w-md">
         {input('current', 'Current password', 'current-password')}
         {input('next', 'New password', 'new-password')}
-        {input('again', 'New password again', 'new-password')}
-        <button type="button" onClick={() => setShow((s) => !s)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700">
-          {show ? <EyeOff size={13} /> : <Eye size={13} />} {show ? 'Hide' : 'Show'} passwords
-        </button>
+        {input('again', 'Re-type new password', 'new-password')}
         {error && <p className="rounded-md px-3 py-2 text-sm" style={{ background: '#FFEBEE', color: '#C62828' }}>{error}</p>}
         {done && (
           <p className="flex items-center gap-2 rounded-md px-3 py-2 text-sm" style={{ background: '#E8F5E9', color: '#2E7D32' }}>
@@ -117,7 +123,7 @@ export function PasswordCard() {
           </p>
         )}
         <button type="submit" disabled={busy}
-          className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white disabled:opacity-50"
+          className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white disabled:opacity-50 !mt-5"
           style={{ background: 'var(--color-primary)' }}>
           {busy && <Loader2 size={15} className="animate-spin" />} Change password
         </button>

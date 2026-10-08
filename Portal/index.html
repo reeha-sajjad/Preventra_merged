@@ -1,907 +1,407 @@
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Preventra — Sign in to GLP-1 Analytics and Readmission Risk</title>
-  <!-- Who this page belongs to, stated plainly. A bare "Sign in" page on an
-       unfamiliar domain is what Google Safe Browsing reads as phishing, and it
-       flagged this one twice; naming the product, describing it and linking a
-       public About page is what separates a product's sign-in from a lure. -->
-  <meta name="description" content="Preventra is a clinical analytics platform for care teams: GLP-1 treatment analytics and 30-day hospital readmission risk monitoring. Sign in with your Preventra account.">
-  <meta property="og:site_name" content="Preventra">
-  <meta property="og:title" content="Preventra — Sign in">
-  <meta property="og:description" content="Preventra is a clinical analytics platform for care teams: GLP-1 treatment analytics and 30-day hospital readmission risk monitoring. Sign in with your Preventra account.">
+  <title>Preventra · See who is slipping, and reach them in time</title>
+  <meta name="description" content="Preventra predicts which patients are likely to stop GLP-1 treatment or return to hospital after discharge, explains why, and routes each one to the right person on their care team.">
   <link rel="icon" type="image/png" href="logo.png">
 
   <!--
-  Shared login portal.
+    The public front door of Preventra. The sign-in page itself is signin.html
+    and is unchanged; this page only sends three kinds of visitor straight on
+    to it, before anything is drawn:
 
-  One page, no build step, no backend, no dependencies. Open index.html directly
-  or drop this folder on Vercel/Netlify.
+      #signout=1&chain=...   an app's Sign out relay - both apps send people
+                             to this address, so the relay must keep working
+      #token=...             a token handed over for testing
+      a live portal session  someone already signed in in this tab: their
+                             app tiles, not the front page
 
-  What it does, and nothing more:
-    1. posts email + password to the auth service
-    2. keeps the token it gets back
-    3. reads `app_access` out of the token to decide which tiles to show
-    4. redirects into the chosen app with the token on the URL fragment
-
-  It never verifies a token - it cannot, and does not need to. The payload is
-  base64, so reading `app_access` here needs no secret. Each backend verifies the
-  signature itself, which is the only check that counts. This page holds no
-  secret and must never be given one.
--->
-
-  <!-- Per-environment configuration. Loaded before the app script below, which
-       reads window.__PORTAL_CONFIG__ and falls back to the defaults in it when
-       this file is absent. -->
-  <script src="config.js"></script>
+    The hash is passed on untouched, so signin.html does exactly what it did
+    when it lived at this address.
+  -->
   <script>
-    // Defaults, used only when config.js is missing or incomplete. Edit
-    // config.js for a real deployment - not this block.
-    const FALLBACK_CONFIG = {
-      AUTH_BASE_URL: 'http://localhost:8001',
-      APPS: [
-        { key: 'glp1',         name: 'GLP-1 Analytics',  blurb: 'Treatment response, adherence and payer return on investment.',     url: '', handoff: 'fragment' },
-        { key: 'readmissions', name: 'Readmission Risk', blurb: 'Discharge risk scoring, weekly monitoring and the clinician console.', url: '', handoff: 'fragment' },
-      ],
-    };
-
-    const CONFIG = Object.assign({}, FALLBACK_CONFIG, window.__PORTAL_CONFIG__ || {});
+    (function () {
+      var hash = window.location.hash || '';
+      var forward = /(^|[#&])(signout|token)=/.test(hash);
+      if (!forward) {
+        try {
+          var t = sessionStorage.getItem('portal_token');
+          if (t) {
+            var part = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+            var claims = JSON.parse(atob(part));
+            forward = !!claims.exp && claims.exp * 1000 > Date.now();
+          }
+        } catch (e) { /* no session, or storage blocked: show the page */ }
+      }
+      if (forward) window.location.replace('signin.html' + hash);
+    })();
   </script>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
   <style>
-    /* Light only, on purpose. The logo is a solid teal mark on white and a demo
-     screen should look the same on every machine in the room - no dark-mode
-     branch to be surprised by on someone else's laptop. */
+    /* Light only, like the sign-in page: the logo is teal and navy on white. */
     :root {
-      --brand: #3ecfae;
-      /* shield teal, from the logo */
-      --brand-deep: #2bb897;
-      /* hover / pressed */
-      --ink: #0e1b2a;
-      /* the navy in the cross */
-      --bg: #f4f7f8;
-      --surface: #ffffff;
-      --border: #dde5e6;
-      --text: #0e1b2a;
-      --muted: #5b6b76;
-      --accent: #0e1b2a;
-      /* buttons: navy on white reads at any size */
-      --accent-ink: #ffffff;
-      --danger-bg: #fdf2f2;
-      --danger-border: #f3c9c9;
-      --danger-text: #8a2020;
-      --radius: 10px;
-      --shadow: 0 1px 2px rgba(14, 27, 42, .05), 0 10px 28px rgba(14, 27, 42, .07);
+      --teal: #3ecfae;        /* the shield, from the logo */
+      --teal-deep: #1f9e83;   /* teal that reads as text on white */
+      --teal-wash: #e3f6f1;
+      --navy: #0e1b2a;        /* the cross */
+      --navy-soft: #1d3046;
+      --mist: #f2f6f7;
+      --line: #d9e3e5;
+      --muted: #566775;
+      --white: #ffffff;
+      --display: "Sora", system-ui, sans-serif;
+      --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --wrap: 1120px;
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      min-height: 100vh;
-      display: grid;
-      /* The card centred in the space above, the footer at the bottom. */
-      grid-template-rows: 1fr auto;
-      place-items: center;
-      padding: 24px;
-      background: var(--bg);
-      color: var(--text);
-      font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--white);
+      color: var(--navy);
+      font: 17px/1.6 var(--body);
+      -webkit-font-smoothing: antialiased;
+    }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; }
+    :focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; border-radius: 6px; }
+    .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+    h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; margin: 0; }
+    p { margin: 0; }
+
+    /* ── Top bar ─────────────────────────────────────────── */
+    .bar {
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(255, 255, 255, .92);
+      backdrop-filter: saturate(1.4) blur(10px);
+      border-bottom: 1px solid transparent;
+      transition: border-color .2s;
+    }
+    .bar.scrolled { border-bottom-color: var(--line); }
+    .bar .wrap { display: flex; align-items: center; justify-content: space-between; height: 68px; }
+    .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .brand img { width: 26px; height: auto; }
+    .brand span { font: 600 19px var(--display); letter-spacing: -0.02em; }
+    .bar nav { display: flex; align-items: center; gap: 28px; font-size: 15px; }
+    .bar nav a.plain { text-decoration: none; color: var(--muted); }
+    .bar nav a.plain:hover { color: var(--navy); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      font: 600 15px var(--body); text-decoration: none;
+      padding: 11px 20px; border-radius: 999px; border: 1.5px solid transparent;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn-dark { background: var(--navy); color: var(--white); }
+    .btn-dark:hover { background: var(--navy-soft); }
+    .btn-line { border-color: var(--line); color: var(--navy); }
+    .btn-line:hover { border-color: var(--navy); }
+
+    /* ── Hero ────────────────────────────────────────────── */
+    .hero { padding: 72px 0 40px; }
+    .hero h1 {
+      font-size: clamp(38px, 5.6vw, 64px); line-height: 1.05; font-weight: 600;
+      max-width: 15ch;
+    }
+    .hero .lede { margin-top: 24px; font-size: 19px; color: var(--muted); max-width: 54ch; }
+    .hero .actions { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; }
+
+    /* The arc from the logo, as the journey Preventra actually runs. */
+    .path { margin-top: 56px; position: relative; }
+    .path svg { width: 100%; height: auto; overflow: visible; }
+    .path .arc { fill: none; stroke: var(--navy); stroke-width: 2.5; stroke-linecap: round; }
+    .path .arc-glow { fill: none; stroke: var(--teal); stroke-width: 14; stroke-linecap: round; opacity: .18; }
+    .path .node { fill: var(--navy); stroke: var(--white); stroke-width: 5; }
+    .path .node-ring { fill: none; stroke: var(--teal); stroke-width: 2; }
+    .stops {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+      margin-top: -8px; list-style: none; padding: 0;
+    }
+    .stops li:nth-child(1) { text-align: left; }
+    .stops li:nth-child(2) { text-align: center; }
+    .stops li:nth-child(3) { text-align: right; }
+    .stops .when { font: 600 14px var(--body); color: var(--teal-deep); }
+    .stops h3 { font-size: 21px; font-weight: 600; margin-top: 4px; }
+    .stops p { color: var(--muted); font-size: 15.5px; margin-top: 6px; }
+    .stops li:nth-child(2) p { margin-left: auto; margin-right: auto; }
+    .stops li:nth-child(3) p { margin-left: auto; }
+    .stops p { max-width: 30ch; }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .path .arc { stroke-dasharray: 1400; stroke-dashoffset: 1400; animation: draw 1.6s .2s cubic-bezier(.6,.1,.2,1) forwards; }
+      .path .node, .path .node-ring { opacity: 0; transform-box: fill-box; transform-origin: center; animation: pop .5s forwards; }
+      .path .n1 { animation-delay: .35s; } .path .n2 { animation-delay: .9s; } .path .n3 { animation-delay: 1.45s; }
+      @keyframes draw { to { stroke-dashoffset: 0; } }
+      @keyframes pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
     }
 
-    .card {
-      width: 100%;
-      max-width: 420px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 32px;
+    /* ── Sections ────────────────────────────────────────── */
+    section { padding: 96px 0; }
+    .section-head { max-width: 640px; margin-bottom: 48px; }
+    .section-head h2 { font-size: clamp(28px, 3.4vw, 40px); line-height: 1.15; font-weight: 600; }
+    .section-head p { margin-top: 14px; color: var(--muted); font-size: 18px; }
+
+    /* Two products, side by side, each with what it watches. */
+    .products { background: var(--mist); }
+    .product-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .product {
+      background: var(--white); border-radius: 20px; padding: 36px;
+      border: 1px solid var(--line);
+    }
+    .product .tag {
+      display: inline-block; font: 600 13px var(--body); color: var(--teal-deep);
+      background: var(--teal-wash); padding: 4px 12px; border-radius: 999px;
+    }
+    .product h3 { font-size: 26px; font-weight: 600; margin-top: 18px; }
+    .product > p { color: var(--muted); margin-top: 10px; }
+    .product ul { margin: 24px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+    .product li { padding: 14px 0 14px 28px; border-bottom: 1px solid var(--line); position: relative; font-size: 16px; }
+    .product li::before {
+      content: ""; position: absolute; left: 4px; top: 22px; width: 9px; height: 9px;
+      border-radius: 50%; background: var(--teal);
     }
 
-    .card.wide {
-      max-width: 560px;
+    /* Who it is for: a plain list, one row per person. */
+    .people { display: grid; grid-template-columns: 1fr; border-top: 1.5px solid var(--navy); }
+    .person {
+      display: grid; grid-template-columns: 260px 1fr; gap: 32px;
+      padding: 28px 0; border-bottom: 1px solid var(--line);
     }
+    .person h3 { font-size: 20px; font-weight: 600; }
+    .person p { color: var(--muted); max-width: 62ch; }
+    /* Patients did not choose Preventra; their row says so gently, set apart. */
+    .person.patient { background: var(--teal-wash); border: 0; border-radius: 14px; padding: 28px 24px; margin-top: 16px; }
 
-    h1 {
-      font-size: 20px;
-      margin: 0 0 4px;
-      letter-spacing: -.01em;
-    }
+    /* Privacy, on navy: the part a hospital asks about first. */
+    .trust { background: var(--navy); color: var(--white); }
+    .trust .section-head p { color: #b9c6d2; }
+    .rules { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 56px; }
+    .rule { padding: 24px 0; border-top: 1px solid rgba(255,255,255,.14); display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
+    .rule svg { margin-top: 3px; }
+    .rule h3 { font: 600 17px var(--body); letter-spacing: 0; }
+    .rule p { color: #b9c6d2; font-size: 15.5px; margin-top: 4px; }
 
-    .sub {
-      color: var(--muted);
-      font-size: 14px;
-      margin: 0 0 24px;
-    }
+    /* Closing */
+    .close { text-align: center; padding: 104px 0; }
+    .close img { width: 56px; margin: 0 auto 24px; }
+    .close h2 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 600; }
+    .close p { color: var(--muted); margin: 14px auto 0; max-width: 48ch; }
+    .close .actions { margin-top: 28px; display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
 
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      margin: 0 0 6px;
-    }
+    footer { border-top: 1px solid var(--line); padding: 28px 0; font-size: 14px; color: var(--muted); }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--navy); }
+    footer nav { display: flex; gap: 20px; }
 
-    input, select {
-      width: 100%;
-      padding: 10px 12px;
-      margin-bottom: 16px;
-      font: inherit;
-      color: var(--text);
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+    /* ── Small screens ───────────────────────────────────── */
+    @media (max-width: 860px) {
+      .product-grid, .rules { grid-template-columns: 1fr; }
+      .person { grid-template-columns: 1fr; gap: 6px; }
     }
-
-    .role-hint {
-      color: var(--muted);
-      font-size: 13px;
-      margin: -10px 0 16px;
-    }
-
-    input:focus-visible, select:focus-visible {
-      outline: 2px solid var(--brand);
-      outline-offset: 1px;
-    }
-
-    button {
-      width: 100%;
-      padding: 11px 16px;
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
-      color: var(--accent-ink);
-      background: var(--accent);
-      border: 1px solid transparent;
-      border-radius: 8px;
-    }
-
-    button:hover:not(:disabled) {
-      filter: brightness(1.25);
-    }
-
-    button:disabled {
-      opacity: .6;
-      cursor: progress;
-    }
-
-    /* The rule above means "submitting" on the sign-in button. On a tile it
-     would read as loading rather than unavailable, which is a different
-     thing and sends someone looking for the wrong fault. */
-    .tile:disabled {
-      cursor: not-allowed;
-    }
-
-    .switch {
-      margin: 14px 0 0;
-      font-size: 13px;
-      color: var(--muted);
-      text-align: center;
-    }
-    /* A button, not an anchor - it changes the form in place rather than
-       navigating, and a link that goes nowhere is a lie to a screen reader. */
-    .linkish {
-      background: none;
-      border: 0;
-      padding: 0;
-      width: auto;
-      font: inherit;
-      color: #0f766e;
-      font-weight: 600;
-      cursor: pointer;
-      text-decoration: underline;
-    }
-    .linkish:hover { filter: none; color: #115e59; }
-
-    button.ghost {
-      background: transparent;
-      color: var(--muted);
-      border-color: var(--border);
-      font-weight: 500;
-      margin-top: 8px;
-    }
-
-    .error {
-      background: var(--danger-bg);
-      border: 1px solid var(--danger-border);
-      color: var(--danger-text);
-      border-radius: 8px;
-      padding: 12px 14px;
-      font-size: 13px;
-      margin-bottom: 16px;
-    }
-
-    .error code {
-      font-size: 12px;
-      word-break: break-all;
-    }
-
-    .who {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: baseline;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 16px;
-      margin-bottom: 20px;
-    }
-
-    .who b {
-      font-weight: 600;
-    }
-
-    .who span {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .tiles {
-      display: grid;
-      gap: 12px;
-    }
-
-    .tile {
-      display: block;
-      width: 100%;
-      text-align: left;
-      padding: 16px 18px;
-      cursor: pointer;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: inherit;
-      font: inherit;
-    }
-
-    .tile:hover {
-      border-color: var(--brand);
-      background: #f2fbf8;
-    }
-
-    .tile b {
-      display: block;
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 3px;
-    }
-
-    .tile span {
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    /* Logo. Sized by height so a taller or shorter export still sits correctly. */
-    .brand {
-      text-align: center;
-      margin-bottom: 22px;
-    }
-
-    .brand img {
-      height: 84px;
-      width: auto;
-      display: inline-block;
-    }
-
-    .brand-fallback {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -.02em;
-      color: var(--brand);
-    }
-
-    .who-brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .who-brand img {
-      height: 30px;
-      width: auto;
-    }
-
-    .none {
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .hidden {
-      display: none;
-    }
-
-    .site-footer {
-      margin-top: 24px;
-      font-size: 13px;
-      color: var(--muted);
-      text-align: center;
-    }
-
-    .site-footer a {
-      color: inherit;
-      text-decoration: underline;
-      text-underline-offset: 2px;
-    }
-
-    .site-footer a:hover {
-      color: var(--text);
+    @media (max-width: 680px) {
+      body { font-size: 16px; }
+      .bar nav a.plain { display: none; }
+      .hero { padding-top: 48px; }
+      .path svg { display: none; }
+      .stops { grid-template-columns: 1fr; gap: 0; margin-top: 40px; border-left: 2px solid var(--navy); padding-left: 24px; }
+      .stops li, .stops li:nth-child(2), .stops li:nth-child(3) { text-align: left; position: relative; padding: 0 0 28px; }
+      .stops li::before {
+        content: ""; position: absolute; left: -33px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+        background: var(--navy); box-shadow: 0 0 0 4px var(--white), 0 0 0 6px var(--teal);
+      }
+      .stops li p, .stops li:nth-child(2) p, .stops li:nth-child(3) p { margin-left: 0; }
+      section { padding: 72px 0; }
+      .product { padding: 28px 24px; }
     }
   </style>
 </head>
-
 <body>
-
-  <!-- ── sign in ─────────────────────────────────────────────────────────────── -->
-  <main class="card" id="login-view">
-    <!-- Save the Preventra logo as Portal/logo.png. If it is missing the wordmark
-       below takes its place, so a forgotten file never shows a broken image. -->
-    <div class="brand">
-      <img src="logo.png" alt="Preventra" onerror="this.remove();document.getElementById('brand-text').hidden=false">
-      <div class="brand-fallback" id="brand-text" hidden>Preventra</div>
+  <header class="bar" id="bar">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="Preventra home">
+        <img src="mark.png" alt="" width="26" height="32">
+        <span>Preventra</span>
+      </a>
+      <nav aria-label="Main">
+        <a class="plain" href="#products">Products</a>
+        <a class="plain" href="#who">Who it’s for</a>
+        <a class="plain" href="#privacy">Privacy</a>
+        <a class="btn btn-dark" href="signin.html">Sign in</a>
+      </nav>
     </div>
+  </header>
 
-    <h1 id="form-title">Sign in</h1>
-    <p class="sub">
-      Preventra helps care teams track GLP-1 treatment outcomes and spot patients at risk of
-      hospital readmission. One account for GLP-1 Analytics and Readmission Risk.
-    </p>
-
-    <div class="error hidden" id="login-error"></div>
-
-    <!-- One form for both actions: it is the same request to a different path,
-         and a second page would duplicate the error handling. Sign-up asks which
-         role the person is joining as - a request that files them for the
-         administrator, who confirms or changes it on approval. It never asks
-         for a hospital: an administrator assigns that, so typing a hospital's
-         name is never enough to see its patients. -->
-    <form id="login-form">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" autocomplete="username" required>
-
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
-
-      <div id="signup-fields" class="hidden">
-        <label for="signup-role">I am joining as</label>
-        <select id="signup-role" name="role">
-          <option value="">Choose your role…</option>
-          <option value="case_manager">Case manager</option>
-          <option value="doctor">Doctor</option>
-          <option value="hospital_admin">Hospital administrator</option>
-          <option value="insurer">Insurer</option>
-          <option value="nurse">Nurse or caretaker</option>
-          <option value="patient">Patient</option>
-        </select>
-        <p class="role-hint" id="role-hint"></p>
-        <!-- Only for the roles that work for a hospital. Choosing one files the
-             request with that hospital's administrator; it does not join it. -->
-        <div id="hospital-field" class="hidden">
-          <label for="signup-hospital">Your hospital</label>
-          <select id="signup-hospital" name="hospital_id">
-            <option value="">Choose your hospital…</option>
-          </select>
-          <p class="role-hint" id="hospital-hint"></p>
-        </div>
-        <p class="sub">
-          New accounts wait to be approved. Until then you can sign in but see
-          no patient data.
+  <main>
+    <div class="hero">
+      <div class="wrap">
+        <h1>See who is slipping, and reach them in time.</h1>
+        <p class="lede">
+          Preventra predicts which patients are likely to stop their GLP-1 treatment or come back
+          to hospital after discharge, explains why, and makes sure the right person on their care
+          team follows up.
         </p>
+        <div class="actions">
+          <a class="btn btn-dark" href="signin.html">Sign in</a>
+          <a class="btn btn-line" href="#products">See what it does</a>
+        </div>
+
+        <div class="path" aria-label="How Preventra works, in three steps">
+          <svg viewBox="0 0 1072 150" role="presentation" aria-hidden="true">
+            <path class="arc-glow" d="M 24 118 Q 536 -28 1048 118" />
+            <path class="arc" d="M 24 118 Q 536 -28 1048 118" />
+            <circle class="node-ring n1" cx="24" cy="118" r="17" />
+            <circle class="node n1" cx="24" cy="118" r="11" />
+            <circle class="node-ring n2" cx="536" cy="45" r="17" />
+            <circle class="node n2" cx="536" cy="45" r="11" />
+            <circle class="node-ring n3" cx="1048" cy="118" r="17" />
+            <circle class="node n3" cx="1048" cy="118" r="11" />
+          </svg>
+          <ol class="stops">
+            <li>
+              <div class="when">First</div>
+              <h3>Spot the risk</h3>
+              <p>Every patient gets a risk score, with the main reasons behind it in plain words.</p>
+            </li>
+            <li>
+              <div class="when">Then</div>
+              <h3>Tell their care team</h3>
+              <p>Their own doctors and nurses are notified when a patient needs a look.</p>
+            </li>
+            <li>
+              <div class="when">Finally</div>
+              <h3>Make sure someone acts</h3>
+              <p>A follow-up request goes to a case manager, who contacts the patient and closes the loop.</p>
+            </li>
+          </ol>
+        </div>
       </div>
-
-      <button type="submit" id="login-button">Sign in</button>
-    </form>
-
-    <p class="switch">
-      <span id="switch-text">No account yet?</span>
-      <button type="button" class="linkish" id="switch-mode">Sign up</button>
-    </p>
-  </main>
-
-  <!-- ── waiting for approval ──────────────────────────────────────────────── -->
-  <main class="card hidden" id="pending-view">
-    <div class="who">
-      <div class="who-brand">
-        <img src="logo.png" alt="" onerror="this.remove()">
-        <div><b id="pending-email">—</b><br><span>Waiting for approval</span></div>
-      </div>
-      <button class="ghost" id="pending-sign-out" style="width:auto;padding:6px 12px;margin:0">Sign out</button>
     </div>
-    <h1>Your account is waiting for approval</h1>
-    <p class="sub">
-      <span id="pending-role"></span>
-      You can close this page; once you are approved, signing in takes you
-      straight to your applications.
-    </p>
-    <button type="button" id="check-again">Check again</button>
-  </main>
 
-  <!-- ── replace a temporary password ──────────────────────────────────────── -->
-  <main class="card hidden" id="password-view">
-    <div class="who">
-      <div class="who-brand">
-        <img src="logo.png" alt="" onerror="this.remove()">
-        <div><b id="password-email">—</b><br><span>First sign-in</span></div>
+    <section class="products" id="products">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Two products, one sign-in</h2>
+          <p>Each one watches a moment when patients are easy to lose. Your account opens whichever your hospital uses.</p>
+        </div>
+        <div class="product-grid">
+          <article class="product">
+            <span class="tag">GLP-1 Analytics</span>
+            <h3>Keep patients on their GLP-1 treatment</h3>
+            <p>For patients on GLP-1 medicines for diabetes or weight, where many stop within months.</p>
+            <ul>
+              <li>Each patient’s chance of stopping, and why</li>
+              <li>Groups of patients with similar reasons, to plan support</li>
+              <li>What stopping costs, for the people who hold the budget</li>
+            </ul>
+          </article>
+          <article class="product">
+            <span class="tag">Readmission Risk</span>
+            <h3>Stop avoidable returns to hospital</h3>
+            <p>For the weeks after discharge, when a patient who gets worse can be caught early.</p>
+            <ul>
+              <li>A risk score for each patient at discharge</li>
+              <li>Weekly re-scoring as monitoring data comes in</li>
+              <li>An alert to the responsible clinician when risk rises</li>
+            </ul>
+          </article>
+        </div>
       </div>
-      <button class="ghost" id="password-sign-out" style="width:auto;padding:6px 12px;margin:0">Sign out</button>
-    </div>
-    <h1>Set a new password</h1>
-    <p class="sub">
-      Your administrator gave you a temporary password. Choose your own to
-      continue - the temporary one stops working as soon as you do.
-    </p>
-    <div class="error hidden" id="password-error"></div>
-    <form id="password-form">
-      <label for="pw-current">Temporary password</label>
-      <input id="pw-current" type="password" autocomplete="current-password" required>
-      <label for="pw-new">New password (at least 8 characters)</label>
-      <input id="pw-new" type="password" autocomplete="new-password" minlength="8" required>
-      <label for="pw-confirm">Repeat new password</label>
-      <input id="pw-confirm" type="password" autocomplete="new-password" minlength="8" required>
-      <button type="submit" id="password-button">Save and continue</button>
-    </form>
-  </main>
+    </section>
 
-  <!-- ── choose an app ───────────────────────────────────────────────────────── -->
-  <main class="card wide hidden" id="apps-view">
-    <div class="who">
-      <div class="who-brand">
-        <img src="logo.png" alt="" onerror="this.remove()">
-        <div><b id="who-email">—</b><br><span id="who-org">—</span></div>
+    <section id="who">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Who it’s for</h2>
+          <p>Everyone signs in to the same place and sees only what their role needs.</p>
+        </div>
+        <div class="people">
+          <div class="person">
+            <h3>Hospitals</h3>
+            <p>See which of your patients are at risk, whether each one has a care team, and which follow-ups are still open.</p>
+          </div>
+          <div class="person">
+            <h3>Insurers</h3>
+            <p>Follow adherence and its cost across your members, without opening anyone’s medical details unless there is a reason to.</p>
+          </div>
+          <div class="person">
+            <h3>Doctors and nurses</h3>
+            <p>Start the day with your own patients: who is at risk, who is new to your care, and what needs your attention.</p>
+          </div>
+          <div class="person">
+            <h3>Case managers</h3>
+            <p>Receive follow-up requests from the care team, contact the patient, and record what happened.</p>
+          </div>
+          <div class="person patient">
+            <h3>Patients</h3>
+            <p>If your hospital uses Preventra, sign in with the account they gave you to see your own record. Only you and your care team can see it.</p>
+          </div>
+        </div>
       </div>
-      <button class="ghost" id="sign-out" style="width:auto;padding:6px 12px;margin:0">Sign out</button>
+    </section>
+
+    <section class="trust" id="privacy">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Built around who may see what</h2>
+          <p>Patient information is shared on a need-to-know basis, and every look at it leaves a record.</p>
+        </div>
+        <div class="rules">
+          <div class="rule">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3ecfae" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+            <div><h3>Your patients only</h3><p>Doctors and nurses see the patients they look after, in their own hospital, and no one else’s.</p></div>
+          </div>
+          <div class="rule">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3ecfae" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l1 3h4v13H4V7h4z"/><path d="M8 12h8M8 16h5"/></svg>
+            <div><h3>Every opening is recorded</h3><p>Who opened which patient, when, and why is kept, so the hospital can check it.</p></div>
+          </div>
+          <div class="rule">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3ecfae" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <div><h3>A reason before details</h3><p>Administrators and insurers give a reason before they open a patient’s medical details.</p></div>
+          </div>
+          <div class="rule">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3ecfae" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+            <div><h3>Approved accounts</h3><p>New accounts see nothing until an administrator at their hospital approves them.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="close">
+      <div class="wrap">
+        <img src="mark.png" alt="" width="56" height="69">
+        <h2>Already have an account?</h2>
+        <p>Sign in once and open GLP-1 Analytics or Readmission Risk, whichever your account includes.</p>
+        <div class="actions">
+          <a class="btn btn-dark" href="signin.html">Sign in</a>
+          <a class="btn btn-line" href="about.html">About Preventra</a>
+        </div>
+      </div>
     </div>
-    <h1>Choose an application</h1>
-    <p class="sub">You have access to the following.</p>
-    <div class="tiles" id="tiles"></div>
   </main>
 
-  <footer class="site-footer">
-    Preventra · <a href="about.html">About</a>
+  <footer>
+    <div class="wrap">
+      <span>Preventra. Currently running on demonstration data.</span>
+      <nav aria-label="Footer">
+        <a href="about.html">About</a>
+        <a href="signin.html">Sign in</a>
+      </nav>
+    </div>
   </footer>
 
   <script>
-    const TOKEN_KEY = 'portal_token';
-    const $ = (id) => document.getElementById(id);
-
-    /** sessionStorage, but never fatal. It is blocked on file:// and data: origins
-     *  and in some private modes; without this guard the whole sign-in throws and
-     *  the page looks broken for a reason that has nothing to do with the token.
-     *  Losing persistence across a reload is an acceptable demo cost. */
-    const store = {
-      get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
-      set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* not persisted */ } },
-      del(k) { try { sessionStorage.removeItem(k); } catch { /* nothing to do */ } },
-    };
-
-    /** Read a JWT payload WITHOUT verifying it. Safe here: this only decides which
-     *  tiles to draw. Every real decision is made by a backend that checks the
-     *  signature, so a forged token gets someone a tile and then a 401. */
-    function readClaims(token) {
-      try {
-        const part = token.split('.')[1];
-        const pad = part.replace(/-/g, '+').replace(/_/g, '/');
-        return JSON.parse(decodeURIComponent(escape(atob(pad))));
-      } catch { return null; }
-    }
-
-    function isExpired(claims) {
-      return !claims?.exp || claims.exp * 1000 <= Date.now();
-    }
-
-    function showError(message, hint) {
-      const box = $('login-error');
-      box.innerHTML = hint ? `${message}<br><code>${hint}</code>` : message;
-      box.classList.remove('hidden');
-    }
-
-    function clearError() { $('login-error').classList.add('hidden'); }
-
-    /** Build the destination URL, putting the token where that app expects it.
-     *  Fragment by default: a fragment is never sent to the server, so the token
-     *  stays out of access logs, proxy logs and Referer headers. */
-    function destinationFor(app, token) {
-      const base = app.url.replace(/\/$/, '');
-      return app.handoff === 'query'
-        ? `${base}/?token=${encodeURIComponent(token)}`
-        : `${base}/#token=${encodeURIComponent(token)}`;
-    }
-
-    // Display names for the fixed roles in Readmissions/api/auth.py:ROLES.
-    const ROLE_LABELS = {
-      superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
-      nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', patient: 'Patient',
-    };
-
-    // What each role on the sign-up form means, so people pick the right one.
-    // The choices must stay within SIGNUP_ROLES in Readmissions/api/auth.py.
-    const ROLE_HINTS = {
-      doctor: 'Sees and treats the patients assigned to you.',
-      nurse: 'Follows up on the patients assigned to you.',
-      case_manager: 'Coordinates care across all of your hospital\'s patients: follow-ups, and ' +
-                    'assigning doctors and nurses. No user or cost management.',
-      hospital_admin: 'Runs your hospital\'s account: staff, users and costs. Opens a patient\'s ' +
-                      'clinical details only with a reason, which is logged.',
-      insurer: 'Sees your members across hospitals, mainly costs and outcomes.',
-      patient: 'Sees your own record only.',
-    };
-
-    function renderApps(token, claims) {
-      $('who-email').textContent = claims.email || '—';
-      $('who-org').textContent =
-        [ROLE_LABELS[claims.role] || claims.role, claims.hospital_id]
-          .filter(Boolean).join(' · ') || 'signed in';
-
-      const granted = Array.isArray(claims.app_access) ? claims.app_access : [];
-      const available = CONFIG.APPS.filter((a) => granted.includes(a.key));
-      const tiles = $('tiles');
-      tiles.innerHTML = '';
-
-      if (!available.length) {
-        tiles.innerHTML =
-          '<p class="none">This account has no applications assigned. ' +
-          'Its <code>app_access</code> list is empty or names an app this portal ' +
-          'does not know about.</p>';
-      }
-
-      for (const app of available) {
-        const tile = document.createElement('button');
-        tile.className = 'tile';
-        tile.type = 'button';
-        const configured = Boolean((app.url || '').trim());
-        tile.innerHTML = configured
-          ? `<b>${app.name}</b><span>${app.blurb}</span>`
-          : `<b>${app.name}</b><span>Not configured yet - set its <code>url</code> in CONFIG.</span>`;
-        // An unconfigured tile is disabled rather than hidden: hiding it would look
-        // identical to the account not having access, which is a different problem
-        // and would be debugged in the wrong place.
-        tile.disabled = !configured;
-        if (configured) {
-          tile.addEventListener('click', () => {
-            window.location.href = destinationFor(app, token);
-          });
-        }
-        tiles.appendChild(tile);
-      }
-
-      $('login-view').classList.add('hidden');
-      $('pending-view').classList.add('hidden');
-      $('password-view').classList.add('hidden');
-      $('apps-view').classList.remove('hidden');
-    }
-
-    // The roles that belong to a hospital, and so pick one at sign-up. The
-    // same list as HOSPITAL_ROLES in Readmissions/api/auth.py.
-    const HOSPITAL_ROLES = ['doctor', 'nurse', 'case_manager', 'hospital_admin', 'patient'];
-
-    /** Hospitals a sign-up may ask to join: names and ids, from an open
-     *  endpoint. Fetched once; a failure is retried next time. */
-    let hospitalsPromise = null;
-    function loadHospitals() {
-      if (!hospitalsPromise) {
-        hospitalsPromise = fetch(`${CONFIG.AUTH_BASE_URL.replace(/\/$/, '')}/auth/hospitals`)
-          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-          .catch(() => { hospitalsPromise = null; return []; });
-      }
-      return hospitalsPromise;
-    }
-
-    async function fillHospitals() {
-      const select = $('signup-hospital');
-      if (select.dataset.filled) return;
-      const list = await loadHospitals();
-      if (!list.length) return;                  // try again next time the form opens
-      for (const h of list) select.add(new Option(h.name, h.id));
-      select.add(new Option('My hospital isn\'t listed', 'none'));
-      select.dataset.filled = '1';
-    }
-
-    /** Shows the hospital choice for hospital roles, and says who decides. */
-    function updateSignupFields() {
-      const role = $('signup-role').value;
-      $('role-hint').textContent = ROLE_HINTS[role] || '';
-      const needsHospital = MODE === 'signup' && HOSPITAL_ROLES.includes(role);
-      $('hospital-field').classList.toggle('hidden', !needsHospital);
-      $('signup-hospital').required = needsHospital;
-      $('hospital-hint').textContent = !needsHospital ? ''
-        : role === 'hospital_admin'
-          ? 'Our team reviews requests to become a hospital administrator.'
-          : 'That hospital\'s administrator reviews your request.';
-      if (needsHospital) fillHospitals();
-    }
-
-    /** "You asked to join Demo Hospital as a doctor" - read back from the
-     *  account, since the token does not carry the requested hospital. */
-    async function describeRequest(claims) {
-      const role = ROLE_LABELS[claims.role] || claims.role || '';
-      let hospitalName = '';
-      try {
-        const me = await fetch(`${CONFIG.AUTH_BASE_URL.replace(/\/$/, '')}/auth/me`, {
-          headers: { Authorization: `Bearer ${store.get(TOKEN_KEY)}` },
-        }).then((r) => (r.ok ? r.json() : null));
-        const id = me && me.requested_hospital_id;
-        if (id) hospitalName = ((await loadHospitals()).find((h) => h.id === id) || {}).name || id;
-      } catch { /* the generic wording below still holds */ }
-      if (hospitalName && claims.role === 'hospital_admin') {
-        return `You asked to be an administrator of ${hospitalName}. Our team reviews these requests.`;
-      }
-      if (hospitalName) {
-        return `You asked to join ${hospitalName} as: ${role}. Its administrator will review your request.`;
-      }
-      return role ? `You asked to join as: ${role}. Our team will place you in your hospital.` : '';
-    }
-
-    function renderPending(claims) {
-      $('pending-email').textContent = claims.email || '—';
-      $('pending-role').textContent = claims.role
-        ? `You asked to join as: ${ROLE_LABELS[claims.role] || claims.role}.` : '';
-      describeRequest(claims).then((text) => { if (text) $('pending-role').textContent = text; });
-      $('login-view').classList.add('hidden');
-      $('apps-view').classList.add('hidden');
-      $('password-view').classList.add('hidden');
-      $('pending-view').classList.remove('hidden');
-    }
-
-    // The password typed into the sign-in form, kept only until the "set a new
-    // password" screen has used it, so someone who just typed their temporary
-    // password is not asked for it twice.
-    let lastPassword = '';
-
-    function renderPasswordChange(claims) {
-      $('password-email').textContent = claims.email || '—';
-      $('password-form').reset();
-      $('pw-current').value = lastPassword;
-      lastPassword = '';
-      $('password-error').classList.add('hidden');
-      for (const id of ['login-view', 'apps-view', 'pending-view']) $(id).classList.add('hidden');
-      $('password-view').classList.remove('hidden');
-    }
-
-    /** The waiting screen for a pending account, the new-password screen for one
-     *  still on a temporary password, and the tiles for everyone else. The
-     *  backends enforce the same order; this only shows the right screen. */
-    function show(token, claims) {
-      if (claims.status === 'pending') return renderPending(claims);
-      if (claims.must_change_password) return renderPasswordChange(claims);
-      return renderApps(token, claims);
-    }
-
-    function signIn(token) {
-      const claims = readClaims(token);
-      if (!claims) return showError('That token could not be read.');
-      if (isExpired(claims)) return showError('That session has expired. Sign in again.');
-      store.set(TOKEN_KEY, token);
-      show(token, claims);
-    }
-
-    /** Swap a stored token for one carrying the account's CURRENT role and
-     *  status. Without this, someone approved since they signed in would stay on
-     *  the waiting screen - and hand an app a token that still says "pending" -
-     *  until they signed in again.
-     *
-     *  Returns the fresh token, null if the account is gone or the token is dead
-     *  (sign in again), or the old token if the service could not be reached, so
-     *  a network blip does not sign anyone out. */
-    async function refreshToken(token) {
-      try {
-        const response = await fetch(`${CONFIG.AUTH_BASE_URL.replace(/\/$/, '')}/auth/refresh`, {
-          method: 'POST', headers: { Authorization: `Bearer ${token}` },
-        });
-        if (response.status === 401) return null;
-        if (!response.ok) return token;
-        const body = await response.json().catch(() => ({}));
-        return body.token || token;
-      } catch { return token; }
-    }
-
-    function signOut() {
-      store.del(TOKEN_KEY);
-      lastPassword = '';
-      $('apps-view').classList.add('hidden');
-      $('pending-view').classList.add('hidden');
-      $('password-view').classList.add('hidden');
-      $('login-view').classList.remove('hidden');
-      $('login-form').reset();
-      $('role-hint').textContent = '';
-      setMode('login');             // back to "Sign in", not the sign-up form
-    }
-
-    // ── login ────────────────────────────────────────────────────────────────────
-    $('login-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      clearError();
-      const button = $('login-button');
-      button.disabled = true;
-      button.textContent = 'Signing in…';
-
-      try {
-        const path = MODE === 'signup' ? '/auth/signup' : '/auth/login';
-        const payload = { email: $('email').value, password: $('password').value };
-        if (MODE === 'signup') {
-          payload.role = $('signup-role').value;
-          if (HOSPITAL_ROLES.includes(payload.role)) payload.hospital_id = $('signup-hospital').value;
-        }
-        lastPassword = payload.password;
-
-        const response = await fetch(`${CONFIG.AUTH_BASE_URL.replace(/\/$/, '')}${path}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        const body = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          showError(body.detail || body.message || `Sign-in failed (${response.status}).`);
-          return;
-        }
-
-        // Accept whichever key the auth service uses, rather than failing on a name.
-        const token = body.token || body.access_token || body.jwt || body.accessToken;
-        if (!token) {
-          showError('The auth service did not return a token.',
-            `Keys it returned: ${Object.keys(body).join(', ') || 'none'}`);
-          return;
-        }
-        signIn(token);
-      } catch (err) {
-        // A thrown fetch is almost never a bad password. It is the request never
-        // completing: wrong URL, service down, or - most often - CORS.
-        showError(
-          'Could not reach the auth service. This is usually CORS or the service ' +
-          'being down, not your password.',
-          `${CONFIG.AUTH_BASE_URL}${MODE === 'signup' ? '/auth/signup' : '/auth/login'} — ${err.message}`);
-      } finally {
-        button.disabled = false;
-        button.textContent = MODE === 'signup' ? 'Sign up' : 'Sign in';
-      }
-    });
-
-    // ── sign in / sign up ────────────────────────────────────────────────────
-    // Sign-up returns the same body as sign-in, token included, so a brand new
-    // account lands on the waiting screen instead of being bounced back to a
-    // login form.
-    let MODE = 'login';
-
-    function setMode(mode) {
-      MODE = mode;
-      const up = mode === 'signup';
-      $('form-title').textContent = up ? 'Sign up' : 'Sign in';
-      $('login-button').textContent = up ? 'Sign up' : 'Sign in';
-      $('signup-fields').classList.toggle('hidden', !up);
-      $('signup-role').required = up;
-      updateSignupFields();
-      $('password').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
-      $('switch-text').textContent = up ? 'Already have an account?' : 'No account yet?';
-      $('switch-mode').textContent = up ? 'Sign in' : 'Sign up';
-      clearError();
-    }
-
-    $('switch-mode').addEventListener('click',
-      () => setMode(MODE === 'login' ? 'signup' : 'login'));
-
-    $('signup-role').addEventListener('change', updateSignupFields);
-
-    $('sign-out').addEventListener('click', signOut);
-    $('pending-sign-out').addEventListener('click', signOut);
-    $('password-sign-out').addEventListener('click', signOut);
-
-    $('password-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const box = $('password-error');
-      const fail = (message) => { box.textContent = message; box.classList.remove('hidden'); };
-      box.classList.add('hidden');
-      if ($('pw-new').value !== $('pw-confirm').value) return fail('The two new passwords do not match.');
-
-      const token = store.get(TOKEN_KEY);
-      if (!token) return signOut();
-      const button = $('password-button');
-      button.disabled = true;
-      try {
-        const response = await fetch(`${CONFIG.AUTH_BASE_URL.replace(/\/$/, '')}/auth/change-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ current_password: $('pw-current').value,
-                                 new_password: $('pw-new').value }),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) return fail(body.detail || `Could not change the password (${response.status}).`);
-        signIn(body.token);             // carries must_change_password: false
-      } catch (err) {
-        fail(`Could not reach the auth service - ${err.message}`);
-      } finally {
-        button.disabled = false;
-      }
-    });
-
-    $('check-again').addEventListener('click', async () => {
-      const stored = store.get(TOKEN_KEY);
-      if (!stored) return signOut();
-      const fresh = await refreshToken(stored);
-      if (!fresh) return signOut();
-      signIn(fresh);
-    });
-
-    // ── on load ──────────────────────────────────────────────────────────────────
-    (function start() {
-      const fragment = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-
-      // Arrived here from an app's Sign out. The app has dropped its own token,
-      // but this portal keeps a separate one per tab - and landing on a tile
-      // screen straight after signing out looks exactly like the sign-out
-      // failing. Drop it and show the login form.
-      if (fragment.get('signout')) {
-        window.history.replaceState(null, '', window.location.pathname);
-        store.del(TOKEN_KEY);
-
-        const chain = (fragment.get('chain') || '').split(',').filter(Boolean);
-        if (chain.length > 0) {
-          const [nextKey, ...rest] = chain;
-          const nextApp = CONFIG.APPS.find((a) => a.key === nextKey);
-          if (nextApp && nextApp.url) {
-            const base = nextApp.url.replace(/\/$/, '');
-            window.location.href = `${base}/#signout=1${rest.length ? `&chain=${rest.join(',')}` : ''}`;
-            return;
-          }
-        }
-        return signOut();
-      }
-
-      // A token pasted on the URL wins. Lets the portal be exercised end to end with
-      // scripts/mint_test_token.py before the auth service is reachable.
-      const fromUrl = fragment.get('token');
-      if (fromUrl) {
-        window.history.replaceState(null, '', window.location.pathname);
-        return signIn(fromUrl);
-      }
-      const stored = store.get(TOKEN_KEY);
-      if (stored) {
-        const claims = readClaims(stored);
-        if (claims && !isExpired(claims)) {
-          show(stored, claims);          // draw at once, then correct from the database
-          return refreshToken(stored).then((fresh) => (fresh ? signIn(fresh) : signOut()));
-        }
-        store.del(TOKEN_KEY);
-      }
-    })();
-
-    // Back/forward into this exact document (bfcache), not a fresh load. Common
-    // path: sign in here, click a tile, sign out inside that app, land back on
-    // this portal on a *different* document instance that clears the token - then
-    // press Back. The browser resumes this frozen document exactly as it looked
-    // before navigating away (tiles still on screen) without re-running the script
-    // above, because bfcache restores state rather than reloading it. Re-check the
-    // token against sessionStorage now so a signed-out Back doesn't show stale tiles.
-    window.addEventListener('pageshow', (event) => {
-  if (!event.persisted) return;
-
-  const fragment = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-  if (fragment.get('signout')) {
-    window.history.replaceState(null, '', window.location.pathname);
-    store.del(TOKEN_KEY);
-    const chain = (fragment.get('chain') || '').split(',').filter(Boolean);
-    if (chain.length > 0) {
-      const [nextKey, ...rest] = chain;
-      const nextApp = CONFIG.APPS.find((a) => a.key === nextKey);
-      if (nextApp && nextApp.url) {
-        const base = nextApp.url.replace(/\/$/, '');
-        window.location.href = `${base}/#signout=1${rest.length ? `&chain=${rest.join(',')}` : ''}`;
-        return;
-      }
-    }
-    return signOut();
-  }
-
-  const stored = store.get(TOKEN_KEY);
-  if (!stored) return signOut();
-  const claims = readClaims(stored);
-  if (!claims || isExpired(claims)) { store.del(TOKEN_KEY); return signOut(); }
-  show(stored, claims);
-});
+    // A hairline under the top bar once the page has scrolled.
+    var bar = document.getElementById('bar');
+    var onScroll = function () { bar.classList.toggle('scrolled', window.scrollY > 8); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
   </script>
 </body>
-
 </html>
