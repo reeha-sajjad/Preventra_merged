@@ -197,6 +197,37 @@ const RealAPI = {
    */
   getPipelineStatus: (runId) => apiFetch(`/api/pipeline/status/${runId}`),
 
+  // ── Model Studio (api/model_studio.py) ──────────────────────────────────
+  getStudioOverview: () => apiFetch('/api/studio/overview'),
+  getStudioModels: (target) =>
+    apiFetch(`/api/studio/models${target ? `?target=${encodeURIComponent(target)}` : ''}`),
+  getStudioModel: (id) => apiFetch(`/api/studio/models/${encodeURIComponent(id)}`),
+  deployStudioModel: (id) =>
+    apiFetch(`/api/studio/models/${encodeURIComponent(id)}/deploy`, { method: 'POST' }),
+  deleteStudioModel: (id) =>
+    apiFetch(`/api/studio/models/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  startStudioJob: ({ file, target, mode, algorithm, name, baseModelId }) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('target', target);
+    form.append('mode', mode);
+    form.append('algorithm', algorithm);
+    form.append('name', name || '');
+    if (baseModelId) form.append('base_model_id', baseModelId);
+    return apiFetch('/api/studio/jobs', { method: 'POST', body: form });
+  },
+  getStudioJob: (id) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}`),
+  confirmStudioJob: (id, plan) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}/confirm`, json(plan)),
+  saveStudioJob: (id, name) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}/save`, json({ name })),
+  discardStudioJob: (id) =>
+    apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  scoreStudioFile: ({ file, target }) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('target', target);
+    return apiFetch('/api/studio/score', { method: 'POST', body: form });
+  },
+
   /**
    * Field list and valid category values for the manual-entry form, read from
    * the same feature spec the model was trained against. Fetching it keeps the
@@ -375,6 +406,18 @@ export const uploadFile = USE_MOCK
   ? () => Promise.resolve({ run_id: 'MOCK-RUN', status: 'Running' })
   : RealAPI.uploadFile;
 
+// Model Studio trains and scores on the server; there is nothing to mock.
+export const getStudioOverview = realOnly(RealAPI.getStudioOverview);
+export const getStudioModels = realOnly(RealAPI.getStudioModels);
+export const getStudioModel = realOnly(RealAPI.getStudioModel);
+export const deployStudioModel = realOnly(RealAPI.deployStudioModel);
+export const deleteStudioModel = realOnly(RealAPI.deleteStudioModel);
+export const startStudioJob = realOnly(RealAPI.startStudioJob);
+export const getStudioJob = realOnly(RealAPI.getStudioJob);
+export const confirmStudioJob = realOnly(RealAPI.confirmStudioJob);
+export const saveStudioJob = realOnly(RealAPI.saveStudioJob);
+export const discardStudioJob = realOnly(RealAPI.discardStudioJob);
+export const scoreStudioFile = realOnly(RealAPI.scoreStudioFile);
 export const getPipelineStatus = USE_MOCK
   ? () => Promise.resolve({ status: 'Completed', current_step: 'registry_updated', patient_count: 0 })
   : RealAPI.getPipelineStatus;

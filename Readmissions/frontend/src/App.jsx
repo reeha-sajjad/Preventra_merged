@@ -14,9 +14,10 @@ import About from './pages/About';
 import Settings from './pages/Settings';
 import TestComponents from './pages/TestComponents';
 import MyRecord from './pages/MyRecord';
+import ModelStudio from './pages/ModelStudio';
 import { MANUAL_ENTRY_ENABLED } from './api';
 import { readClaims } from './api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES } from './roles';
+import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES } from './roles';
 import LoadingScreen from './components/LoadingScreen';
 import { useAppLoader } from './hooks/useAppLoader';
 
@@ -69,6 +70,7 @@ function AppRoutes() {
           <Route path="/patients/:id/update" element={<UpdatePatient />} />
           <Route path="/analytics" element={<Analytics />} />
           {can(CONSOLE_ROLES) && <Route path="/doctor" element={<DoctorConsole />} />}
+          {can(STUDIO_ROLES) && <Route path="/model-studio" element={<ModelStudio />} />}
           {/* Off by default. The backend refuses the create endpoints too, so
               typing the URL gets you a form that cannot save. */}
           {MANUAL_ENTRY_ENABLED && <Route path="/manual-entry" element={<ManualEntry />} />}
