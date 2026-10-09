@@ -79,7 +79,7 @@ RUNNER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_runner
 _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RESULTS = os.path.join(_BASE, "data", "mimic", "model", "results")
 
-LABEL_FIELD, GROUP_FIELD = "__label__", "__group__"
+LABEL_FIELD, GROUP_FIELD, ORDER_FIELD = "__label__", "__group__", "__order__"
 
 # ------------------------------------------------------------------ built-ins
 BUILTIN_MIMIC = "builtin-mimic-phase1"
@@ -378,7 +378,8 @@ def heuristic_plan(profile: dict, target: str) -> dict:
     return {
         "summary": f"{profile['n_rows']:,} rows and {profile['n_columns']} columns. Roles were "
                    "assigned from column names and types (no AI analysis).",
-        "label_column": label, "positive_value": None, "id_column": id_col,
+        "label_column": label, "positive_value": None, "label_threshold": None,
+        "id_column": id_col,
         "time_column": time_col, "numeric_columns": numeric, "categorical_columns": categorical,
         "drop_columns": drop, "leakage_suspects": [],
         "sensitive_columns": [c for c in cols if _SENSITIVE_HINT.search(c)][:6],
@@ -431,7 +432,10 @@ def normalise_plan(plan: dict, columns: list, target: str) -> tuple:
                              if isinstance(d, dict) and d.get("column") in known],
         "positive_value": (None if plan.get("positive_value") in (None, "", "null")
                            else str(plan["positive_value"])),
+        "label_threshold": _number(plan.get("label_threshold")),
     }
+    if out["label_threshold"] is not None:  # "yes when >= threshold" replaces a yes-value
+        out["positive_value"] = None
     problems = []
     if not label:
         problems.append("Choose the outcome (label) column.")
@@ -443,12 +447,32 @@ def normalise_plan(plan: dict, columns: list, target: str) -> tuple:
     return out, problems
 
 
+def _number(value):
+    try:
+        return None if value in (None, "", "null") else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _YES = {"1", "1.0", "true", "yes", "y", "readmitted", "<30", "t"}
 _NO = {"0", "0.0", "false", "no", "n", "not readmitted", "none", "f", ">30"}
 
 
-def label_series(s: pd.Series, positive_value: Optional[str]) -> pd.Series:
-    """The outcome as 1 / 0 / NaN. Ambiguous coding is refused, not guessed."""
+def label_series(s: pd.Series, positive_value: Optional[str],
+                 threshold: Optional[float] = None) -> pd.Series:
+    """
+    The outcome as 1 / 0 / NaN. Ambiguous coding is refused, not guessed.
+
+    With a threshold, a numeric column becomes "yes at or above it" - e.g. a
+    risk score where 40 and over is the High band. Blank or non-numeric values
+    stay unknown and the row is dropped, rather than counted as a "no".
+    """
+    if threshold is not None:
+        x = pd.to_numeric(s, errors="coerce")
+        if x.notna().sum() == 0:
+            raise ValueError(f"'{s.name}' has no numeric values, so it cannot be compared with "
+                             f"a threshold of {threshold:g}.")
+        return (x >= threshold).astype(float).where(x.notna())
     text = s.astype("object").where(s.isna(), s.astype(str).str.strip().str.lower())
     if positive_value is not None:
         pos = str(positive_value).strip().lower()
@@ -492,7 +516,7 @@ def association_scan(df: pd.DataFrame, y: pd.Series, features: list) -> list:
         level = "very likely leakage" if auc >= 0.95 else "strong" if auc >= 0.85 else None
         out.append({"column": col, "auroc": round(auc, 3), "flag": level})
     out.sort(key=lambda r: -r["auroc"])
-    return out[:12]
+    return out[:40]
 
 
 def _phase_one(db, job: dict, base: Optional[dict]) -> None:
@@ -523,8 +547,10 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
         if not isinstance(plan, dict):
             plan = heuristic_plan(profile, job["target"])
         if base_ctx:  # a retrain keeps the base model's choices where the data allows
-            for key in ("label_column", "id_column", "time_column", "positive_value"):
-                if base_ctx.get(key) in df.columns or key == "positive_value":
+            for key in ("label_column", "id_column", "time_column", "positive_value",
+                        "label_threshold"):
+                if base_ctx.get(key) in df.columns or key in ("positive_value",
+                                                              "label_threshold"):
                     plan.setdefault(key, base_ctx.get(key))
         plan, problems = normalise_plan(plan, list(df.columns), job["target"])
         assoc = _association_for(df, plan)
@@ -544,14 +570,39 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
         _fail(job, job.get("current_step") or "profile", _short(exc))
 
 
+def outcome(df: pd.DataFrame, plan: dict) -> pd.Series:
+    """The plan's outcome for every row: a yes-value or a threshold, as 1 / 0 / NaN."""
+    return label_series(df[plan["label_column"]], plan.get("positive_value"),
+                        plan.get("label_threshold"))
+
+
 def _association_for(df: pd.DataFrame, plan: dict) -> list:
+    """The leakage scan for every column that is not the outcome, id or time -
+    dropped ones included, so a reviewer sees what each column would give away
+    before deciding to keep it."""
     if not plan.get("label_column"):
         return []
     try:
-        y = label_series(df[plan["label_column"]], plan.get("positive_value"))
+        y = outcome(df, plan)
     except ValueError:
         return []
-    return association_scan(df, y, plan["numeric_columns"] + plan["categorical_columns"])
+    reserved = {plan.get("label_column"), plan.get("id_column"), plan.get("time_column")}
+    return association_scan(df, y, [c for c in df.columns if c not in reserved])
+
+
+_OUTCOME_KEYS = ("label_column", "positive_value", "label_threshold", "id_column", "time_column")
+
+
+def scan_job(job_id: str, user: dict, edits: dict) -> list:
+    """Re-run the leakage scan for an outcome the reviewer is trying out, so the
+    flags always describe the outcome actually chosen."""
+    job = get_job(job_id, user)
+    if job["status"] != "awaiting_confirmation":
+        raise ValueError("This run is not waiting for confirmation.")
+    df = _read_csv(os.path.join(job["workdir"], "upload.csv"))
+    plan = {**job["plan"], **{k: v for k, v in (edits or {}).items() if k in _OUTCOME_KEYS}}
+    plan, _ = normalise_plan(plan, list(df.columns), job["target"])
+    return _association_for(df, plan)
 
 
 def _short(exc) -> str:
@@ -565,16 +616,20 @@ def confirm_job(db, job_id: str, user: dict, edits: dict) -> dict:
         raise ValueError("This run is not waiting for confirmation.")
     df = _read_csv(os.path.join(job["workdir"], "upload.csv"))
     plan = {**job["plan"], **{k: v for k, v in (edits or {}).items() if k in (
-        "label_column", "positive_value", "id_column", "time_column", "numeric_columns",
-        "categorical_columns", "drop_columns", "sensitive_columns")}}
+        "label_column", "positive_value", "label_threshold", "id_column", "time_column",
+        "numeric_columns", "categorical_columns", "drop_columns", "sensitive_columns")}}
     plan, problems = normalise_plan(plan, list(df.columns), job["target"])
     if problems:
         raise ValueError(" ".join(problems))
-    y = label_series(df[plan["label_column"]], plan.get("positive_value"))  # raises if ambiguous
+    y = outcome(df, plan)  # raises if the coding is ambiguous
     if y.dropna().nunique() < 2:
-        raise ValueError("The outcome column has only one value after mapping.")
+        raise ValueError("The outcome has only one value after mapping"
+                         + (f" (nothing on one side of {plan['label_threshold']:g})"
+                            if plan.get("label_threshold") is not None else "") + ".")
+    association = _association_for(df, plan)  # for the outcome actually confirmed
     with _jobs_lock:
         job["plan"] = plan
+        job["association"] = association
         job["status"] = "running"
     _step(job, "confirm", "done", f"Confirmed by {user.get('email')}")
     _log(job, f"Plan confirmed: outcome '{plan['label_column']}', "
@@ -597,9 +652,16 @@ def make_split(df: pd.DataFrame, group_col: Optional[str], time_col: Optional[st
     groups = (df[group_col].astype(str) if group_col
               else pd.Series(np.arange(len(df)).astype(str), index=df.index))
     sizes = groups.value_counts()
+    first = None
     if time_col:
-        t = pd.to_datetime(df[time_col], errors="coerce", format="mixed")
+        t = pd.Series(order_values(df[time_col]), index=df.index)
         first = t.groupby(groups).min()
+        # A week number starts at 0 for everyone, so it orders each patient's
+        # rows but cannot say which patients are newest: ordering by it would
+        # quietly split by id order instead. Fall back to a random split.
+        if first.nunique() < max(3, 0.05 * len(first)):
+            first = None
+    if first is not None:
         order = first.sort_values(na_position="first").index.tolist()
         order += [g for g in sizes.index if g not in set(order)]
     else:
@@ -629,6 +691,19 @@ def _cap_rows(df: pd.DataFrame, group_col: Optional[str]) -> pd.DataFrame:
     return df[groups.isin(keep)]
 
 
+def order_values(s: pd.Series) -> np.ndarray:
+    """A sortable number for a date or week column: numbers as they are, dates
+    as days since 1970. Unparseable values become NaN (sorted last)."""
+    num = pd.to_numeric(s, errors="coerce")
+    if num.notna().mean() >= 0.9:
+        return num.astype(float).to_numpy()
+    t = pd.to_datetime(s, errors="coerce", format="mixed")
+    out = np.full(len(t), np.nan)
+    mask = t.notna().to_numpy()
+    out[mask] = t[mask].astype("int64").to_numpy() / 86_400e9
+    return out
+
+
 def _write_split(job: dict, df: pd.DataFrame, plan: dict, y: pd.Series) -> dict:
     features = plan["numeric_columns"] + plan["categorical_columns"]
     split = make_split(df, plan.get("id_column"), plan.get("time_column"))
@@ -637,10 +712,14 @@ def _write_split(job: dict, df: pd.DataFrame, plan: dict, y: pd.Series) -> dict:
     data[LABEL_FIELD] = y.values
     data[GROUP_FIELD] = (df[plan["id_column"]].astype(str).values if plan.get("id_column")
                          else np.arange(len(df)).astype(str))
+    # Patient and time order travel in every file: the runner sorts by them and,
+    # when history is on, hands them to the pipeline to compute earlier-row features.
+    data[ORDER_FIELD] = (order_values(df[plan["time_column"]]) if plan.get("time_column")
+                         else np.arange(len(df), dtype=float))
     out = {}
     for part in ("train", "valid", "test"):
         rows = data[split == part]
-        cols = features + [LABEL_FIELD, GROUP_FIELD] if part == "train" else features
+        cols = features + [GROUP_FIELD, ORDER_FIELD] + ([LABEL_FIELD] if part == "train" else [])
         rows[cols].to_csv(os.path.join(wd, f"{part}.csv"), index=False)
         out[part] = {"rows": int(len(rows)), "positives": int(rows[LABEL_FIELD].sum()),
                      "labels": rows[LABEL_FIELD].astype(int).values,
@@ -651,7 +730,14 @@ def _write_split(job: dict, df: pd.DataFrame, plan: dict, y: pd.Series) -> dict:
 
 
 def _runner_config(job: dict, plan: dict, y_train: np.ndarray) -> dict:
+    # Per-patient history needs to know whose row is whose and in which order.
+    history = bool(plan.get("id_column") and plan.get("time_column"))
     return {
+        "history": history,
+        "history_group_column": GROUP_FIELD,
+        "history_order_column": ORDER_FIELD,
+        "history_id_name": plan.get("id_column"),
+        "history_time_name": plan.get("time_column"),
         "label_column": plan["label_column"],
         "feature_columns": plan["numeric_columns"] + plan["categorical_columns"],
         "numeric_columns": plan["numeric_columns"],
@@ -733,7 +819,7 @@ def _phase_two(db, job: dict, user: dict) -> None:
     try:
         plan = job["plan"]
         df = _read_csv(os.path.join(job["workdir"], "upload.csv"))
-        y_all = label_series(df[plan["label_column"]], plan.get("positive_value"))
+        y_all = outcome(df, plan)
         df = df[y_all.notna()].reset_index(drop=True)
         y_all = y_all[y_all.notna()].reset_index(drop=True)
         if len(df) > MAX_ROWS:
@@ -793,7 +879,8 @@ def _generate_and_train(job: dict, config: dict, base: Optional[dict]) -> bool:
         problems = studio_guard.check_code(code)
         if problems:
             error = "The code was refused before running:\n" + "\n".join(problems)
-            attempts.append({"attempt": attempt, "stage": "check", "error": error})
+            attempts.append({"attempt": attempt, "stage": "check", "error": error,
+                             "code": code[:30000]})
             _log(job, error, "generate")
             continue
         _step(job, "generate", "done", f"Gemini, attempt {attempt}")
@@ -802,7 +889,8 @@ def _generate_and_train(job: dict, config: dict, base: Optional[dict]) -> bool:
             attempts.append({"attempt": attempt, "stage": "train", "error": None})
             return _accept_code(job, code, "gemini", attempts)
         error = result["error"]
-        attempts.append({"attempt": attempt, "stage": "train", "error": error[-1500:]})
+        attempts.append({"attempt": attempt, "stage": "train", "error": error[-1500:],
+                         "code": code[:30000]})
         _log(job, f"The generated code failed: {error.splitlines()[0] if error else ''}", "train")
         _step(job, "train", "failed", "Generated code failed; retrying")
 
@@ -938,7 +1026,7 @@ def _compare(db, job, comp, kind, y_te, p_te) -> dict:
         # The comparison model needs its own raw columns, which the test file
         # may not hold as features; score the raw test rows instead.
         raw_path = os.path.join(out, "raw_test.csv")
-        job["_split"]["test_frame"].to_csv(raw_path, index=False)
+        with_context(comp, job["_split"]["test_frame"]).to_csv(raw_path, index=False)
         result = _score_with(db, comp, [{"name": f"test ({name})", "path": raw_path,
                                          "out": os.path.join(out, "pred.csv")}], out,
                              lambda m: _log(job, m, "evaluate"))
@@ -951,6 +1039,27 @@ def _compare(db, job, comp, kind, y_te, p_te) -> dict:
     except Exception as exc:
         row["note"] = f"Could not be compared: {_short(exc)}"
     return row
+
+
+def with_context(model: dict, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    The patient and time-order columns a history model needs, built from that
+    model's own id and date/week columns. A file without them cannot be scored
+    by such a model: "change since last week" needs last week.
+    """
+    if not (model.get("config") or {}).get("history"):
+        return df
+    data = model.get("data") or {}
+    id_col, time_col = data.get("id_column"), data.get("time_column")
+    missing = [c for c in (id_col, time_col) if not c or c not in df.columns]
+    if missing:
+        raise ValueError(f"{model['name']} uses each patient's earlier rows, so the file needs its "
+                         f"patient id column '{id_col}' and its date/week column '{time_col}', "
+                         "with each patient's earlier rows included.")
+    out = df.copy()
+    out[GROUP_FIELD] = df[id_col].astype(str)
+    out[ORDER_FIELD] = order_values(df[time_col])
+    return out
 
 
 def comp_features(model: dict) -> list:
@@ -1133,7 +1242,8 @@ def subgroup_metrics(frame: pd.DataFrame, y, p, columns: list, groups=None) -> l
 
 
 # ============================================================ 7. recommendation
-def decide(evaluation: dict, association: list, code_origin: str) -> dict:
+def decide(evaluation: dict, association: list, code_origin: str,
+           features: Optional[list] = None, score_outcome: bool = False) -> dict:
     """
     Deploy / deploy with caution / do not deploy, by fixed rules - the same
     rules for every model, so two runs can be compared and the decision can be
@@ -1159,9 +1269,17 @@ def decide(evaluation: dict, association: list, code_origin: str) -> dict:
         check("Enough readmissions to judge", "pass", f"{pos} {what} in the test set{extra}.")
 
     auc, lo = m["auroc"], m["auroc_ci"][0]
-    if auc > 0.97:
-        check("Discrimination", "fail", f"AUROC {auc:.3f} is implausibly high for readmission; "
-                                        "the outcome has almost certainly leaked into a feature.")
+    if score_outcome and 0.97 < auc < 0.995:
+        # A threshold on a score (next week's risk score >= 40) can be genuinely
+        # easy: this week's score already says most of it. Not proof of a leak.
+        check("Discrimination", "warn",
+              f"AUROC {auc:.3f} is very high. The outcome is a threshold on a score, which can be "
+              "easy to predict from information already known (this week's score, say), or "
+              "something may leak. Confirm every feature is known when the prediction is made.")
+    elif auc > (0.995 if score_outcome else 0.97):
+        check("Discrimination", "fail", f"AUROC {auc:.3f} is implausibly high"
+                                        + ("" if score_outcome else " for readmission")
+                                        + "; the outcome has almost certainly leaked into a feature.")
     elif auc < 0.6:
         check("Discrimination", "fail", f"AUROC {auc:.3f}: barely better than chance.")
     elif auc < 0.65:
@@ -1221,10 +1339,14 @@ def decide(evaluation: dict, association: list, code_origin: str) -> dict:
         check("Fairness across groups", "pass", "No demographic group is more than 0.08 AUROC "
                                                 "below the overall result.")
 
-    leaks = [a["column"] for a in association if a.get("flag") == "very likely leakage"]
+    leaks = [a["column"] for a in association if a.get("flag") == "very likely leakage"
+             and (features is None or a["column"] in features)]
     if leaks:
         check("Leakage", "warn", "These columns predict the outcome almost perfectly on their own "
-                                 f"and were kept: {', '.join(leaks)}.")
+                                 f"and were kept: {', '.join(leaks)}. Check when each becomes "
+                                 "known: one recorded after the moment of prediction leaks the "
+                                 "answer; one known at that moment (this week's score, say) may "
+                                 "simply make the problem easy.")
 
     if code_origin == "standard":
         check("Pipeline", "info", "Trained with the Preventra standard pipeline, not "
@@ -1241,7 +1363,9 @@ def decide(evaluation: dict, association: list, code_origin: str) -> dict:
 
 def _recommend(job: dict) -> None:
     _step(job, "recommend", "running")
-    verdict = decide(job["evaluation"], job.get("association") or [], job["code_origin"])
+    verdict = decide(job["evaluation"], job.get("association") or [], job["code_origin"],
+                     features=job["config"]["feature_columns"],
+                     score_outcome=job["plan"].get("label_threshold") is not None)
     m = job["evaluation"]["metrics"]
     unit = ("patient-weeks (several rows per patient)" if job["target"] == "weekly"
             else "hospital stays")
@@ -1297,7 +1421,8 @@ def _base_context(model: dict) -> dict:
         spec = _mimic_spec()
         return {"name": model["name"], "algorithm": model["algorithm"],
                 "label_column": "readmit_30d", "id_column": "subject_id", "time_column": None,
-                "positive_value": None, "feature_columns": spec["features"],
+                "positive_value": None, "label_threshold": None,
+                "feature_columns": spec["features"],
                 "metrics": model.get("metrics")}
     cfg = model.get("config", {})
     return {"name": model["name"], "algorithm": model.get("algorithm"),
@@ -1305,6 +1430,8 @@ def _base_context(model: dict) -> dict:
             "id_column": model.get("data", {}).get("id_column"),
             "time_column": model.get("data", {}).get("time_column"),
             "positive_value": model.get("data", {}).get("positive_value"),
+            "label_threshold": model.get("data", {}).get("label_threshold"),
+            "history": model.get("data", {}).get("history", False),
             "feature_columns": cfg.get("feature_columns"),
             "metrics": model.get("metrics")}
 
@@ -1329,6 +1456,8 @@ def save_job_model(db, job_id: str, user: dict, name: Optional[str] = None) -> d
         "algorithm_preference": job["algorithm_preference"],
         "data": {"filename": job["filename"], "rows": job["profile"]["n_rows"],
                  "label_column": plan["label_column"], "positive_value": plan.get("positive_value"),
+                 "label_threshold": plan.get("label_threshold"),
+                 "history": job["config"].get("history", False),
                  "id_column": plan.get("id_column"), "time_column": plan.get("time_column"),
                  "split": ev["split"], "split_method": ev["split_method"]},
         "config": job["config"],
@@ -1486,10 +1615,12 @@ def score_file(db, user: dict, target: str, upload_path: str) -> dict:
     if not present:
         raise ValueError("None of the columns this model needs are in the file. It expects: "
                          + ", ".join(features[:15]) + ("…" if len(features) > 15 else ""))
+    history = bool((model.get("config") or {}).get("history"))
+    framed = with_context(model, df)  # raises if a history model's id/time columns are missing
     workdir = tempfile.mkdtemp(prefix="score_", dir=_ensure_root())
     try:
         inp = os.path.join(workdir, "input.csv")
-        df.to_csv(inp, index=False)
+        framed.to_csv(inp, index=False)
         logs = []
         result = _score_with(db, model, [{"name": "upload", "path": inp,
                                           "out": os.path.join(workdir, "pred.csv")}],
@@ -1503,13 +1634,33 @@ def score_file(db, user: dict, target: str, upload_path: str) -> dict:
     bands = model.get("bands") or _mimic_bands()
     band = np.where(scores >= bands["high_score_threshold"], "High",
                     np.where(scores >= bands["low_score_threshold"], "Medium", "Low"))
-    id_col = (model.get("data") or {}).get("id_column")
+    data = model.get("data") or {}
+    id_col = data.get("id_column")
     ids = df[id_col].astype(str).values if id_col and id_col in df.columns else None
-    rows = [{"row": i + 1, "id": None if ids is None else ids[i],
-             "score": round(float(scores[i]), 1), "band": str(band[i])} for i in range(len(df))]
+
+    if history:
+        # Every row was scored with the history before it; what a patient's
+        # risk is NOW is their latest row. Earlier rows only served as history.
+        order = framed[ORDER_FIELD].to_numpy()
+        frame = pd.DataFrame({"pos": np.arange(len(df)), "id": ids, "order": order})
+        latest = (frame.sort_values(["id", "order", "pos"], na_position="first")
+                  .groupby("id", sort=False).tail(1).sort_values("pos"))
+        counts = frame.groupby("id")["pos"].size()
+        time_col = data.get("time_column")
+        picked = latest["pos"].to_numpy()
+        rows = [{"row": int(i) + 1, "id": ids[i], "score": round(float(scores[i]), 1),
+                 "band": str(band[i]), "as_of": str(df[time_col].iloc[i]),
+                 "history_rows": int(counts[ids[i]]) - 1} for i in picked]
+        band = band[picked]
+    else:
+        rows = [{"row": i + 1, "id": None if ids is None else ids[i],
+                 "score": round(float(scores[i]), 1), "band": str(band[i])}
+                for i in range(len(df))]
     return {
         "model": {k: model.get(k) for k in ("model_id", "name", "target", "algorithm")},
         "bands": bands, "rows": rows, "id_column": id_col if ids is not None else None,
+        "history": history, "rows_in_file": int(len(df)),
+        "time_column": data.get("time_column") if history else None,
         "summary": {b: int((band == b).sum()) for b in ("High", "Medium", "Low")},
         "missing_columns": [c for c in features if c not in df.columns],
     }
@@ -1568,5 +1719,5 @@ def model_code(db, model_id: str, user: dict) -> str:
 
 
 __all__ = ["create_job", "confirm_job", "get_job", "public_job", "list_jobs", "discard_job",
-           "save_job_model", "list_models", "get_model", "deploy_model", "delete_model",
+           "save_job_model", "list_models", "get_model", "deploy_model", "delete_model", "scan_job",
            "overview", "score_file", "save_upload", "job_code", "model_code"]

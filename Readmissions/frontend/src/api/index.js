@@ -219,6 +219,7 @@ const RealAPI = {
   getStudioJob: (id) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}`),
   confirmStudioJob: (id, plan) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}/confirm`, json(plan)),
   saveStudioJob: (id, name) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}/save`, json({ name })),
+  scanStudioJob: (id, plan) => apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}/scan`, json(plan)),
   discardStudioJob: (id) =>
     apiFetch(`/api/studio/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   scoreStudioFile: ({ file, target }) => {
@@ -416,6 +417,7 @@ export const startStudioJob = realOnly(RealAPI.startStudioJob);
 export const getStudioJob = realOnly(RealAPI.getStudioJob);
 export const confirmStudioJob = realOnly(RealAPI.confirmStudioJob);
 export const saveStudioJob = realOnly(RealAPI.saveStudioJob);
+export const scanStudioJob = realOnly(RealAPI.scanStudioJob);
 export const discardStudioJob = realOnly(RealAPI.discardStudioJob);
 export const scoreStudioFile = realOnly(RealAPI.scoreStudioFile);
 export const getPipelineStatus = USE_MOCK

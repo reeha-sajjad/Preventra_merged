@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { Sparkles, AlertTriangle, ListChecks, Loader2, ArrowRight, Info } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Sparkles, AlertTriangle, ListChecks, Loader2, ArrowRight, Info, History } from 'lucide-react';
+import { scanStudioJob } from '../../api';
 import { Card } from './StudioParts';
 import { fmt } from './studioFormat';
 
@@ -18,8 +19,12 @@ function defaultRole(profileCol) {
  * applied until "Train with this plan".
  */
 export default function PlanReview({ job, onConfirm, busy, error }) {
-  const { profile, plan, association = [] } = job;
+  const { profile, plan } = job;
   const columns = Object.keys(profile?.columns || {});
+  // The leakage scan, re-run whenever the outcome changes so its flags always
+  // describe the outcome actually chosen (api/model_studio.scan_job).
+  const [association, setAssociation] = useState(job.association || []);
+  const [scanning, setScanning] = useState(false);
   const assoc = useMemo(() => Object.fromEntries(association.map((a) => [a.column, a])), [association]);
   const reasons = useMemo(() => {
     const out = {};
@@ -30,6 +35,9 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
 
   const [label, setLabel] = useState(plan.label_column || '');
   const [positive, setPositive] = useState(plan.positive_value ?? '');
+  // How the outcome becomes yes/no: a value that means yes, or "at or above a threshold".
+  const [rule, setRule] = useState(plan.label_threshold != null ? 'threshold' : 'value');
+  const [threshold, setThreshold] = useState(plan.label_threshold ?? '');
   const [idCol, setIdCol] = useState(plan.id_column || '');
   const [timeCol, setTimeCol] = useState(plan.time_column || '');
   const [roles, setRoles] = useState(() => {
@@ -45,7 +53,31 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
   const roleOf = (c) => roles[c] ?? defaultRole(profile.columns[c]);
   const features = columns.filter((c) => !reserved.has(c) && roleOf(c) !== 'drop');
   const labelValues = Object.keys(profile.columns[label]?.values || {});
+  const labelIsNumber = ['numeric', 'binary'].includes(profile.columns[label]?.kind);
   const weekly = job.target === 'weekly';
+  const history = Boolean(idCol && timeCol);
+  const outcomeRule = {
+    label_column: label || null,
+    positive_value: rule === 'value' && positive !== '' ? positive : null,
+    label_threshold: rule === 'threshold' && threshold !== '' ? Number(threshold) : null,
+    id_column: idCol || null, time_column: timeCol || null,
+  };
+  const ruleKey = JSON.stringify(outcomeRule);
+  const firstScan = useRef(ruleKey);
+
+  useEffect(() => {
+    if (ruleKey === firstScan.current || !label) return undefined;
+    if (rule === 'threshold' && threshold === '') return undefined;
+    let live = true;
+    const timer = setTimeout(() => {
+      setScanning(true);
+      scanStudioJob(job.job_id, JSON.parse(ruleKey))
+        .then((a) => { if (live) setAssociation(a); })
+        .catch(() => { /* the scan is advisory; confirming re-runs it */ })
+        .finally(() => { if (live) setScanning(false); });
+    }, 500);
+    return () => { live = false; clearTimeout(timer); };
+  }, [ruleKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = () => {
     const numeric = features.filter((c) => roleOf(c) === 'numeric');
@@ -53,8 +85,7 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
     const dropped = columns.filter((c) => !reserved.has(c) && roleOf(c) === 'drop')
       .map((c) => ({ column: c, reason: reasons[c]?.text || 'left out by reviewer' }));
     onConfirm({
-      label_column: label, positive_value: positive === '' ? null : positive,
-      id_column: idCol || null, time_column: timeCol || null,
+      ...outcomeRule,
       numeric_columns: numeric, categorical_columns: categorical, drop_columns: dropped,
       sensitive_columns: [...fair].filter((c) => features.includes(c)),
     });
@@ -83,9 +114,23 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
             <span className="mb-1 block font-medium text-gray-700">Outcome (readmitted?)</span>
             {select(label, setLabel, false)}
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Value meaning "readmitted"</span>
-            {labelValues.length ? (
+          <div className="text-sm">
+            <span className="mb-1 block font-medium text-gray-700">Counts as "yes" when</span>
+            {labelIsNumber && (
+              <select value={rule} onChange={(e) => setRule(e.target.value)} aria-label="How the outcome becomes yes or no"
+                className="mb-1.5 w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm">
+                <option value="value">it has a particular value</option>
+                <option value="threshold">it is at or above a threshold</option>
+              </select>
+            )}
+            {labelIsNumber && rule === 'threshold' ? (
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500">≥</span>
+                <input type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)}
+                  placeholder="e.g. 40" aria-label="Threshold"
+                  className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm" />
+              </div>
+            ) : labelValues.length ? (
               <select value={positive} onChange={(e) => setPositive(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm">
                 <option value="">1 / yes / true</option>
@@ -95,7 +140,7 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
               <input value={positive} onChange={(e) => setPositive(e.target.value)} placeholder="1 / yes / true"
                 className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm" />
             )}
-          </label>
+          </div>
           <label className="text-sm">
             <span className="mb-1 block font-medium text-gray-700">
               Patient identifier{weekly && <span className="text-red-600"> *</span>}
@@ -104,10 +149,22 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
             <span className="mt-1 block text-xs text-gray-500">Keeps each patient on one side of the split.</span>
           </label>
           <label className="text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Date for time-ordered testing</span>
+            <span className="mb-1 block font-medium text-gray-700">Date or week order</span>
             {select(timeCol, setTimeCol, true, 'None (random split)')}
             <span className="mt-1 block text-xs text-gray-500">The newest patients become the test set.</span>
           </label>
+        </div>
+        <div className={`mt-4 flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${history
+          ? 'bg-indigo-50 text-indigo-800' : 'bg-gray-50 text-gray-500'}`}>
+          <History size={14} className="mt-0.5 shrink-0" />
+          {history ? (
+            <span><b>Patient history on.</b> The pipeline may build features from each patient's
+              earlier rows of {timeCol} (change since last time, trends), never later ones. A look-ahead
+              check enforces this before training. Files scored later must include each patient's
+              earlier rows.</span>
+          ) : (
+            <span>Patient history off: it needs both a patient identifier and a date or week column.</span>
+          )}
         </div>
       </Card>
 
@@ -117,8 +174,8 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
           <ul className="space-y-1">
             {leaky.map((a) => (
               <li key={a.column}>• <b>{a.column}</b> predicts the outcome {a.flag === 'very likely leakage'
-                ? 'almost perfectly' : 'very strongly'} on its own (AUROC {fmt(a.auroc)}). If it is only
-                known after discharge or because of the readmission, leave it out.</li>
+                ? 'almost perfectly' : 'very strongly'} on its own (AUROC {fmt(a.auroc)}). If it only
+                becomes known after the moment of prediction, leave it out.</li>
             ))}
             {(plan.data_issues || []).map((d, i) => <li key={i}>• {d}</li>)}
           </ul>
@@ -133,7 +190,9 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
                 <th className="pb-2 pr-3">Column</th><th className="pb-2 pr-3">Use as</th>
                 <th className="pb-2 pr-3">Type seen</th><th className="pb-2 pr-3">Missing</th>
                 <th className="pb-2 pr-3">Distinct</th>
-                <th className="pb-2 pr-3" title="AUROC of this column alone. Near 1.0 usually means leakage.">Alone predicts</th>
+                <th className="pb-2 pr-3" title="AUROC of this column alone. Near 1.0 usually means leakage.">
+                  Alone predicts {scanning && <Loader2 size={12} className="inline animate-spin text-gray-400" />}
+                </th>
                 <th className="pb-2 pr-3" title="Report performance separately for each value of this column">Fairness</th>
                 <th className="pb-2">Note</th>
               </tr>
@@ -196,7 +255,9 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
           <Info size={14} /> Gemini writes the pipeline next. It sees the column statistics above, never patient rows.
         </p>
-        <button type="button" onClick={submit} disabled={busy || !label || (weekly && !idCol) || !features.length}
+        <button type="button" onClick={submit}
+          disabled={busy || !label || (weekly && !idCol) || !features.length
+            || (rule === 'threshold' && labelIsNumber && threshold === '')}
           className="inline-flex items-center gap-2 rounded-lg bg-ns-navy px-4 py-2 text-sm font-semibold text-white hover:bg-ns-navy/90 disabled:opacity-50">
           {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
           Train with this plan

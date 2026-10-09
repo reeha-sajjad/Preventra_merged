@@ -109,9 +109,17 @@ export function CodeViewer({ code, sections, origin, attempts, filename = 'pipel
           </summary>
           <div className="mt-2 space-y-2">
             {failed.map((a) => (
-              <pre key={a.attempt} className="overflow-auto whitespace-pre-wrap rounded bg-amber-50 p-2 text-amber-900">
-                Attempt {a.attempt} ({a.stage}): {a.error}
-              </pre>
+              <div key={a.attempt}>
+                <pre className="overflow-auto whitespace-pre-wrap rounded bg-amber-50 p-2 text-amber-900">
+                  Attempt {a.attempt} ({a.stage}): {a.error}
+                </pre>
+                {a.code && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-amber-700">Show the code that failed</summary>
+                    <pre className="mt-1 max-h-64 overflow-auto rounded bg-slate-900 p-3 text-slate-100"><code>{a.code}</code></pre>
+                  </details>
+                )}
+              </div>
             ))}
           </div>
         </details>

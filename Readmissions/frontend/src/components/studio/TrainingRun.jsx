@@ -222,6 +222,8 @@ export default function TrainingRun({ jobId, onClose, onModelsChanged }) {
             <div className="px-5 pb-4 text-sm text-gray-700">
               {job.plan.summary && <p className="mb-2">{job.plan.summary}</p>}
               <p>Outcome <b>{job.plan.label_column}</b>
+                {job.plan.label_threshold != null && <> ≥ {job.plan.label_threshold}</>}
+                {job.config?.history && <> · patient history on</>}
                 {job.plan.id_column && <> · patient id <b>{job.plan.id_column}</b></>}
                 {job.plan.time_column && <> · time <b>{job.plan.time_column}</b></>} ·{' '}
                 {(job.plan.numeric_columns?.length || 0) + (job.plan.categorical_columns?.length || 0)} features ·{' '}

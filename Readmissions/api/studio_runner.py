@@ -24,6 +24,17 @@ must define:
 
 The same preprocess and transform run again at prediction time, so the saved
 estimator only ever sees features built exactly as they were in training.
+
+PATIENT HISTORY
+---------------
+When the plan has a patient id and a date/week column (config["history"]), the
+frame passed to preprocess/transform also carries those two as
+config["history_group_column"] and config["history_order_column"], and its rows
+arrive sorted by patient, then time. transform may then use a patient's EARLIER
+rows (lags, changes, running counts, carrying a value forward) - never a later
+row and never another patient's. check_no_lookahead() enforces that before any
+model is trained: it removes later rows and confirms no earlier row's features
+move. Predictions are written back in the file's original row order.
 """
 
 from __future__ import annotations
@@ -50,6 +61,40 @@ def _load_module(workdir: str):
     return pipeline_code
 
 
+def _context(config) -> list:
+    """The patient and time-order columns, when history is enabled."""
+    if not config.get("history"):
+        return []
+    return [config["history_group_column"], config["history_order_column"]]
+
+
+def _in_history_order(df, config):
+    """Rows sorted by patient then time (stable), plus the permutation that
+    puts results back in the file's own order; (df, None) without history."""
+    import numpy as np
+
+    if not config.get("history"):
+        return df.reset_index(drop=True), None
+    group, order = _context(config)
+    missing = [c for c in (group, order) if c not in df.columns]
+    if missing:
+        raise RuntimeError("This model uses patient history, but the data has no "
+                           f"{' or '.join(missing)} column")
+    ranked = df.assign(__pos__=np.arange(len(df))).sort_values(
+        [group, order, "__pos__"], kind="mergesort", na_position="last")
+    return ranked.drop(columns="__pos__").reset_index(drop=True), ranked["__pos__"].values
+
+
+def _restore(values, positions):
+    import numpy as np
+
+    if positions is None:
+        return values
+    out = np.empty_like(values)
+    out[positions] = values
+    return out
+
+
 def _features(module, raw, config):
     """Raw input columns -> model features, with the contract checks the model
     cannot be trusted to keep on its own."""
@@ -70,8 +115,75 @@ def _features(module, raw, config):
     label = config.get("label_column")
     if label and label in X.columns:
         raise RuntimeError(f"transform() output contains the label column '{label}'")
+    # The patient and time columns give the code something to group and order
+    # by; they are not features (an id would let a model memorise patients).
+    X = X.drop(columns=[c for c in _context(config) if c in X.columns])
     X.columns = [str(c) for c in X.columns]
     return X.reset_index(drop=True)
+
+
+def _same(a, b) -> bool:
+    import numpy as np
+    import pandas as pd
+
+    if pd.api.types.is_numeric_dtype(a) and pd.api.types.is_numeric_dtype(b):
+        x, y = a.to_numpy(dtype=float), b.to_numpy(dtype=float)
+        return bool(np.all(np.isclose(x, y, rtol=1e-6, atol=1e-9, equal_nan=True)))
+    x, y = a.astype("object"), b.astype("object")
+    both_missing = x.isna().to_numpy() & y.isna().to_numpy()
+    equal = (x.astype(str).to_numpy() == y.astype(str).to_numpy())
+    return bool(np.all(both_missing | equal))
+
+
+def check_no_lookahead(module, raw, config, max_groups: int = 300) -> None:
+    """
+    A row's features may depend only on that row and - with history - the same
+    patient's EARLIER rows. Tested, not trusted: features are built twice, once
+    on the full rows and once after removing data a row must not depend on
+    (each sampled patient's later rows; without history, half the other rows),
+    and every column of the rows present both times must come out identical.
+    A column that moves used the future, another patient, or a statistic of the
+    whole dataset.
+    """
+    import numpy as np
+
+    rng = np.random.RandomState(0)
+    if config.get("history"):
+        group = _context(config)[0]
+        sizes = raw.groupby(group, sort=False).size()
+        multi = sizes[sizes >= 2].index.to_numpy()
+        if not len(multi):
+            return
+        pick = set(rng.choice(multi, min(len(multi), max_groups), replace=False))
+        full = raw[raw[group].isin(pick)].reset_index(drop=True)
+        position = full.groupby(group, sort=False).cumcount().to_numpy()
+        cut = full[group].map({g: rng.randint(1, sizes[g]) for g in pick}).to_numpy()
+        keep = position < cut                    # each patient loses its later rows
+        what = "a later row of the same patient"
+    else:
+        full = raw.sample(min(len(raw), 2000), random_state=0).reset_index(drop=True)
+        keep = rng.rand(len(full)) < 0.5         # half of the other rows vanish
+        what = "other rows"
+    if keep.all() or not keep.any():
+        return
+    before = _features(module, full, config)
+    after = _features(module, full[keep].reset_index(drop=True), config)
+    if list(before.columns) != list(after.columns):
+        raise RuntimeError("transform() returned different columns for different inputs; "
+                           "its output columns must not depend on the data")
+    moved = [c for c in before.columns
+             if not _same(before.loc[keep].reset_index(drop=True)[c], after[c])]
+    if moved:
+        raise RuntimeError(
+            f"Look-ahead check failed: {', '.join(moved[:10])} changed when {what} was removed, "
+            "so these features use information a prediction must not see (a later week, "
+            "another patient, or a statistic of the whole dataset). Use only the row itself"
+            + (" and the same patient's EARLIER rows: groupby(patient).shift(k) with k >= 1, "
+               "cumulative or expanding windows, ffill" if config.get("history") else "")
+            + ". The same failure appears when per-patient values are put on the wrong rows: "
+            "results of groupby(...).expanding() / rolling() / apply() come back in a different "
+            "order, so assign them by index (groupby(...)[col].transform(...), or "
+            "reset_index(level=0, drop=True)), never with .values or .to_numpy().")
 
 
 def _read(path, dtypes=None):
@@ -86,12 +198,16 @@ def run_train(workdir: str, job: dict) -> None:
 
     config = job["config"]
     module = _load_module(workdir)
-    df = _read(f"{workdir}/{job['train_file']}", job.get("dtypes"))
-    feature_cols = config["feature_columns"]
+    df, _ = _in_history_order(_read(f"{workdir}/{job['train_file']}", job.get("dtypes")), config)
+    feature_cols = config["feature_columns"] + _context(config)
     y = pd.Series(df[job["target_field"]].astype(int).values, name="label")
     groups = (pd.Series(df[job["group_field"]].astype(str).values, name="group")
               if job.get("group_field") else None)
     _emit("log", message=f"Training rows: {len(df):,}, positives: {int(y.sum()):,}")
+
+    check_no_lookahead(module, df[feature_cols], config)
+    _emit("log", message="Look-ahead check passed: every feature uses only the row itself"
+                          + (" and the same patient's earlier rows" if config.get("history") else ""))
 
     started = time.time()
     X = _features(module, df[feature_cols], config)
@@ -151,12 +267,12 @@ def run_predict(workdir: str, job: dict) -> None:
     config = job["config"]
 
     for item in job["inputs"]:
-        df = _read(item["path"], job.get("dtypes"))
-        raw = df.reindex(columns=config["feature_columns"])
+        df, positions = _in_history_order(_read(item["path"], job.get("dtypes")), config)
+        raw = df.reindex(columns=config["feature_columns"] + _context(config))
         missing = [c for c in config["feature_columns"] if c not in df.columns]
         X = _features(module, raw, config).reindex(columns=columns)
         proba = np.asarray(estimator.predict_proba(X))[:, 1]
-        pd.DataFrame({"score": proba}).to_csv(item["out"], index=False)
+        pd.DataFrame({"score": _restore(proba, positions)}).to_csv(item["out"], index=False)
         _emit("log", message=f"Scored {len(df):,} rows from {item['name']}",
               missing_inputs=missing)
 

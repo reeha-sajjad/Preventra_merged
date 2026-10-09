@@ -41,7 +41,9 @@ TARGETS = {
         "follow-up attendance, vital signs). The outcome is readmission within the "
         "monitoring window. Rows of the same patient are not independent, so a patient "
         "identifier is required and splits must keep each patient's weeks together. "
-        "Signals from weeks after the row's own week are leakage."),
+        "Signals from weeks after the row's own week are leakage: columns describing a LATER "
+        "week (names like next_week_*) leak the answer unless one of them is the outcome itself. "
+        "The outcome may be a numeric score with a threshold (e.g. next week's risk score >= 40)."),
 }
 
 
@@ -101,8 +103,9 @@ _ANALYSIS_SHAPE = """{
   "summary": "2-3 sentences: what this dataset appears to be and how usable it is",
   "label_column": "the outcome column (readmitted or not)",
   "positive_value": "the label value that means readmitted, as text, or null if 1/true",
+  "label_threshold": "if the outcome column is a numeric score rather than yes/no, the value at or above which it counts as yes (a number); otherwise null",
   "id_column": "patient identifier column, or null",
-  "time_column": "date/time column usable to split oldest-to-newest, or null",
+  "time_column": "date/time (or week) column that orders rows in time, used to split oldest-to-newest and to order each patient's rows, or null",
   "numeric_columns": ["feature columns to treat as numbers"],
   "categorical_columns": ["feature columns to treat as categories"],
   "drop_columns": [{"column": "...", "reason": "identifier / free text / leakage / constant / ..."}],
@@ -144,7 +147,8 @@ def transform(df: pd.DataFrame, config: dict) -> pd.DataFrame
     Feature engineering from the cleaned columns: ratios, flags, buckets, date parts,
     clinically meaningful combinations. Same rules: same rows, same order, stateless,
     and the label column must never appear in the output. Numeric features must be
-    numeric dtype; categorical features object dtype.
+    numeric dtype; categorical features object dtype. (When PATIENT HISTORY below
+    applies, transform may also use the same patient's earlier rows.)
 
 def train(X: pd.DataFrame, y: pd.Series, groups, config: dict) -> tuple
     Model selection and fitting on the transformed features. y is 0/1 (1 = readmitted).
@@ -175,7 +179,32 @@ RULES
 - Write clear docstrings: a reviewer reads this code before it is deployed.
 
 config contains: label_column, feature_columns (the raw input columns you receive),
-numeric_columns, categorical_columns, algorithm_preference, target, n_rows, n_positive.
+numeric_columns, categorical_columns, algorithm_preference, target, n_rows, n_positive,
+history (true/false), history_group_column, history_order_column.
+
+The runner VERIFIES statelessness before training: it rebuilds the features after removing
+rows and fails the run if any remaining row's features change.
+"""
+
+_HISTORY = """PATIENT HISTORY (config["history"] is true for this dataset)
+df also has config["history_group_column"] (the patient, from the column '{id_name}') and
+config["history_order_column"] (a number ordering that patient's rows in time, from
+'{time_name}'). Rows arrive SORTED by patient, then time. In transform you MAY add
+features built from the same patient's EARLIER rows - this is usually where most of the
+signal in repeated measurements is (change since last time, trend, carried-forward baseline):
+
+    g = df.groupby(config["history_group_column"], sort=False)
+    out["x_change"] = df["x"] - g["x"].shift(1)        # change since the previous row
+    out["x_prev"] = g["x"].shift(1)                    # last row's value
+    out["rows_before"] = g.cumcount()                  # how much history exists
+    out["baseline_x"] = g["baseline_x"].ffill()        # carry an earlier value forward
+    out["x_running_max"] = g["x"].cummax()             # running summaries over earlier rows
+
+You MUST NOT use a later row of the patient (no shift with a negative period, no bfill or
+backfill, no centred/forward windows, no per-patient statistic over ALL of the patient's
+rows such as groupby(...).transform("mean") or max()), and MUST NOT mix patients. The
+runner removes each patient's later rows and re-checks that no earlier row's features
+change; any look-ahead fails the run. Do not output the two history columns as features.
 """
 
 
@@ -193,7 +222,10 @@ def generate_pipeline(profile: dict, config: dict, target: str, *,
         + ("Compare at least two suitable candidates and keep the best."
            if preference == "auto" else "Use this algorithm family only; tune it sensibly.")
         + f"\n\n{_CONTRACT}\n"
-        f"REFERENCE IMPLEMENTATION (follows the contract; improve on it for THIS data - "
+        + (_HISTORY.format(id_name=config.get("history_id_name"),
+                           time_name=config.get("history_time_name")) + "\n"
+           if config.get("history") else "")
+        + f"REFERENCE IMPLEMENTATION (follows the contract; improve on it for THIS data - "
         f"engineer features the profile suggests, choose encodings per column):\n"
         f"```python\n{STANDARD_PIPELINE}\n```\n")
     if base_code:
