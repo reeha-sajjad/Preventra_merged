@@ -165,6 +165,33 @@
     footer a { color: var(--muted); text-decoration: none; }
     footer nav a:hover { color: var(--navy); }
 
+    /* Wide screens: the statement on the left, the arc panel on the right, so
+       the first screen uses its width instead of one tall column. The steps
+       list down the panel beside the arc. */
+    @media (min-width: 980px) {
+      .hero { text-align: left; }
+      .hero .wrap {
+        display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr);
+        gap: clamp(40px, 5vw, 80px); align-items: center;
+      }
+      .hero h1 { margin-left: 0; margin-right: 0; max-width: 14ch; }
+      .hero .lede { margin-left: 0; margin-right: 0; max-width: 46ch; }
+      .panel { margin: 0; max-width: none; padding: clamp(26px, 4vh, 40px) clamp(26px, 2.6vw, 40px); }
+      .panel svg { max-height: none; }
+      .steps { grid-template-columns: 1fr; gap: 0; margin-top: clamp(18px, 3vh, 28px); }
+      .steps li, .steps li:first-child, .steps li:last-child {
+        text-align: left; display: grid; grid-template-columns: 34px 1fr; column-gap: 12px;
+        padding: clamp(10px, 1.8vh, 16px) 0; border-top: 1px solid var(--line);
+      }
+      .steps li::before {
+        content: counter(step); counter-increment: step; grid-row: span 2;
+        width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+        background: var(--teal-wash); color: var(--teal-deep); font: 600 15px var(--display);
+      }
+      .steps { counter-reset: step; }
+      .steps span { display: block; }
+    }
+
     /* Short laptop screens: a tighter top bar and no label above the headline,
        so the first screen still shows the whole panel. */
     @media (max-height: 680px) and (min-width: 761px) {
@@ -201,6 +228,7 @@
 
     <div class="hero">
       <div class="wrap">
+        <div class="intro">
         <span class="pill"><i></i>Patient risk analytics for care teams</span>
         <h1>Know which patients need attention next</h1>
         <p class="lede">
@@ -208,6 +236,7 @@
           after discharge, and shows the factors behind each prediction.
         </p>
         <a class="btn btn-big" href="signin.html">Sign in</a>
+        </div>
 
         <div class="panel" aria-label="How it works">
           <svg viewBox="0 0 760 90" aria-hidden="true">
