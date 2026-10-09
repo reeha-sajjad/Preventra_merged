@@ -183,6 +183,21 @@ def test_implausible_auroc_is_treated_as_leakage():
     assert any("leaked" in c["detail"] for c in verdict["checks"])
 
 
+def test_very_high_auroc_on_a_score_outcome_is_a_warning_not_a_leak():
+    easy = ms.decide(_evaluation(auroc=0.989, ci=(0.986, 0.992)), [], "gemini", score_outcome=True)
+    perfect = ms.decide(_evaluation(auroc=1.0, ci=(1.0, 1.0)), [], "gemini", score_outcome=True)
+    assert easy["decision"] == "caution"
+    assert perfect["decision"] == "do_not_deploy"
+
+
+def test_leakage_warning_only_names_columns_that_were_kept():
+    scan = [{"column": "dropped_leak", "auroc": 1.0, "flag": "very likely leakage"},
+            {"column": "kept_leak", "auroc": 0.99, "flag": "very likely leakage"}]
+    verdict = ms.decide(_evaluation(), scan, "gemini", features=["kept_leak", "age"])
+    detail = next(c for c in verdict["checks"] if c["name"] == "Leakage")["detail"]
+    assert "kept_leak" in detail and "dropped_leak" not in detail
+
+
 def test_worse_than_the_active_model_is_not_deployed():
     worse = {"kind": "active", "name": "Current", "delta_auroc":
              {"estimate": -0.04, "ci_low": -0.06, "ci_high": -0.02}}
@@ -398,3 +413,139 @@ def test_sandbox_does_not_see_the_api_environment(db, tmp_path, monkeypatch):
                                                "target_field": "__label__",
                                                "group_field": None}, 120, lambda m: None)
     assert result["ok"], result["error"]
+
+
+# ------------------------------------------------------------------ patient history
+def _weekly_scored(n_patients: int, seed: int) -> pd.DataFrame:
+    """Weekly rows with a rules-like score and NEXT week's score, as the weekly
+    export produces: the outcome is 'next week's score >= 40'."""
+    frame = demo.weekly(n_patients, np.random.default_rng(seed))
+    logit = (0.6 * frame["weight_change_kg"].clip(lower=0) - 0.05 * (frame["adherence_pct"] - 85)
+             + 0.8 * (frame["followup_status"] == "missed") - 1.3)
+    frame["risk_score"] = (100 / (1 + np.exp(-logit))).round(1)
+    frame["next_week_risk_score"] = frame.groupby("patient_id")["risk_score"].shift(-1)
+    return frame
+
+
+def _history_run_dir(tmp_path, code: str, frame: pd.DataFrame, history: bool):
+    wd = tmp_path / "hist"
+    wd.mkdir()
+    data = frame.copy()
+    data["__label__"] = (data["risk_score"] >= 40).astype(int)
+    data["__group__"] = data["patient_id"]
+    data["__order__"] = data["week_number"].astype(float)
+    data.to_csv(wd / "train.csv", index=False)
+    (wd / "pipeline_code.py").write_text(code)
+    cfg = {"label_column": "risk_score", "feature_columns": ["weight_change_kg", "adherence_pct"],
+           "numeric_columns": ["weight_change_kg", "adherence_pct"], "categorical_columns": [],
+           "algorithm_preference": "logistic_regression", "history": history,
+           "history_group_column": "__group__", "history_order_column": "__order__"}
+    return str(wd), {"config": cfg, "train_file": "train.csv", "target_field": "__label__",
+                     "group_field": "__group__"}
+
+
+@pytest.mark.parametrize("cheat,history", [
+    # uses every week of the patient, including later ones (invisible to the static check)
+    ('out["w_mean"] = df.groupby(config["history_group_column"])["weight_change_kg"]'
+     '.transform("mean")', True),
+    # a statistic of the whole dataset
+    ('out["w_centred"] = df["weight_change_kg"] - df["weight_change_kg"].mean()', False),
+])
+def test_lookahead_check_fails_features_that_peek(tmp_path, cheat, history):
+    code = STANDARD_PIPELINE.replace("    return out\n\n\ndef _columns",
+                                     f"    {cheat}\n    return out\n\n\ndef _columns", 1)
+    assert studio_guard.check_code(code) == []  # passes the static check...
+    wd, spec = _history_run_dir(tmp_path, code, _weekly_scored(200, 1), history)
+    result = ms.run_sandbox("train", wd, spec, 120, lambda m: None)
+    assert not result["ok"]                      # ...but not the runtime one
+    assert "Look-ahead check failed" in result["error"]
+    assert ("w_mean" if history else "w_centred") in result["error"]
+
+
+def test_earlier_row_features_pass_the_lookahead_check(tmp_path):
+    logs = []
+    wd, spec = _history_run_dir(tmp_path, STANDARD_PIPELINE, _weekly_scored(200, 2), True)
+    result = ms.run_sandbox("train", wd, spec, 120, logs.append)
+    assert result["ok"], result["error"]
+    assert any("Look-ahead check passed" in m for m in logs)
+    import json
+    names = json.loads((tmp_path / "hist" / "train_result.json").read_text())["feature_names"]
+    assert "weight_change_kg_change" in names and "rows_before" in names
+    assert "__group__" not in names and "__order__" not in names
+
+
+def test_boolean_numeric_columns_become_floats_with_history(tmp_path):
+    """True/False in a numeric column used to stay boolean, and 'change since
+    last week' then mixed booleans with numbers and broke the encoders."""
+    frame = _weekly_scored(200, 5)
+    frame["observed"] = np.random.default_rng(5).random(len(frame)) < 0.8   # booleans
+    wd, spec = _history_run_dir(tmp_path, STANDARD_PIPELINE, frame, True)
+    spec["config"]["numeric_columns"] = spec["config"]["feature_columns"] = [
+        "weight_change_kg", "adherence_pct", "observed"]
+    result = ms.run_sandbox("train", wd, spec, 120, lambda m: None)
+    assert result["ok"], result["error"]
+
+
+def test_threshold_outcome():
+    out = ms.label_series(pd.Series([12.0, 40.0, 63.5, None, "n/a"], name="s"), None, 40)
+    assert [None if pd.isna(v) else int(v) for v in out] == [0, 1, 1, None, None]
+    with pytest.raises(ValueError, match="no numeric values"):
+        ms.label_series(pd.Series(["a", "b"], name="s"), None, 40)
+
+
+def test_order_values_sorts_dates_and_keeps_numbers():
+    dates = ms.order_values(pd.Series(["2025-01-08", "2025-01-01", "bad"]))
+    assert dates[1] < dates[0] and np.isnan(dates[2])
+    assert list(ms.order_values(pd.Series([3, 1, 2]))) == [3.0, 1.0, 2.0]
+
+
+def test_weekly_history_model_scores_each_patients_latest_week(db, tmp_path):
+    frame = _weekly_scored(900, 3)
+    job = ms.create_job(db, ADMIN, _csv(tmp_path, frame, "weekly.csv"), "weekly.csv",
+                        target="weekly", mode="new", base_model_id=None,
+                        algorithm="logistic_regression", name="Next-week High")
+    job = _wait(job["job_id"], ADMIN, {"awaiting_confirmation", "failed"})
+    plan = job["plan"]
+    assert plan["id_column"] == "patient_id" and plan["time_column"] == "week_date"
+    leaks = {"readmitted_30d", "readmit_visit_flag", "next_week_risk_score"}
+    edits = {"label_column": "next_week_risk_score", "label_threshold": 40,
+             "numeric_columns": [c for c in plan["numeric_columns"] if c not in leaks],
+             "categorical_columns": [c for c in plan["categorical_columns"] if c not in leaks],
+             "drop_columns": [{"column": c, "reason": "leakage"}
+                              for c in ("readmitted_30d", "readmit_visit_flag")]}
+    ms.confirm_job(db, job["job_id"], ADMIN, edits)
+    job = _wait(job["job_id"], ADMIN, {"completed", "failed"})
+    assert job["status"] == "completed", job["error"]
+    assert job["config"]["history"] is True
+    assert any(m["message"].startswith("Look-ahead check passed") for m in job["logs"])
+    assert "risk_score_change" in job["train_report"]["feature_names"]
+
+    saved = ms.save_job_model(db, job["job_id"], ADMIN)
+    assert saved["data"]["label_threshold"] == 40 and saved["data"]["history"] is True
+    ms.deploy_model(db, saved["model_id"], ADMIN)
+
+    new = _weekly_scored(50, 4).drop(columns=["next_week_risk_score"])
+    scored = ms.score_file(db, ADMIN, "weekly", _csv(tmp_path, new, "new.csv"))
+    assert scored["history"] is True and scored["rows_in_file"] == len(new)
+    assert len(scored["rows"]) == new["patient_id"].nunique()      # one row per patient
+    latest = new.sort_values("week_number").groupby("patient_id").tail(1)
+    by_id = {r["id"]: r for r in scored["rows"]}
+    sample = latest.iloc[0]
+    assert by_id[sample["patient_id"]]["as_of"] == str(sample["week_date"])
+    assert by_id[sample["patient_id"]]["history_rows"] == 3          # weeks 1-3 before week 4
+
+    with pytest.raises(ValueError, match="patient id column"):
+        ms.score_file(db, ADMIN, "weekly",
+                      _csv(tmp_path, new.drop(columns=["patient_id"]), "noid.csv"))
+
+
+def test_week_numbers_order_rows_but_do_not_pick_the_test_patients():
+    """Every patient starts at week 0, so a week number cannot say who is newest;
+    the split must fall back to random patients rather than id order."""
+    frame = demo.weekly(500, np.random.default_rng(11))
+    split = ms.make_split(frame, "patient_id", "week_number")
+    test_ids = sorted(frame.loc[split == "test", "patient_id"].unique())
+    all_ids = sorted(frame["patient_id"].unique())
+    assert test_ids != all_ids[-len(test_ids):]          # not simply the last ids
+    sides = pd.DataFrame({"pid": frame.patient_id, "side": split}).groupby("pid").side.nunique()
+    assert sides.max() == 1

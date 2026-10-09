@@ -40,6 +40,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 MISSING_TOKENS = {"", "nan", "none", "null", "na", "n/a", "?", "unknown"}
+# Yes/no written as words or booleans become 1/0, so a numeric column is always
+# a float column - True minus False is not a number a model can use.
+BOOLEAN_WORDS = {"true": 1.0, "false": 0.0, "yes": 1.0, "no": 0.0, "y": 1.0, "n": 0.0}
+
+
+def _as_number(value):
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        return BOOLEAN_WORDS.get(value.strip().lower(), value)
+    return value
 
 
 def preprocess(df, config):
@@ -48,7 +59,8 @@ def preprocess(df, config):
     numeric = set(config.get("numeric_columns", []))
     for col in df.columns:
         if col in numeric:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            values = df[col].astype("object").map(_as_number)
+            df[col] = pd.to_numeric(values, errors="coerce").astype(float)
         else:
             text = df[col].astype("object")
             text = text.where(text.isna(), text.astype(str).str.strip())
@@ -59,12 +71,21 @@ def preprocess(df, config):
 def transform(df, config):
     """Model input features. Numeric columns as numbers, the rest as text
     categories; encoding happens inside the model so it is learned on training
-    rows only."""
+    rows only.
+
+    With patient history (rows sorted by patient, then time), each numeric
+    column also gets its change since the patient's previous row, plus a count
+    of how many rows came before - earlier rows only, never later ones."""
     numeric = [c for c in config.get("numeric_columns", []) if c in df.columns]
-    categorical = [c for c in df.columns if c not in numeric]
+    categorical = [c for c in config.get("categorical_columns", []) if c in df.columns]
     out = df[numeric + categorical].copy()
     for col in categorical:
         out[col] = out[col].astype("object")
+    if config.get("history"):
+        earlier = df.groupby(config["history_group_column"], sort=False)
+        for col in numeric:
+            out[col + "_change"] = df[col] - earlier[col].shift(1)
+        out["rows_before"] = earlier.cumcount()
     return out
 
 

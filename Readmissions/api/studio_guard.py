@@ -36,6 +36,10 @@ BLOCKED_ATTRIBUTE_PREFIXES = ("read_", "to_csv", "to_pickle", "to_parquet", "to_
                               "fetch_", "load", "save", "fromfile", "tofile", "genfromtxt")
 ALLOWED_DUNDERS = {"__init__", "__name__"}
 REQUIRED_FUNCTIONS = ("preprocess", "transform", "train")
+# Reading a later row of the same patient. The runner's look-ahead check is the
+# real guarantee; these catch the obvious forms early, with a clear message.
+LOOKAHEAD_METHODS = {"bfill", "backfill"}
+PERIOD_METHODS = {"shift", "diff", "pct_change"}
 
 
 def check_code(code: str) -> list:
@@ -71,11 +75,36 @@ def check_code(code: str) -> list:
                 refuse(node, f"'.{attr}' reads or writes files, which the pipeline must not do "
                              "(the runner handles all input and output)")
 
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            method = node.func.attr
+            if method in LOOKAHEAD_METHODS:
+                refuse(node, f"'.{method}()' fills from LATER rows (look-ahead); use ffill")
+            if method in PERIOD_METHODS:
+                periods = node.args[0] if node.args else next(
+                    (k.value for k in node.keywords if k.arg == "periods"), None)
+                if _is_negative(periods):
+                    refuse(node, f"'.{method}()' with a negative period reads a LATER row "
+                                 "(look-ahead); use a positive period")
+            for k in node.keywords:
+                if k.arg == "method" and isinstance(k.value, ast.Constant) and \
+                        k.value.value in ("bfill", "backfill"):
+                    refuse(node, "filling with method='bfill' uses LATER rows (look-ahead)")
+                if k.arg == "center" and isinstance(k.value, ast.Constant) and k.value.value:
+                    refuse(node, "a centred window includes LATER rows (look-ahead)")
+
     defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
     for name in REQUIRED_FUNCTIONS:
         if name not in defined:
             problems.append(f"The module must define a top-level function {name}(...)")
     return problems
+
+
+def _is_negative(node) -> bool:
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return isinstance(node.operand, ast.Constant) and isinstance(node.operand.value,
+                                                                     (int, float))
+    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+        and node.value < 0
 
 
 def _check_module(node, name: str, refuse) -> None:

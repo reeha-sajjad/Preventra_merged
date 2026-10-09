@@ -61,6 +61,12 @@ export default function ScorePanel({ overview }) {
           </label>
           <div className="text-sm md:col-span-2">
             <span className="mb-1.5 block font-medium text-gray-700">Patient file (.csv, same columns as training)</span>
+            {active?.data?.history && (
+              <span className="mb-1.5 block text-xs text-indigo-700">
+                This model uses patient history: include {active.data.id_column} and{' '}
+                {active.data.time_column}, and each patient's earlier rows.
+              </span>
+            )}
             <button type="button" onClick={() => input.current?.click()}
               className="flex w-full items-center gap-3 rounded-lg border border-dashed border-gray-300 px-3 py-2.5 text-left hover:border-ns-navy/50">
               <input ref={input} type="file" accept=".csv,text/csv" className="hidden"
@@ -80,7 +86,9 @@ export default function ScorePanel({ overview }) {
       </Card>
 
       {result && (
-        <Card title={`${result.rows.length.toLocaleString()} rows scored with ${result.model.name}`}
+        <Card title={result.history
+          ? `${result.rows.length.toLocaleString()} patients scored with ${result.model.name}`
+          : `${result.rows.length.toLocaleString()} rows scored with ${result.model.name}`}
           right={<button type="button" onClick={exportCsv}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
             <Download size={15} /> Download CSV</button>}>
@@ -95,6 +103,13 @@ export default function ScorePanel({ overview }) {
               High from {result.bands.high_score_threshold}%, Medium from {result.bands.low_score_threshold}%
             </div>
           </div>
+          {result.history && (
+            <p className="mb-4 text-sm text-gray-600">
+              This model uses each patient's history: all {result.rows_in_file.toLocaleString()} rows
+              were read, and each patient's latest {result.time_column} is scored; their earlier rows
+              served as history.
+            </p>
+          )}
           {result.missing_columns?.length > 0 && (
             <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -106,14 +121,18 @@ export default function ScorePanel({ overview }) {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="text-xs text-gray-500">
-                <tr><th className="pb-2">Row</th><th className="pb-2">{result.id_column || 'Patient'}</th>
-                  <th className="pb-2">Risk</th><th className="pb-2">Band</th></tr>
+                <tr><th className="pb-2 pr-3">Row</th><th className="pb-2 pr-3">{result.id_column || 'Patient'}</th>
+                  {result.history && <th className="pb-2 pr-3">As of ({result.time_column})</th>}
+                  {result.history && <th className="pb-2 pr-3">Earlier rows</th>}
+                  <th className="pb-2 pr-3">Risk</th><th className="pb-2">Band</th></tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {rows.slice(0, shown).map((r) => (
                   <tr key={r.row}>
                     <td className="py-1.5 text-gray-500">{r.row}</td>
                     <td className="py-1.5 font-medium text-gray-800">{r.id ?? '—'}</td>
+                    {result.history && <td className="py-1.5 text-gray-600">{r.as_of}</td>}
+                    {result.history && <td className="py-1.5 text-gray-600">{r.history_rows}</td>}
                     <td className="py-1.5 tabular-nums font-semibold">{r.score.toFixed(1)}%</td>
                     <td className="py-1.5"><RiskBadge riskBand={r.band} size="sm" /></td>
                   </tr>

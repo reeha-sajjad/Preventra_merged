@@ -2004,6 +2004,11 @@ def studio_confirm(job_id: str, request: Request, plan: dict = Body(default={}))
     return _studio_call(model_studio.confirm_job, db, job_id, _studio_user(request), plan)
 
 
+@app.post("/api/studio/jobs/{job_id}/scan")
+def studio_scan(job_id: str, request: Request, plan: dict = Body(default={})):
+    return _studio_call(model_studio.scan_job, job_id, _studio_user(request), plan)
+
+
 @app.post("/api/studio/jobs/{job_id}/save")
 def studio_save(job_id: str, request: Request, body: dict = Body(default={})):
     return _studio_call(model_studio.save_job_model, db, job_id, _studio_user(request),

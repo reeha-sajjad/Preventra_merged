@@ -65,6 +65,8 @@ export default function ModelLibrary({ models, onChanged, onRetrain }) {
                             {m.algorithm ? String(m.algorithm).replace(/_/g, ' ') : ''}
                             {m.created_at && <> · {m.created_at}</>}{m.created_by && <> · {m.created_by}</>}
                             {m.base_model_id && <> · retrained from {m.base_model_id}</>}
+                            {m.data?.history && <> · uses patient history</>}
+                            {m.data?.label_threshold != null && <> · yes when {m.data.label_column} ≥ {m.data.label_threshold}</>}
                           </div>
                         </td>
                         <td className="pr-3 tabular-nums">{fmt(m.metrics?.auroc)}</td>
