@@ -113,30 +113,29 @@
     .hero .lede { margin: clamp(12px, 2.4vh, 22px) auto 0; font-size: clamp(16px, 2.2vh, 19px); color: var(--muted); max-width: 54ch; }
     .hero .btn { margin-top: clamp(18px, 3.6vh, 34px); }
 
-    /* The arc from the logo, on a raised panel, as the three steps. */
+    /* "How it works", on a raised panel. */
     .panel {
-      margin: clamp(24px, 5.5vh, 64px) auto 0; width: 100%; max-width: 860px; background: var(--white);
+      margin: clamp(24px, 5.5vh, 64px) auto 0; width: 100%; max-width: 520px; background: var(--white);
       border: 1px solid var(--line); border-radius: 24px;
       padding: clamp(22px, 4vh, 40px) clamp(24px, 4vw, 52px) clamp(20px, 3.6vh, 34px);
       box-shadow: 0 1px 2px rgba(14, 27, 42, .04), 0 24px 48px -24px rgba(14, 27, 42, .22);
     }
-    .panel svg { max-height: 12vh; }
-    .panel svg { width: 100%; height: auto; overflow: visible; display: block; }
-    .panel .arc-glow { fill: none; stroke: var(--teal); stroke-width: 12; stroke-linecap: round; opacity: .16; }
-    .panel .arc { fill: none; stroke: var(--navy); stroke-width: 2; stroke-linecap: round; }
-    .panel .node { fill: var(--navy); stroke: var(--white); stroke-width: 4; }
-    .panel .ring { fill: var(--white); stroke: var(--teal); stroke-width: 2; }
-    .steps { display: grid; grid-template-columns: repeat(3, 1fr); list-style: none; padding: 0; margin: clamp(10px, 2vh, 18px) 0 0; }
-    .steps li:first-child { text-align: left; } .steps li:last-child { text-align: right; }
-    .steps b { display: block; font: 600 18px var(--display); letter-spacing: -0.01em; }
-    .steps span { color: var(--muted); font-size: 15px; }
-    @media (prefers-reduced-motion: no-preference) {
-      .panel .arc { stroke-dasharray: 900; stroke-dashoffset: 900; animation: draw 1.4s .2s ease-out forwards; }
-      .panel .node, .panel .ring { opacity: 0; animation: fade .4s forwards; }
-      .panel .n1 { animation-delay: .3s; } .panel .n2 { animation-delay: .8s; } .panel .n3 { animation-delay: 1.3s; }
-      @keyframes draw { to { stroke-dashoffset: 0; } }
-      @keyframes fade { to { opacity: 1; } }
+    /* Three numbered steps joined by one line: a sequence you can read at a glance. */
+    .panel-title { font-size: 15px; font-weight: 600; color: var(--teal-deep); letter-spacing: 0; margin-bottom: clamp(14px, 2.4vh, 22px); text-align: left; }
+    .flow { list-style: none; margin: 0; padding: 0; text-align: left; }
+    .flow li { position: relative; display: grid; grid-template-columns: 40px 1fr; gap: 16px; padding-bottom: clamp(16px, 3vh, 28px); }
+    .flow li:last-child { padding-bottom: 0; }
+    .flow li:not(:last-child)::after {
+      content: ""; position: absolute; left: 19px; top: 40px; bottom: 0; width: 2px;
+      background: linear-gradient(var(--teal), #bfeee2);
     }
+    .flow .dot {
+      width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--navy); color: var(--white); font: 600 16px var(--display);
+      box-shadow: 0 0 0 5px var(--teal-wash);
+    }
+    .flow b { display: block; font: 600 18px var(--display); letter-spacing: -0.01em; padding-top: 1px; }
+    .flow span:not(.dot) { display: block; color: var(--muted); font-size: 15.5px; margin-top: 2px; }
 
     /* ── The two products ── */
     .products { background: var(--mist); border-top: 1px solid var(--line); padding: 72px 0; }
@@ -165,9 +164,9 @@
     footer a { color: var(--muted); text-decoration: none; }
     footer nav a:hover { color: var(--navy); }
 
-    /* Wide screens: the statement on the left, the arc panel on the right, so
+    /* Wide screens: the statement on the left, the "How it works" panel on the right, so
        the first screen uses its width instead of one tall column. The steps
-       list down the panel beside the arc. */
+       sit beside it. */
     @media (min-width: 980px) {
       .hero { text-align: left; }
       .hero .wrap {
@@ -177,19 +176,6 @@
       .hero h1 { margin-left: 0; margin-right: 0; max-width: 14ch; }
       .hero .lede { margin-left: 0; margin-right: 0; max-width: 46ch; }
       .panel { margin: 0; max-width: none; padding: clamp(26px, 4vh, 40px) clamp(26px, 2.6vw, 40px); }
-      .panel svg { max-height: none; }
-      .steps { grid-template-columns: 1fr; gap: 0; margin-top: clamp(18px, 3vh, 28px); }
-      .steps li, .steps li:first-child, .steps li:last-child {
-        text-align: left; display: grid; grid-template-columns: 34px 1fr; column-gap: 12px;
-        padding: clamp(10px, 1.8vh, 16px) 0; border-top: 1px solid var(--line);
-      }
-      .steps li::before {
-        content: counter(step); counter-increment: step; grid-row: span 2;
-        width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-        background: var(--teal-wash); color: var(--teal-deep); font: 600 15px var(--display);
-      }
-      .steps { counter-reset: step; }
-      .steps span { display: block; }
     }
 
     /* Short laptop screens: a tighter top bar and no label above the headline,
@@ -206,7 +192,6 @@
       .top { min-height: 0; }
       .hero { padding: 40px 0 48px; }
       .panel { padding: 24px 20px 20px; margin-top: 36px; }
-      .steps span { display: none; }
       .products { padding: 56px 0; }
       .products .wrap { grid-template-columns: 1fr; }
       .product { padding: 24px; }
@@ -238,18 +223,21 @@
         <a class="btn btn-big" href="signin.html">Sign in</a>
         </div>
 
-        <div class="panel" aria-label="How it works">
-          <svg viewBox="0 0 760 90" aria-hidden="true">
-            <path class="arc-glow" d="M 14 74 Q 380 -26 746 74" />
-            <path class="arc" d="M 14 74 Q 380 -26 746 74" />
-            <circle class="ring n1" cx="14" cy="74" r="13" /><circle class="node n1" cx="14" cy="74" r="7" />
-            <circle class="ring n2" cx="380" cy="24" r="13" /><circle class="node n2" cx="380" cy="24" r="7" />
-            <circle class="ring n3" cx="746" cy="74" r="13" /><circle class="node n3" cx="746" cy="74" r="7" />
-          </svg>
-          <ol class="steps">
-            <li><b>Predict</b><span>A risk score for each patient</span></li>
-            <li><b>Explain</b><span>The factors behind it</span></li>
-            <li><b>Act</b><span>Care teams follow up</span></li>
+        <div class="panel">
+          <h2 class="panel-title">How it works</h2>
+          <ol class="flow">
+            <li>
+              <span class="dot" aria-hidden="true">1</span>
+              <div><b>Predict</b><span>Each patient gets a risk score.</span></div>
+            </li>
+            <li>
+              <span class="dot" aria-hidden="true">2</span>
+              <div><b>Explain</b><span>The main factors behind each score are shown.</span></div>
+            </li>
+            <li>
+              <span class="dot" aria-hidden="true">3</span>
+              <div><b>Act</b><span>The care team sees who to follow up with first.</span></div>
+            </li>
           </ol>
         </div>
       </div>
