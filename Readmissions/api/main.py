@@ -425,16 +425,18 @@ def _require_detail(request: Request, patient_id) -> None:
 
     404 outside the caller's patients, as everywhere. A hospital admin or an
     insurer then needs a reason given this sign-in, or gets the structured 403
-    the frontends turn into the prompt. The superadmin is never asked, but its
-    first look at each patient in a sign-in is logged all the same.
+    the frontends turn into the prompt. The superadmin, doctors, nurses and case
+    managers are never asked, but their first look at each patient in a sign-in
+    is logged all the same (access.AUTOMATIC_REASONS).
     """
     _require_patient(request, patient_id)
     user = request.state.user
-    if user["role"] == "superadmin":
+    automatic = access.AUTOMATIC_REASONS.get(user["role"])
+    if automatic:
         session = request.state.session
         if not access_log.has_opened(db, user, access_log.APP, patient_id, session):
             access_log.record(db, user, access_log.APP, patient_id, _patient_hospital(patient_id),
-                              access.SUPERADMIN_REASON, session)
+                              automatic, session)
         return
     if _detail_access(request, patient_id) == "reason_required":
         raise HTTPException(status_code=403, detail=access.REASON_REQUIRED)
@@ -2002,11 +2004,6 @@ def studio_job(job_id: str, request: Request):
 @app.post("/api/studio/jobs/{job_id}/confirm")
 def studio_confirm(job_id: str, request: Request, plan: dict = Body(default={})):
     return _studio_call(model_studio.confirm_job, db, job_id, _studio_user(request), plan)
-
-
-@app.post("/api/studio/jobs/{job_id}/scan")
-def studio_scan(job_id: str, request: Request, plan: dict = Body(default={})):
-    return _studio_call(model_studio.scan_job, job_id, _studio_user(request), plan)
 
 
 @app.post("/api/studio/jobs/{job_id}/save")

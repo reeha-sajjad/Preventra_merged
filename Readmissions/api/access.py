@@ -93,6 +93,20 @@ REASONS = {
 }
 SUPERADMIN_REASON = "superadmin"            # logged, never asked for
 
+# Roles that are never asked for a reason but whose first look at each patient
+# per sign-in is still logged, for the audit trail (45 CFR 164.312(b)).
+# Doctors and nurses open only their own patients (patient_scope), so treatment
+# is the reason (45 CFR 164.506); a case manager coordinates care across the
+# hospital. Like SUPERADMIN_REASON these are not in REASONS: nobody picks them,
+# so the list both apps share stays as it is. Mirrors GLP1/Backend/core/access.py.
+TREATMENT_REASON = "treatment"
+COORDINATION_REASON = "case_management"
+AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,
+                     "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON}
+LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
+                  TREATMENT_REASON: "Treatment (care team)",
+                  COORDINATION_REASON: "Care coordination (case manager)"}
+
 # The 403 a reason-role gets for the clinical layer of a patient it has not
 # opened this session. A structured detail so the frontends can tell it from
 # any other refusal and show the prompt instead of an error.

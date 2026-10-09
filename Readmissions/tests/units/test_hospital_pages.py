@@ -131,12 +131,39 @@ def test_opening_another_hospitals_patient_is_404_and_logs_nothing(main, marked)
     assert log(marked) == []
 
 
-@pytest.mark.parametrize("email", ["cm@a.test", "doc.a@a.test", "nurse@a.test"])
-def test_the_care_team_is_never_asked_and_not_logged(main, marked, email):
+@pytest.mark.parametrize("email, reason, label", [
+    ("doc.a@a.test", "treatment", "Treatment (care team)"),
+    ("nurse@a.test", "treatment", "Treatment (care team)"),
+    ("cm@a.test", "case_management", "Care coordination (case manager)"),
+])
+def test_the_care_team_is_never_asked_but_is_logged_once_per_sign_in(main, marked, email, reason, label):
+    """Same rule as GLP-1 (GLP1/Backend/core/access.py AUTOMATIC_REASONS)."""
     client = as_user(main, marked, email)
-    assert client.get(f"/api/patients/{A1}").status_code == 200
+    for _ in range(2):
+        assert client.get(f"/api/patients/{A1}").status_code == 200
+    client.get(f"/api/patients/{A1}/trend")
     assert client.get(f"/api/patients/{A1}/summary").json()["detail_access"] == "open"
+    entries = log(marked)
+    assert [(e["email"], e["patient_id"], e["reason"], e["reason_label"], e["hospital_id"]) for e in entries] == \
+        [(email, A1, reason, label, "hosp-a")]
+
+
+def test_a_care_team_list_or_summary_is_not_an_opening(main, marked):
+    client = as_user(main, marked, "doc.a@a.test")
+    client.get("/api/patients")
+    client.get(f"/api/patients/{A1}/summary")
     assert log(marked) == []
+
+
+def test_a_care_team_refusal_is_not_logged(main, marked):
+    client = as_user(main, marked, "doc.a@a.test")
+    assert client.get(f"/api/patients/{B1}").status_code == 404
+    assert log(marked) == []
+
+
+def test_the_reason_list_is_unchanged_and_matches_glp1():
+    assert set(access.REASONS) == {"care_coordination", "incident_review", "audit", "billing"}
+    assert not set(access.LOGGED_REASONS) & set(access.REASONS)
 
 
 def test_the_superadmin_is_never_asked_but_is_logged_once_per_sign_in(main, marked):
