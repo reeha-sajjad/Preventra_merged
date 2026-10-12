@@ -69,9 +69,17 @@ def _touch(session_id: str, owner: str) -> dict:
 
 
 def _trim(messages: list[dict]) -> list[dict]:
+    """Keep about the last _MAX_HISTORY_MESSAGES, but only ever cut just before
+    one of the user's questions. Cutting inside a tool round (a tool result
+    without the request it answers) makes Gemini reject the whole call. The
+    current question and its tool round are always kept whole."""
     if len(messages) <= _MAX_HISTORY_MESSAGES:
         return messages
-    return messages[-_MAX_HISTORY_MESSAGES:]
+    questions = [i for i, m in enumerate(messages) if m["role"] == "user"]
+    start = len(messages) - _MAX_HISTORY_MESSAGES
+    later = [i for i in questions if i >= start]
+    start = later[0] if later else (questions[-1] if questions else 0)
+    return messages[start:]
 
 
 @router.post("/message", response_model=ChatResponse)

@@ -77,6 +77,24 @@ def _to_content(msg: dict) -> types.Content:
     return types.Content(role=gemini_role, parts=[types.Part.from_text(text=msg.get("content") or "")])
 
 
+def _to_contents(messages: Iterable[dict]) -> list[types.Content]:
+    """Convert the whole conversation. When Gemini asks for several tools in one
+    turn, all their results must go back together in ONE user turn, in the
+    order they were asked for. Sent as separate turns, Gemini 3.x rejects the
+    request (400 INVALID_ARGUMENT, "corrupted thought signature")."""
+    contents: list[types.Content] = []
+    previous_was_function = False
+    for msg in messages:
+        content = _to_content(msg)
+        is_function = msg["role"] == "function"
+        if is_function and previous_was_function:
+            contents[-1].parts.extend(content.parts)
+        else:
+            contents.append(content)
+        previous_was_function = is_function
+    return contents
+
+
 def _extract_function_calls(response: Any) -> list[dict]:
     calls: list[dict] = []
     for cand in getattr(response, "candidates", None) or []:
@@ -118,7 +136,7 @@ async def chat(
     friendly reply so the widget never white-screens.
     """
     client = get_client()
-    contents = [_to_content(m) for m in messages]
+    contents = _to_contents(messages)
     config = types.GenerateContentConfig(
         system_instruction=system_instruction,
         tools=tools or [],
