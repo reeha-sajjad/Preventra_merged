@@ -43,6 +43,16 @@ FEATURE_LABELS: Dict[str, str] = {
     "LBXTC":                "Total cholesterol",
     "LBXTR":                "Triglycerides",
     "LBXGLU":               "Fasting blood glucose",
+    # The model's other inputs. Same wording as each patient's top drivers
+    # (Backend/data/shap_patient_drivers.csv), so the Overview and the patient
+    # page never name the same thing two ways.
+    "mol_SEMAGLUTIDE":      "Prescribed Semaglutide",
+    "mol_TIRZEPATIDE":      "Prescribed Tirzepatide",
+    "mol_LIRAGLUTIDE":      "Prescribed Liraglutide",
+    "mol_DULAGLUTIDE":      "Prescribed Dulaglutide",
+    "is_newer_drug":        "Newer-generation drug",
+    "has_dyslipidemia":     "High cholesterol diagnosis",
+    "has_dysglycemia":      "Impaired glucose diagnosis",
 }
 
 survival_cache: Optional[Dict]       = None
