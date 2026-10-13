@@ -20,6 +20,9 @@ export const WATCH_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
 // Model Studio: training, comparing and deploying the hospital's own models
 // (api/access.py manage_models).
 export const STUDIO_ROLES = ['superadmin', 'hospital_admin'];
+// Doctors and nurses: their own patients are their home page (GLP-1's
+// CARE_TEAM_ROLES in RoleContext.jsx).
+export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];
 
 export const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Nurse',
