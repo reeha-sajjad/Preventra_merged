@@ -195,6 +195,20 @@ def _hospital_name(db, hospital_id: Optional[str]) -> Optional[dict]:
     return {"id": hospital_id, "name": h["name"] if h else hospital_id}
 
 
+def me(db, user: dict, scope: Optional[list]) -> dict:
+    """The signed-in person's own account, for Settings: who they are, where
+    they work, and how many patients they can see. Their own details only, and
+    the same shape as GLP-1's /api/me, so the two Settings pages match."""
+    insurer = None
+    if user.get("insurer_id"):
+        doc = _identity(db)["insurers"].find_one({"_id": user["insurer_id"]})
+        insurer = {"id": user["insurer_id"], "name": (doc or {}).get("name", user["insurer_id"])}
+    return {"id": str(user["_id"]), "name": user.get("name") or "", "email": user.get("email", ""),
+            "role": user["role"], "hospital": _hospital_name(db, user.get("hospital_id")),
+            "insurer": insurer,
+            "patients": None if scope is None else len({str(p) for p in scope})}
+
+
 def overview(db, view, user: dict, batch_dates: list) -> dict:
     """How is my hospital doing - or, for an insurer, how are my members."""
     if not batch_dates:

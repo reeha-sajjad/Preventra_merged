@@ -2496,6 +2496,13 @@ def get_overview(request: Request):
     return hospital.overview(db, _view(request), request.state.user, _batch_dates())
 
 
+@app.get("/api/me")
+def get_me(request: Request):
+    """Your own account, for Settings. Everyone signed in may ask, about
+    themselves only, so there is no role check and nothing is logged."""
+    return hospital.me(db, request.state.user, _scope(request))
+
+
 @app.get("/api/staff")
 def get_staff(request: Request):
     """Who looks after whom: doctors and nurses with their patient counts."""

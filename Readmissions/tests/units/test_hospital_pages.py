@@ -366,3 +366,23 @@ def test_a_refreshed_token_is_the_same_sign_in(main, marked):
                        raise_server_exceptions=False)
     assert again.get(f"/api/patients/{A1}").status_code == 200
     assert login_again(main, marked, "admin@a.test").get(f"/api/patients/{A1}").status_code == 403
+
+# ----------------------------------------------------------------- settings
+def test_everyone_reads_their_own_account_and_no_one_elses(main, world):
+    doctor = as_user(main, world, "doc.a@a.test").get("/api/me").json()
+    assert doctor["email"] == "doc.a@a.test" and doctor["role"] == "doctor"
+    assert doctor["hospital"]["id"] == "hosp-a"
+    assert doctor["patients"] == 2                                   # A1, A2
+    assert "password_hash" not in doctor
+
+    insurer = as_user(main, world, "claims@acme.test").get("/api/me").json()
+    assert insurer["insurer"]["id"] == "acme" and insurer["patients"] == 2
+
+    patient = as_user(main, world, "me@patient.test").get("/api/me").json()
+    assert patient["role"] == "patient" and patient["patients"] == 1
+
+
+def test_reading_your_account_is_not_an_opening(main, marked):
+    before = len(log(marked))
+    as_user(main, marked, "admin@a.test").get("/api/me")
+    assert len(log(marked)) == before

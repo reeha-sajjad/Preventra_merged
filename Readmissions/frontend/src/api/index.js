@@ -86,6 +86,26 @@ const RealAPI = {
   /** The signed-in account as the auth service sees it now. */
   getMe: () => apiFetch('/auth/me'),
 
+  /** Your own account for Settings: name, hospital, how many patients you can see. */
+  getAccount: () => apiFetch('/api/me'),
+  /** Change your own password at the shared auth service. Not through apiFetch:
+   *  a wrong current password is a 401, which apiFetch would treat as the
+   *  session being over and sign the user out. Returns { token }. */
+  changePassword: async (currentPassword, newPassword) => {
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
+    if (API_KEY) headers['X-API-Key'] = API_KEY;
+    const res = await fetch(`${BASE_URL}/auth/change-password`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const d = body?.detail;
+      throw new ApiError(typeof d === 'string' ? d : 'The password could not be changed.', res.status);
+    }
+    return body;
+  },
+
   // ─── Hospital pages ──────────────────────────────────────────────────────
   // Overview layer only - counts, names, assignments. See api/hospital.py.
   getOverview: () => apiFetch('/api/overview'),
@@ -373,6 +393,8 @@ export const pingService = () => fetch(`${BASE_URL}/healthz`);
 // indistinguishable on screen from a real one.
 const HOSPITAL_MOCK_ERROR = 'The hospital pages require the real backend. Set VITE_USE_MOCK=false.';
 const realOnly = (fn) => (USE_MOCK ? () => Promise.reject(new Error(HOSPITAL_MOCK_ERROR)) : fn);
+export const getAccount        = realOnly(RealAPI.getAccount);
+export const changePassword    = realOnly(RealAPI.changePassword);
 export const getOverview       = realOnly(RealAPI.getOverview);
 export const getStaff          = realOnly(RealAPI.getStaff);
 export const setCareTeam       = realOnly(RealAPI.setCareTeam);

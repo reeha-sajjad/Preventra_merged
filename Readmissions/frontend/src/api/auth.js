@@ -92,6 +92,13 @@ export function getToken() {
   return store()?.getItem(STORAGE_KEY) || null;
 }
 
+/** Swap in a fresh token for this session - after a password change, the
+ *  auth service hands back one carrying the updated account. Same sign-in,
+ *  same expiry; only the claims are newer. */
+export function replaceToken(token) {
+  if (token) store()?.setItem(STORAGE_KEY, token);
+}
+
 export function clearToken() {
   store()?.removeItem(STORAGE_KEY);
 }

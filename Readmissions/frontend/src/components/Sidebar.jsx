@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, Users, UsersRound, ClipboardList, X,
-         FlaskConical } from 'lucide-react';
+import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
+         FlaskConical, Settings } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED } from '../api';
 import { readClaims } from '../api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, MANAGER_ROLES, STUDIO_ROLES,
+import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES,
          ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
@@ -38,6 +38,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   // Doctors and nurses have no Overview: their Patients list is their home.
   const navItems = isPatient ? [
     { name: 'My record', path: '/my-record', icon: <Info size={20} /> },
+    { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ] : [
     ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
     { name: 'Patients', path: '/patients', icon: <ClipboardList size={20} /> },
@@ -49,7 +50,8 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
     ...(can(STUDIO_ROLES) ? [{ name: 'Model Studio', path: '/model-studio', icon: <FlaskConical size={20} /> }] : []),
     ...(can(CONSOLE_ROLES) ? [{ name: 'Clinician Console', path: '/doctor', icon: <Stethoscope size={20} /> }] : []),
     { name: 'About Preventra', path: '/about', icon: <Info size={20} /> },
-    ...(can(MANAGER_ROLES) ? [{ name: 'User Management', path: '/settings', icon: <Users size={20} /> }] : []),
+    // Everyone's own account and password; admins also manage users there.
+    { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ];
 
   return (
