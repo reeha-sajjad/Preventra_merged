@@ -5,6 +5,10 @@ import { readClaims } from './api/auth';
 
 export const OVERVIEW_ROLES = ['superadmin', 'hospital_admin', 'case_manager', 'insurer'];
 export const STAFF_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
+// Follow-up requests (api/followups.py): doctors and nurses ask; case managers
+// arrange them, and hospital admins and the superadmin can step in.
+export const FOLLOWUP_REQUEST_ROLES = ['doctor', 'nurse'];
+export const FOLLOWUP_HANDLE_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const ASSIGN_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const MANAGER_ROLES = ['superadmin', 'hospital_admin'];
 // Registering a doctor for alert routing (api/access.py ACTIONS manage_doctors).

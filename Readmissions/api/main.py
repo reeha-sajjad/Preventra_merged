@@ -29,6 +29,7 @@ from api import access
 from api import access_log
 from api import hospital
 from api import risk_watch
+from api import followups
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -2503,6 +2504,72 @@ def get_me(request: Request):
     return hospital.me(db, request.state.user, _scope(request))
 
 
+@app.get("/api/my-patients")
+def get_my_patients(request: Request):
+    """A doctor's or nurse's home page: their own patients at a glance, and
+    the ones that need a look first. Their own patients only (the scope)."""
+    _require(request, "view_my_patients")
+    return hospital.my_patients(db, _view(request), request.state.user, _batch_dates(),
+                                driver_of=_worklist_driver)
+
+
+# ---------------------------------------------------------------------------
+# Follow-up requests - doctors and nurses ask, case managers arrange
+# (api/followups.py; the same flow as GLP-1's)
+# ---------------------------------------------------------------------------
+class FollowUpRequest(BaseModel):
+    urgency: str = "routine"
+    note: Optional[str] = None
+
+
+class FollowUpNote(BaseModel):
+    text: str
+
+
+class FollowUpDone(BaseModel):
+    outcome: str
+    note: Optional[str] = None
+
+
+@app.get("/api/followups")
+def list_followups(request: Request, status: str = Query("active", description="active | done")):
+    """The hospital's follow-up requests, for case managers (and admins)."""
+    return followups.listing(db, request.state.user, status=status)
+
+
+@app.get("/api/followups/waiting")
+def followups_waiting(request: Request):
+    """How many requests nobody has taken yet - the menu badge."""
+    return {"waiting": followups.waiting(db, request.state.user)}
+
+
+@app.get("/api/patients/{patient_id}/followup")
+def get_patient_followup(patient_id: str, request: Request):
+    return followups.for_patient(db, request.state.user, _scope(request), patient_id)
+
+
+@app.post("/api/patients/{patient_id}/followup", status_code=201)
+def request_followup(patient_id: str, body: FollowUpRequest, request: Request):
+    return followups.request(db, request.state.user, _scope(request), patient_id,
+                             body.urgency, body.note)
+
+
+@app.post("/api/followups/{followup_id}/note")
+def add_followup_note(followup_id: str, body: FollowUpNote, request: Request):
+    return followups.add_note(db, request.state.user, _scope(request), followup_id, body.text)
+
+
+@app.post("/api/followups/{followup_id}/take")
+def take_followup(followup_id: str, request: Request):
+    return followups.take(db, request.state.user, _scope(request), followup_id)
+
+
+@app.post("/api/followups/{followup_id}/done")
+def finish_followup(followup_id: str, body: FollowUpDone, request: Request):
+    return followups.complete(db, request.state.user, _scope(request), followup_id,
+                              body.outcome, body.note)
+
+
 @app.get("/api/staff")
 def get_staff(request: Request):
     """Who looks after whom: doctors and nurses with their patient counts."""
@@ -2985,13 +3052,22 @@ def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, reque
 def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.respond(
+        alert = doctor_service.respond(
             db, alert_id, payload.doctor_id, payload.recommendation,
             actions=payload.actions, urgency=payload.urgency)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # A reply that asks for a call, a review, bloods or a home visit goes to the
+    # hospital's case managers as a follow-up request (api/followups.py). The
+    # reply is already saved; a problem here must not undo or hide it.
+    try:
+        alert["followup"] = followups.from_alert(db, request.state.user, alert)
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: follow-up from alert {alert_id} not created ({type(exc).__name__}: {exc})")
+        alert["followup"] = None
+    return alert
 
 
 @app.post("/api/clinical-alerts/{alert_id}/dismiss")

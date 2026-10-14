@@ -110,6 +110,8 @@ const RealAPI = {
   // Overview layer only - counts, names, assignments. See api/hospital.py.
   getOverview: () => apiFetch('/api/overview'),
   getStaff: () => apiFetch('/api/staff'),
+  /** A doctor's or nurse's own patients at a glance - the My patients home page. */
+  getMyPatients: () => apiFetch('/api/my-patients'),
   /** { patient_ids, doctor_id?, nurse_ids?, add_nurse_ids? } - see api/hospital.assign. */
   setCareTeam: (body) => apiFetch('/api/care-team', json(body)),
   /** A patient's overview layer, and whether their clinical details are open yet. */
@@ -117,6 +119,16 @@ const RealAPI = {
   /** Open one patient's clinical details with a reason (hospital admins, insurers). */
   openPatient: (id, reason) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/open`, json({ reason })),
+
+  // ─── Follow-ups ──────────────────────────────────────────────────────────
+  // Doctors and nurses ask, case managers arrange. See api/followups.py.
+  getFollowUps: (status = 'active') => apiFetch(`/api/followups?status=${status}`),
+  getFollowUpsWaiting: () => apiFetch('/api/followups/waiting'),
+  getPatientFollowUp: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`),
+  requestFollowUp: (id, body) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`, json(body)),
+  addFollowUpNote: (fid, text) => apiFetch(`/api/followups/${fid}/note`, json({ text })),
+  takeFollowUp: (fid) => apiFetch(`/api/followups/${fid}/take`, { method: 'POST' }),
+  finishFollowUp: (fid, body) => apiFetch(`/api/followups/${fid}/done`, json(body)),
 
   // ─── Clinician loop ──────────────────────────────────────────────────────
   // Forecast -> alert -> the doctor's inbox -> a recommendation back on the
@@ -397,6 +409,14 @@ export const getAccount        = realOnly(RealAPI.getAccount);
 export const changePassword    = realOnly(RealAPI.changePassword);
 export const getOverview       = realOnly(RealAPI.getOverview);
 export const getStaff          = realOnly(RealAPI.getStaff);
+export const getMyPatients     = realOnly(RealAPI.getMyPatients);
+export const getFollowUps        = realOnly(RealAPI.getFollowUps);
+export const getFollowUpsWaiting = realOnly(RealAPI.getFollowUpsWaiting);
+export const getPatientFollowUp  = realOnly(RealAPI.getPatientFollowUp);
+export const requestFollowUp     = realOnly(RealAPI.requestFollowUp);
+export const addFollowUpNote     = realOnly(RealAPI.addFollowUpNote);
+export const takeFollowUp        = realOnly(RealAPI.takeFollowUp);
+export const finishFollowUp      = realOnly(RealAPI.finishFollowUp);
 export const setCareTeam       = realOnly(RealAPI.setCareTeam);
 export const getPatientSummary = realOnly(RealAPI.getPatientSummary);
 export const openPatient       = realOnly(RealAPI.openPatient);

@@ -67,6 +67,8 @@ ACTIONS = {
     # so they get neither.
     "view_overview":  ("superadmin", "hospital_admin", "case_manager", "insurer"),
     "view_staff":     ("superadmin", "hospital_admin", "case_manager"),
+    # "My patients", the home page of the people who look after patients.
+    "view_my_patients": ("doctor", "nurse"),
     # A doctor's alert inbox is clinical content about several patients at
     # once, so it is for the care team, not for the roles that must give a
     # reason per patient.

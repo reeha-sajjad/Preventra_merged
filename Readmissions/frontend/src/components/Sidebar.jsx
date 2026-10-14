@@ -1,10 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
-         FlaskConical, Settings } from 'lucide-react';
-import { MANUAL_ENTRY_ENABLED } from '../api';
+         FlaskConical, Settings, CalendarClock } from 'lucide-react';
+import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting } from '../api';
 import { readClaims } from '../api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES,
+import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
          ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
@@ -31,18 +31,31 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
     };
   }, [open, onClose]);
 
+  // Follow-up requests nobody has taken yet, for the badge on "Follow-ups".
+  // Re-read on every page change, so taking one updates the count.
+  const [waiting, setWaiting] = useState(0);
+  useEffect(() => {
+    if (!can(FOLLOWUP_HANDLE_ROLES)) return undefined;
+    let live = true;
+    getFollowUpsWaiting().then((d) => { if (live) setWaiting(d.waiting || 0); }).catch(() => {});
+    return () => { live = false; };
+  }, [location.pathname]);
+
   const role = readClaims()?.role;
   const isPatient = role === 'patient';
   // Each role's pages - hidden, not dimmed, for everyone else. The server
   // refuses them anyway; this keeps the menu to what the user can use.
-  // Doctors and nurses have no Overview: their Patients list is their home.
+  // Doctors and nurses have no Overview: "My patients" is their home.
   const navItems = isPatient ? [
     { name: 'My record', path: '/my-record', icon: <Info size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ] : [
     ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
+    ...(can(MY_PATIENTS_ROLES) ? [{ name: 'My patients', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
     { name: 'Patients', path: '/patients', icon: <ClipboardList size={20} /> },
     ...(can(STAFF_ROLES) ? [{ name: 'Staff', path: '/staff', icon: <UsersRound size={20} /> }] : []),
+    ...(can(FOLLOWUP_HANDLE_ROLES)
+      ? [{ name: 'Follow-ups', path: '/follow-ups', icon: <CalendarClock size={20} />, badge: waiting }] : []),
     ...(MANUAL_ENTRY_ENABLED
       ? [{ name: 'Manual Entry', path: '/manual-entry', icon: <UserPlus size={20} /> }]
       : []),
@@ -107,7 +120,13 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
               }
             >
               {item.icon}
-              <span>{item.name}</span>
+              <span className="flex-1">{item.name}</span>
+              {item.badge > 0 && (
+                <span className="min-w-[20px] rounded-full bg-risk-high px-1.5 text-center text-xs font-bold leading-5 text-white"
+                      aria-label={`${item.badge} waiting`}>
+                  {item.badge > 99 ? '99+' : item.badge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
