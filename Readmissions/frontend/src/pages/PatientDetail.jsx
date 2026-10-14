@@ -4,6 +4,7 @@ import { getPatientById, getPatientSummary } from '../api';
 import { myRole } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
 import CareTeamCard from '../components/shared/CareTeamCard';
+import FollowUpCard from '../components/followups/FollowUpCard';
 import ClinicalGate from '../components/shared/ClinicalGate';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
@@ -143,6 +144,7 @@ export default function PatientDetail() {
           </div>
         </div>
         <CareTeamCard summary={summary} onChanged={reload} />
+        <FollowUpCard patientId={summary.id} />
         <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload} />
       </div>
     );
@@ -297,6 +299,8 @@ export default function PatientDetail() {
           </div>
 
           <CareTeamCard summary={summary} onChanged={reload} />
+
+          <FollowUpCard patientId={patient.id} />
 
           <ForecastPanel patientId={patient.id} />
 

@@ -11,9 +11,14 @@ export const MANAGER_ROLES = ['superadmin', 'hospital_admin'];
 export const REGISTRY_ROLES = ['superadmin', 'hospital_admin'];
 // Hospital admins and insurers open a patient's clinical details with a reason.
 export const REASON_ROLES = ['hospital_admin', 'insurer'];
-// The clinician console is a doctor's alert inbox; the roles that must give a
-// reason per patient cannot read a whole inbox of clinical alerts.
-export const CONSOLE_ROLES = ['superadmin', 'doctor', 'case_manager'];
+// The clinician console: a doctor's alert inbox, or for a nurse the alerts on
+// their own patients. The roles that must give a reason per patient cannot
+// read a whole inbox of clinical alerts.
+export const CONSOLE_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
+// Follow-up requests (api/followups.py): doctors and nurses ask from a
+// patient's page; case managers handle them, and hospital admins can step in.
+export const FOLLOWUP_REQUEST_ROLES = ['doctor', 'nurse'];
+export const FOLLOWUP_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 // Who is told when their patients' risk goes up (api/access.py watch_risk).
 // A doctor or nurse hears about their own patients only.
 export const WATCH_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];

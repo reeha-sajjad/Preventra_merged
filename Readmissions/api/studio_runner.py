@@ -186,6 +186,35 @@ def check_no_lookahead(module, raw, config, max_groups: int = 300) -> None:
             "reset_index(level=0, drop=True)), never with .values or .to_numpy().")
 
 
+def _require_grouped_folds(groups) -> bool:
+    """
+    When patients have several rows, every cross-validation inside train()
+    must keep a patient's rows in one fold - the same rule as our own split.
+    KFold and StratifiedKFold (and cv=<number>, which sklearn turns into one of
+    them) split rows, so a patient's other stays or weeks would sit in training
+    while one is validated: model selection and calibration would both be
+    flattered. They are refused here, in this child process only, and the error
+    goes back to the code writer to fix. Grouped splitters, a list of
+    precomputed folds, and the internal early-stopping split of gradient
+    boosting are unaffected.
+    """
+    if groups is None or groups.nunique() == len(groups):
+        return False
+    from sklearn.model_selection import KFold, StratifiedKFold
+
+    def refuse(self, *args, **kwargs):
+        raise RuntimeError(
+            f"{type(self).__name__} (which is also what cv=<number> means) splits rows, not "
+            "patients, and these patients have several rows each. Use StratifiedGroupKFold "
+            "with groups, for example cv=list(StratifiedGroupKFold(n_splits=3, shuffle=True, "
+            "random_state=0).split(X, y, groups)), for cross-validation and for "
+            "CalibratedClassifierCV alike.")
+
+    for cls in (KFold, StratifiedKFold):
+        cls.split = refuse
+    return True
+
+
 def _read(path, dtypes=None):
     import pandas as pd
     return pd.read_csv(path, low_memory=False, dtype=dtypes)
@@ -213,6 +242,11 @@ def run_train(workdir: str, job: dict) -> None:
     X = _features(module, df[feature_cols], config)
     _emit("log", message=f"Preprocess + transform produced {X.shape[1]} features "
                           f"in {time.time() - started:.1f}s")
+
+    if _require_grouped_folds(groups):
+        _emit("log", message=f"{groups.nunique():,} patients have {len(groups):,} rows between "
+                              "them, so any cross-validation inside train() must keep each "
+                              "patient in one fold")
 
     started = time.time()
     result = module.train(X, y, groups, config)

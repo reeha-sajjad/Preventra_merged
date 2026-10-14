@@ -74,6 +74,14 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
+// Anything that can change the follow-up queue says so, and the menu's
+// waiting count (Sidebar.jsx) refreshes at once rather than on the next page.
+export const FOLLOWUPS_CHANGED = 'preventra:followups-changed';
+const followUpsChanged = (result) => {
+  try { window.dispatchEvent(new Event(FOLLOWUPS_CHANGED)); } catch { /* no window */ }
+  return result;
+};
+
 // ─── Real API implementations ──────────────────────────────────────────────
 const json = (body) => ({
   method: 'POST',
@@ -118,6 +126,23 @@ const RealAPI = {
   openPatient: (id, reason) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/open`, json({ reason })),
 
+  // ─── Follow-up requests (api/followups.py) ──────────────────────────────
+  getFollowUps: (status = 'active') => apiFetch(`/api/followups?status=${encodeURIComponent(status)}`),
+  getFollowUpBadge: () => apiFetch('/api/followups/badge'),
+  getPatientFollowUp: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`),
+  requestFollowUp: (id, body) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`, json(body)).then(followUpsChanged),
+  addFollowUpNote: (followupId, text) =>
+    apiFetch(`/api/followups/${encodeURIComponent(followupId)}/note`, json({ text })),
+  takeFollowUp: (followupId) =>
+    apiFetch(`/api/followups/${encodeURIComponent(followupId)}/take`, { method: 'POST' })
+      .then(followUpsChanged),
+  finishFollowUp: (followupId, body) =>
+    apiFetch(`/api/followups/${encodeURIComponent(followupId)}/done`, json(body))
+      .then(followUpsChanged),
+  /** Every change to a patient's care team, newest first (the roles that assign). */
+  getCareTeamHistory: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/care-team/history`),
+
   // ─── Clinician loop ──────────────────────────────────────────────────────
   // Forecast -> alert -> the doctor's inbox -> a recommendation back on the
   // patient's record. See api/doctor_service.py.
@@ -142,13 +167,18 @@ const RealAPI = {
   getDoctorNotifications: (doctorId) =>
     apiFetch(`/api/doctors/${encodeURIComponent(doctorId)}/notifications`),
   getUnroutedAlerts: () => apiFetch('/api/clinical-alerts/unrouted'),
+  /** The nurse console: alerts on the caller's own patients, whichever doctor they went to. */
+  getMyClinicalAlerts: (status = 'open') =>
+    apiFetch(`/api/clinical-alerts/mine?status=${encodeURIComponent(status)}`),
   getRecommendedActions: () => apiFetch('/api/clinical-alerts/actions'),
 
   acknowledgeClinicalAlert: (alertId, doctorId) =>
     apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/acknowledge`,
       json({ doctor_id: doctorId })),
+  // A reply can hand a follow-up request to the case managers.
   respondToClinicalAlert: (alertId, body) =>
-    apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/respond`, json(body)),
+    apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/respond`, json(body))
+      .then(followUpsChanged),
   dismissClinicalAlert: (alertId, doctorId, reason) =>
     apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/dismiss`,
       json({ doctor_id: doctorId, reason })),
@@ -399,6 +429,14 @@ export const getOverview       = realOnly(RealAPI.getOverview);
 export const getStaff          = realOnly(RealAPI.getStaff);
 export const setCareTeam       = realOnly(RealAPI.setCareTeam);
 export const getPatientSummary = realOnly(RealAPI.getPatientSummary);
+export const getFollowUps      = realOnly(RealAPI.getFollowUps);
+export const getFollowUpBadge  = realOnly(RealAPI.getFollowUpBadge);
+export const getPatientFollowUp = realOnly(RealAPI.getPatientFollowUp);
+export const requestFollowUp   = realOnly(RealAPI.requestFollowUp);
+export const addFollowUpNote   = realOnly(RealAPI.addFollowUpNote);
+export const takeFollowUp      = realOnly(RealAPI.takeFollowUp);
+export const finishFollowUp    = realOnly(RealAPI.finishFollowUp);
+export const getCareTeamHistory = realOnly(RealAPI.getCareTeamHistory);
 export const openPatient       = realOnly(RealAPI.openPatient);
 export const getPatients       = API.getPatients;
 export const getPatientGroups  = USE_MOCK
@@ -529,6 +567,7 @@ export const getForecastScan = clinicianOnly(RealAPI.getForecastScan);
 export const getDoctorAlerts = clinicianOnly(RealAPI.getDoctorAlerts);
 export const getDoctorNotifications = clinicianOnly(RealAPI.getDoctorNotifications);
 export const getUnroutedAlerts = clinicianOnly(RealAPI.getUnroutedAlerts);
+export const getMyClinicalAlerts = clinicianOnly(RealAPI.getMyClinicalAlerts);
 export const getRecommendedActions = clinicianOnly(RealAPI.getRecommendedActions);
 export const acknowledgeClinicalAlert = clinicianOnly(RealAPI.acknowledgeClinicalAlert);
 export const respondToClinicalAlert = clinicianOnly(RealAPI.respondToClinicalAlert);

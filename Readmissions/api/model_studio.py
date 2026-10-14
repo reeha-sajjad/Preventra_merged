@@ -387,11 +387,49 @@ def heuristic_plan(profile: dict, target: str) -> dict:
     }
 
 
-def normalise_plan(plan: dict, columns: list, target: str) -> tuple:
+_PATIENT_NAME = re.compile(r"patient|subject|member|person|mrn", re.I)
+
+
+def patient_id_problems(df: pd.DataFrame, id_col: Optional[str]) -> list:
+    """
+    The split keeps a patient's rows together only through the id column. Any
+    patient-named column whose values repeat - several stays or weeks per
+    person - therefore has to BE that column. Otherwise one patient's other
+    rows sit in training while one is tested, and every reported number is
+    flattered. Only patient-named columns count: a repeating hospital_id or
+    ward_id is not a person.
+    """
+    repeating = []
+    for col in df.columns:
+        if not _PATIENT_NAME.search(str(col)):
+            continue
+        s = df[col].dropna().astype(str)
+        if len(s) and s.nunique() < len(s):
+            repeating.append((col, int(s.nunique()), len(s)))
+    if not id_col:
+        if repeating:
+            col, k, n = repeating[0]
+            return [f"'{col}' repeats ({n:,} rows for {k:,} values), so a patient has several "
+                    "rows. Choose it as the patient id column, so each patient's rows stay on "
+                    "one side of the train/test split."]
+        return []
+    s = df[id_col].dropna().astype(str)
+    others = [r for r in repeating if r[0] != id_col]
+    if len(s) and s.nunique() == len(s) and others:
+        col, k, n = others[0]
+        return [f"'{id_col}' is different on every row, so it cannot keep a patient's rows "
+                f"together. '{col}' repeats ({n:,} rows for {k:,} values) and looks like the "
+                "patient id column."]
+    return []
+
+
+def normalise_plan(plan: dict, columns: list, target: str,
+                   df: Optional[pd.DataFrame] = None) -> tuple:
     """
     Make a plan internally consistent against the real columns: unknown names
     removed, every column in exactly one role. Returns (plan, problems) -
     problems are the things a person must fix before training can start.
+    With `df`, the patient id is also checked against the data itself.
     """
     known = set(columns)
 
@@ -442,6 +480,8 @@ def normalise_plan(plan: dict, columns: list, target: str) -> tuple:
     if target == "weekly" and not id_col:
         problems.append("Weekly data needs a patient identifier column, so each patient's "
                         "weeks stay together when the data is split.")
+    elif df is not None:
+        problems.extend(patient_id_problems(df, id_col))
     if not numeric + categorical:
         problems.append("No feature columns are selected.")
     return out, problems
@@ -552,7 +592,7 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
                 if base_ctx.get(key) in df.columns or key in ("positive_value",
                                                               "label_threshold"):
                     plan.setdefault(key, base_ctx.get(key))
-        plan, problems = normalise_plan(plan, list(df.columns), job["target"])
+        plan, problems = normalise_plan(plan, list(df.columns), job["target"], df)
         assoc = _association_for(df, plan)
         with _jobs_lock:
             job["plan"], job["plan_source"], job["association"] = plan, source, assoc
@@ -618,7 +658,7 @@ def confirm_job(db, job_id: str, user: dict, edits: dict) -> dict:
     plan = {**job["plan"], **{k: v for k, v in (edits or {}).items() if k in (
         "label_column", "positive_value", "label_threshold", "id_column", "time_column",
         "numeric_columns", "categorical_columns", "drop_columns", "sensitive_columns")}}
-    plan, problems = normalise_plan(plan, list(df.columns), job["target"])
+    plan, problems = normalise_plan(plan, list(df.columns), job["target"], df)
     if problems:
         raise ValueError(" ".join(problems))
     y = outcome(df, plan)  # raises if the coding is ambiguous

@@ -8,6 +8,7 @@ import {
   getDoctors, registerDoctor, getDoctorAlerts, getDoctorNotifications,
   getRecommendedActions, acknowledgeClinicalAlert, respondToClinicalAlert,
   dismissClinicalAlert, getUnroutedAlerts, startForecastScan, getForecastScan,
+  getMyClinicalAlerts,
 } from '../api';
 import { readClaims } from '../api/auth';
 import { can, REGISTRY_ROLES } from '../roles';
@@ -46,10 +47,14 @@ export default function DoctorConsole() {
   const [directoryDown, setDirectoryDown] = useState('');
 
   // A signed-in doctor opens their own inbox - their registry entry, matched by
-  // email the same way the backend matches it (api/access.py). Only the
-  // superadmin and case managers choose whose inbox to look at.
+  // email the same way the backend matches it (api/access.py). A nurse sees the
+  // alerts on their own patients, whichever doctor they went to, and answers in
+  // their own name. Only the superadmin and case managers choose whose inbox to
+  // look at.
   const me = readClaims();
   const isDoctor = me?.role === 'doctor';
+  const isNurse = me?.role === 'nurse';
+  const [notice, setNotice] = useState('');
   const mine = useMemo(
     () => (isDoctor ? doctors.find((d) => (d.email || '').toLowerCase() === (me?.email || '').toLowerCase()) : null),
     [doctors, isDoctor, me?.email],
@@ -93,6 +98,23 @@ export default function DoctorConsole() {
   }, [loadDirectory]);
 
   const loadInbox = useCallback(() => {
+    if (isNurse) {
+      setLoading(true);
+      getMyClinicalAlerts('open')
+        .then((data) => {
+          const list = data.alerts || [];
+          setAlerts(list);
+          setCounts({
+            open: list.length,
+            critical: list.filter((a) => a.severity === 'critical').length,
+            pending: list.filter((a) => a.status === 'pending').length,
+          });
+          setError('');
+        })
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+      return;
+    }
     if (!doctorId) return;
     setLoading(true);
     Promise.all([
@@ -106,14 +128,14 @@ export default function DoctorConsole() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [doctorId]);
+  }, [doctorId, isNurse]);
 
   useEffect(() => {
     loadInbox();
-    if (!doctorId) return undefined;
+    if (!doctorId && !isNurse) return undefined;
     const id = setInterval(loadInbox, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [doctorId, loadInbox]);
+  }, [doctorId, isNurse, loadInbox]);
 
   // The sweep runs on the server and takes a couple of minutes over the full
   // cohort, so the button starts it and this polls until it stops running.
@@ -143,8 +165,15 @@ export default function DoctorConsole() {
       .catch((e) => { setError(e.message); setScan(null); });
   };
 
-  const afterResolve = (alertId) =>
+  const afterResolve = (alertId, result) => {
     setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
+    // A reply that asks for something a case manager arranges becomes a
+    // follow-up request (api/followups.py); say so, so nobody asks twice.
+    const f = result?.followup;
+    setNotice(!f ? '' : f.merged
+      ? `Added to the follow-up request already open for ${f.patient_id}.`
+      : `Sent to the case managers as a follow-up request for ${f.patient_id}.`);
+  };
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-6xl">
@@ -184,9 +213,25 @@ export default function DoctorConsole() {
         </div>
       </header>
 
-      {/* Anyone but the doctor themselves is looking at someone else's inbox.
-          Saying so on screen beats letting a reviewer discover it. */}
-      {!isDoctor && (
+      {/* Anyone but the doctor themselves (or a nurse, who answers as
+          themselves) is looking at someone else's inbox. Saying so on screen
+          beats letting a reviewer discover it. */}
+      {isNurse && (
+        <div className="bg-slate-50 border border-slate-200 rounded-md px-4 py-2.5 text-xs text-slate-700 flex items-start gap-2">
+          <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+          <span>
+            Alerts on the patients you are assigned to, whichever doctor they went to.
+            Anything you acknowledge or answer is recorded under your own name.
+          </span>
+        </div>
+      )}
+      {notice && (
+        <div className="bg-green-50 border border-green-200 text-green-800 rounded-md px-4 py-2.5 text-sm flex items-start justify-between gap-3">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss" className="text-green-700 hover:text-green-900"><X size={14} /></button>
+        </div>
+      )}
+      {!isDoctor && !isNurse && (
         <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-2.5 text-xs text-amber-900 flex items-start gap-2">
           <ShieldAlert size={14} className="shrink-0 mt-0.5" />
           <span>
@@ -215,15 +260,17 @@ export default function DoctorConsole() {
 
       <section className="bg-white rounded-lg border border-gray-200 p-4">
         <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {isDoctor ? 'Your inbox' : 'Viewing as'}
+          {isDoctor ? 'Your inbox' : isNurse ? 'Your patients' : 'Viewing as'}
         </label>
-        {!isDoctor && (
+        {!isDoctor && !isNurse && (
         <p className="text-xs text-gray-500 mt-0.5 mb-2">
           Each alert is addressed to one clinician. Choose whose inbox to open.
         </p>
         )}
         <div className="flex items-center gap-3 flex-wrap">
-          {isDoctor ? (
+          {isNurse ? (
+            <span className="text-sm font-medium text-gray-800 py-2">Alerts on the patients you look after</span>
+          ) : isDoctor ? (
             <span className="text-sm font-medium text-gray-800 py-2">
               {mine ? `${mine.name} — ${mine.specialty}` : 'You are not registered for alerts yet'}
             </span>
@@ -278,7 +325,7 @@ export default function DoctorConsole() {
         />
       )}
 
-      {!doctorId ? (
+      {!doctorId && !isNurse ? (
         <EmptyState
           icon={<Stethoscope size={32} />}
           title={isDoctor ? 'Your account is not in the alert registry' : 'Select a clinician to open their inbox'}
@@ -305,11 +352,12 @@ export default function DoctorConsole() {
             <AlertCard
               key={alert.alert_id}
               alert={alert}
-              doctorId={doctorId}
+              doctorId={isNurse ? (alert.doctor_id || '') : doctorId}
+              routedTo={isNurse ? (alert.doctor_name || 'no doctor yet') : null}
               actions={actions}
               urgencies={urgencies}
               onOpenPatient={() => navigate(`/patients/${alert.patient_id}`)}
-              onResolved={() => afterResolve(alert.alert_id)}
+              onResolved={(result) => afterResolve(alert.alert_id, result)}
               onAcknowledged={(updated) =>
                 setAlerts((prev) => prev.map((a) =>
                   a.alert_id === updated.alert_id ? updated : a))}
@@ -345,7 +393,7 @@ export default function DoctorConsole() {
 
 /* ── One alert, and the reply form it carries ───────────────────────────── */
 
-function AlertCard({ alert, doctorId, actions, urgencies, onOpenPatient, onResolved, onAcknowledged }) {
+function AlertCard({ alert, doctorId, routedTo, actions, urgencies, onOpenPatient, onResolved, onAcknowledged }) {
   const [open, setOpen] = useState(false);
   const [recommendation, setRecommendation] = useState('');
   const [picked, setPicked] = useState([]);
@@ -372,13 +420,13 @@ function AlertCard({ alert, doctorId, actions, urgencies, onOpenPatient, onResol
     if (!recommendation.trim()) { setFormError('A recommendation is required.'); return; }
     setBusy('respond');
     try {
-      await respondToClinicalAlert(alert.alert_id, {
+      const result = await respondToClinicalAlert(alert.alert_id, {
         doctor_id: doctorId,
         recommendation: recommendation.trim(),
         actions: picked,
         urgency,
       });
-      onResolved();
+      onResolved(result);
     } catch (err) { setFormError(err.message); } finally { setBusy(''); }
   };
 
@@ -446,7 +494,7 @@ function AlertCard({ alert, doctorId, actions, urgencies, onOpenPatient, onResol
         </ul>
 
         <p className="text-xs text-gray-400 mt-3">
-          Routed to you: {alert.routing_reason} · review {forecast.recommended_review_by}
+          {routedTo ? `Routed to ${routedTo}` : 'Routed to you'}: {alert.routing_reason} · review {forecast.recommended_review_by}
         </p>
       </div>
 

@@ -7,7 +7,7 @@ import time
 import shutil
 import threading
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import certifi
 from dotenv import load_dotenv
@@ -27,6 +27,7 @@ from api import auth as shared_auth
 from api import user_admin
 from api import access
 from api import access_log
+from api import followups
 from api import hospital
 from api import risk_watch
 from api.chatbot_service import answer_turn
@@ -370,6 +371,11 @@ db = _mongo_client[get_db_name()]
 # rather than wherever the product collections are set up.
 shared_auth.ensure_indexes(db)
 access_log.ensure_indexes(db)
+try:
+    followups.ensure_indexes(db)
+except Exception as exc:                                  # noqa: BLE001
+    # Created again on the first request if the database was unreachable at boot.
+    print(f"WARNING: could not create the followups indexes ({type(exc).__name__}: {exc})")
 
 
 # ---------------------------------------------------------------------------
@@ -2527,6 +2533,15 @@ def set_care_team(payload: CareTeamRequest, request: Request):
                            add_nurse_ids=payload.add_nurse_ids)
 
 
+@app.get("/api/patients/{patient_id}/care-team/history")
+def get_care_team_history(patient_id: str, request: Request):
+    """Every change to one patient's care team, newest first: who changed it,
+    when, and from what to what. For the roles that assign care teams."""
+    _require_patient(request, patient_id)
+    _require(request, "assign")
+    return {"patient_id": patient_id, "changes": hospital.care_team_history(db, patient_id)}
+
+
 _SUMMARY_FIELDS = {"_id": 0, "patient_id": 1, "risk_score": 1, "risk_band": 1,
                    "current_score": 1, "current_band": 1, "monitoring_status": 1,
                    "trend_delta": 1, "weeks_tracked": 1, "discharge_date": 1}
@@ -2597,11 +2612,20 @@ def assign_coordinator(patient_id: str, payload: AssignCoordinatorRequest, reque
             raise HTTPException(status_code=404, detail="Doctor not found")
         fields["assigned_doctor_id"] = doctor_id or None
 
+    before = db["care_actions"].find_one(_patient_id_filter(patient_id),
+                                         {"assigned_doctor_id": 1, "assigned_nurse_ids": 1,
+                                          "hospital_id": 1})
     db["care_actions"].update_one(
         _patient_id_filter(patient_id),
         {"$set": fields, "$setOnInsert": {"notes": []}},
         upsert=True,
     )
+    if "assigned_doctor_id" in fields:
+        old = hospital._team(before)
+        hospital.archive_care_team_changes(
+            db, [(patient_id, (before or {}).get("hospital_id"), old,
+                  {**old, "doctor_id": fields["assigned_doctor_id"]})],
+            request.state.user, via="assign")
     return {"status": "assigned", "patient_id": patient_id,
             "coordinator_name": payload.coordinator_name,
             "assigned_doctor_id": fields.get("assigned_doctor_id")}
@@ -2635,6 +2659,67 @@ def get_care_actions(patient_id: str, request: Request):
         return {"patient_id": patient_id, "coordinator_name": None, "assigned_at": None, "notes": []}
     doc.setdefault("notes", [])
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Follow-up requests - see api/followups.py. Doctors and nurses ask; case
+# managers take them, book the patient in the hospital's own system and mark
+# them done; hospital admins see the same list and can step in.
+# ---------------------------------------------------------------------------
+class FollowUpRequest(BaseModel):
+    urgency: Literal["urgent", "routine"]
+    note: Optional[str] = None
+
+
+class FollowUpNoteRequest(BaseModel):
+    text: str
+
+
+class FollowUpDoneRequest(BaseModel):
+    outcome: Literal["booked", "unreachable", "not_needed"]
+    note: Optional[str] = None
+
+
+@app.get("/api/patients/{patient_id}/followup")
+def get_patient_followup(patient_id: str, request: Request):
+    """This patient's open request, and the last finished one if recent."""
+    return followups.for_patient(db, request.state.user, _scope(request), patient_id)
+
+
+@app.post("/api/patients/{patient_id}/followup", status_code=201)
+def request_followup(patient_id: str, payload: FollowUpRequest, request: Request):
+    """A doctor or nurse asks for a follow-up. 409 if one is already open."""
+    return followups.request(db, request.state.user, _scope(request), patient_id,
+                             payload.urgency, payload.note)
+
+
+@app.get("/api/followups")
+def list_followups(request: Request, status: Literal["active", "done"] = "active"):
+    """The hospital's follow-up requests - case managers, hospital admins."""
+    return followups.listing(db, request.state.user, status)
+
+
+@app.get("/api/followups/badge")
+def followups_badge(request: Request):
+    """Requests nobody has taken yet, for the red count on the menu."""
+    return followups.badge(db, request.state.user)
+
+
+@app.post("/api/followups/{followup_id}/note")
+def add_followup_note(followup_id: str, payload: FollowUpNoteRequest, request: Request):
+    return followups.add_note(db, request.state.user, _scope(request), followup_id, payload.text)
+
+
+@app.post("/api/followups/{followup_id}/take")
+def take_followup(followup_id: str, request: Request):
+    """"I'll take it" - only one person can."""
+    return followups.take(db, request.state.user, _scope(request), followup_id)
+
+
+@app.post("/api/followups/{followup_id}/done")
+def finish_followup(followup_id: str, payload: FollowUpDoneRequest, request: Request):
+    return followups.complete(db, request.state.user, _scope(request), followup_id,
+                              payload.outcome, payload.note)
 
 
 # ---------------------------------------------------------------------------
@@ -2950,6 +3035,15 @@ def get_doctor_notifications(doctor_id: str, request: Request):
     return doctor_service.unread_count(view, doctor_id)
 
 
+@app.get("/api/clinical-alerts/mine")
+def get_my_clinical_alerts(request: Request, status: Optional[str] = "open", limit: int = 50):
+    """Alerts about the caller's patients, whichever doctor they were routed to.
+    The nurse console: a nurse sees the alerts of the patients assigned to them."""
+    _require(request, "read_inboxes")
+    return {"alerts": doctor_service.alerts_for_patients(_view(request), status=status,
+                                                         limit=min(max(limit, 1), 200))}
+
+
 @app.get("/api/clinical-alerts/unrouted")
 def get_unrouted_alerts(request: Request, limit: int = 50):
     """Alerts with no registered doctor to send them to. Never silently dropped."""
@@ -2964,6 +3058,11 @@ def get_patient_clinical_alerts(patient_id: str, request: Request):
             "alerts": doctor_service.patient_alerts(_view(request), patient_id)}
 
 
+def _responder(request: Request) -> dict:
+    """Who actually acted on an alert, kept beside the doctor it is filed under."""
+    return followups.who(request.state.user)
+
+
 def _require_clinical_alert(request: Request, alert_id: str) -> None:
     """404 unless the alert is about one of the caller's patients; 403 unless
     their role responds to alerts."""
@@ -2976,7 +3075,8 @@ def _require_clinical_alert(request: Request, alert_id: str) -> None:
 def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.acknowledge(db, alert_id, payload.doctor_id)
+        return doctor_service.acknowledge(db, alert_id, payload.doctor_id,
+                                          responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -2985,20 +3085,28 @@ def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, reque
 def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.respond(
+        alert = doctor_service.respond(
             db, alert_id, payload.doctor_id, payload.recommendation,
-            actions=payload.actions, urgency=payload.urgency)
+            actions=payload.actions, urgency=payload.urgency,
+            responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # The reply is stored as before; if it asks for something a case manager
+    # arranges, a follow-up request is added on top (api/followups.py).
+    alert["followup"] = followups.from_alert_reply(
+        db, request.state.user, alert, payload.actions, payload.urgency,
+        payload.recommendation, doctor_service.RECOMMENDED_ACTIONS)
+    return alert
 
 
 @app.post("/api/clinical-alerts/{alert_id}/dismiss")
 def dismiss_clinical_alert(alert_id: str, payload: DismissRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason)
+        return doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason,
+                                      responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

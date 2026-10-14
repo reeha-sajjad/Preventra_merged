@@ -472,6 +472,18 @@ def inbox(db, doctor_id: str, status: Optional[str] = None, limit: int = 50) -> 
     return _ranked(db, query, limit)
 
 
+def alerts_for_patients(db, status: Optional[str] = "open", limit: int = 50) -> list:
+    """Alerts about the caller's patients, whichever doctor they went to, most
+    severe first. `db` is the caller's scoped view, so a nurse sees the alerts
+    of the patients they are assigned to and nobody else's: the nurse console."""
+    query: dict = {}
+    if status == "open":
+        query["status"] = {"$in": list(_STATUS_OPEN)}
+    elif status:
+        query["status"] = status
+    return _ranked(db, query, limit)
+
+
 def unrouted_alerts(db, limit: int = 50) -> list:
     """Alerts nobody is responsible for. Must never be silently dropped."""
     return _ranked(db, {"status": "unrouted"}, limit)
@@ -506,7 +518,7 @@ def unread_count(db, doctor_id: str) -> dict:
     }
 
 
-def acknowledge(db, alert_id: str, doctor_id: str) -> dict:
+def acknowledge(db, alert_id: str, doctor_id: str, responder: Optional[dict] = None) -> dict:
     alert = db[CLINICAL_ALERTS].find_one({"alert_id": alert_id})
     if not alert:
         raise LookupError(f"No alert with id '{alert_id}'.")
@@ -516,13 +528,14 @@ def acknowledge(db, alert_id: str, doctor_id: str) -> dict:
     db[CLINICAL_ALERTS].update_one(
         {"alert_id": alert_id},
         {"$set": {"status": "acknowledged", "acknowledged_at": _now(),
-                  "acknowledged_by": doctor_id}})
+                  "acknowledged_by": doctor_id, "acknowledged_by_account": responder}})
     db[NOTIFICATIONS].update_many({"alert_id": alert_id}, {"$set": {"read": True}})
     return db[CLINICAL_ALERTS].find_one({"alert_id": alert_id}, {"_id": 0})
 
 
 def respond(db, alert_id: str, doctor_id: str, recommendation: str,
-            actions: Optional[list] = None, urgency: str = "routine") -> dict:
+            actions: Optional[list] = None, urgency: str = "routine",
+            responder: Optional[dict] = None) -> dict:
     """
     Record the clinician's reply and push it onto the patient's care record.
 
@@ -544,10 +557,18 @@ def respond(db, alert_id: str, doctor_id: str, recommendation: str,
         raise LookupError(f"No alert with id '{alert_id}'.")
 
     doctor = get_doctor(db, doctor_id)
+    # A nurse answers in their own name, from their own console. Anyone else
+    # covering a doctor's inbox answers as that doctor (the console says so),
+    # and `responder` keeps who actually typed it.
+    by_nurse = (responder or {}).get("role") == "nurse"
     response = {
         "doctor_id": doctor_id,
         "doctor_name": doctor["name"] if doctor else doctor_id,
         "specialty": doctor["specialty"] if doctor else None,
+        "answered_by": (responder or {}).get("name") if by_nurse
+                       else (doctor["name"] if doctor else doctor_id),
+        "answered_as": "nurse" if by_nurse else "doctor",
+        "responder": responder,
         "recommendation": recommendation,
         "actions": actions,
         "action_labels": [RECOMMENDED_ACTIONS[a] for a in actions],
@@ -568,8 +589,10 @@ def respond(db, alert_id: str, doctor_id: str, recommendation: str,
         _patient_id_filter(alert["patient_id"]),
         {"$push": {"notes": {
             "text": note_text,
-            "author": f"{response['doctor_name']}"
-                      + (f" ({response['specialty']})" if response["specialty"] else ""),
+            "author": (f"{response['answered_by']} (Nurse)" if by_nurse
+                       else f"{response['doctor_name']}"
+                       + (f" ({response['specialty']})" if response["specialty"] else "")),
+            "entered_by": (responder or {}).get("email"),
             "source": "clinical_alert",
             "alert_id": alert_id,
             "urgency": urgency,
@@ -582,7 +605,8 @@ def respond(db, alert_id: str, doctor_id: str, recommendation: str,
     return db[CLINICAL_ALERTS].find_one({"alert_id": alert_id}, {"_id": 0})
 
 
-def dismiss(db, alert_id: str, doctor_id: str, reason: str = "") -> dict:
+def dismiss(db, alert_id: str, doctor_id: str, reason: str = "",
+            responder: Optional[dict] = None) -> dict:
     """
     Close an alert without a clinical recommendation.
 
@@ -597,6 +621,7 @@ def dismiss(db, alert_id: str, doctor_id: str, reason: str = "") -> dict:
     db[CLINICAL_ALERTS].update_one(
         {"alert_id": alert_id},
         {"$set": {"status": "dismissed", "dismissed_at": _now(),
-                  "dismissed_by": doctor_id, "dismissal_reason": reason.strip()}})
+                  "dismissed_by": doctor_id, "dismissed_by_account": responder,
+                  "dismissal_reason": reason.strip()}})
     db[NOTIFICATIONS].update_many({"alert_id": alert_id}, {"$set": {"read": True}})
     return db[CLINICAL_ALERTS].find_one({"alert_id": alert_id}, {"_id": 0})

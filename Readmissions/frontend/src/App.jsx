@@ -15,9 +15,10 @@ import Settings from './pages/Settings';
 import TestComponents from './pages/TestComponents';
 import MyRecord from './pages/MyRecord';
 import ModelStudio from './pages/ModelStudio';
+import FollowUps from './pages/FollowUps';
 import { MANUAL_ENTRY_ENABLED } from './api';
 import { readClaims } from './api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES } from './roles';
+import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, FOLLOWUP_ROLES } from './roles';
 import LoadingScreen from './components/LoadingScreen';
 import { useAppLoader } from './hooks/useAppLoader';
 
@@ -66,6 +67,7 @@ function AppRoutes() {
           <Route path="/" element={can(OVERVIEW_ROLES) ? <Overview /> : <Navigate to="/patients" replace />} />
           <Route path="/patients" element={<Patients />} />
           {can(STAFF_ROLES) && <Route path="/staff" element={<Staff />} />}
+          {can(FOLLOWUP_ROLES) && <Route path="/follow-ups" element={<FollowUps />} />}
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/trend" element={<PatientTrend />} />
           <Route path="/patients/:id/update" element={<UpdatePatient />} />
