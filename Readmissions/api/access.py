@@ -83,6 +83,12 @@ ACTIONS = {
     # choosing which model scores that hospital's patients. An administrative
     # decision about the hospital's tooling, so the roles that run the account.
     "manage_models":  ("superadmin", "hospital_admin"),
+    # Cost and ROI figures (api/roi_model.py): what a readmission costs, what an
+    # intervention costs, and the return. A case manager coordinates care and
+    # manages neither people nor money, so they get the clinical half of those
+    # panels - the verdict's actions and the counterfactual - without the
+    # figures (docs/case_manager.md).
+    "view_costs":     ("superadmin", "hospital_admin", "doctor", "nurse", "insurer", "patient"),
 }
 
 # ------------------------------------------------ overview and clinical layer
@@ -139,6 +145,10 @@ CLINICAL_FIELDS = frozenset({
 # at a time ("which of these patients has heart failure?"). Ignored for the
 # reason roles; counts by condition stay available, as counts.
 CLINICAL_SORTS = frozenset({"diagnosis", "driver"})
+
+
+def sees_costs(user: dict) -> bool:
+    return user["role"] in ACTIONS["view_costs"]
 
 
 def needs_reason(user: dict) -> bool:

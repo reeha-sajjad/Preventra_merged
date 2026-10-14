@@ -1432,7 +1432,7 @@ def get_patient_trend(patient_id: str, request: Request):
         .sort("week_number", 1)
     )
     if weekly_docs:
-        return _weekly_trend_response(patient_id, weekly_docs)
+        return _hide_costs(request, _weekly_trend_response(patient_id, weekly_docs))
 
     registry_docs = list(
         db["risk_registry"]
@@ -1544,7 +1544,8 @@ def get_patient_trend(patient_id: str, request: Request):
         # it is measured per patient and rendered rather than assumed.
         "median_gap_days": sorted(observed)[len(observed) // 2] if observed else None,
         "span_days": span_days,
-        "roi_case": roi_case(latest_score, monitoring_status),
+        "roi_case": (roi_case(latest_score, monitoring_status)
+                     if access.sees_costs(request.state.user) else None),
         "weeks": weeks,
     }
 
@@ -1575,6 +1576,14 @@ class AIInsightsRequest(BaseModel):
     trend_status: Optional[str] = None
 
 
+def _hide_costs(request: Request, body: dict) -> dict:
+    """The trend without its cost verdict, for the roles that do not see costs
+    (access.ACTIONS view_costs). The verdict's reason is written in dollars."""
+    if access.sees_costs(request.state.user):
+        return body
+    return {**body, "roi_case": None}
+
+
 @app.post("/api/ai-insights")
 def get_ai_insights(payload: AIInsightsRequest, request: Request):
     """
@@ -1587,6 +1596,22 @@ def get_ai_insights(payload: AIInsightsRequest, request: Request):
     around it — it no longer prices anything or does the arithmetic.
     """
     _require_detail(request, payload.patient_id)
+    if not access.sees_costs(request.state.user):
+        # The counterfactual only. Gemini is given no figures at all, and is
+        # told never to state one that is not in its input, so nothing about
+        # money can reach a role that does not see costs.
+        try:
+            narrative = generate_roi_and_counterfactual(
+                patient_id=payload.patient_id, risk_score=payload.risk_score,
+                risk_band=payload.risk_band,
+                drivers=[d.model_dump() for d in payload.drivers], roi=None)
+        except Exception as exc:
+            print(f"[ai-insights] Gemini call failed: {exc}")
+            raise HTTPException(
+                status_code=503,
+                detail="AI insights are temporarily unavailable. Please try again in a moment.")
+        return {"counterfactual_explanation": narrative.get("counterfactual_explanation", []),
+                "costs_hidden": True}
     roi = compute_roi(payload.risk_score, trend_status=payload.trend_status)
     try:
         narrative = generate_roi_and_counterfactual(

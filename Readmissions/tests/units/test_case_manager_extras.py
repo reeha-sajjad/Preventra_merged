@@ -98,3 +98,42 @@ def test_the_extras_leave_the_follow_up_rules_alone(main, world):
     assert "case_manager" not in followups.ALERT_REPLY_ROLES
     f = reply(main, world, "cm@a.test", f"CA-{A1}", ["increase_monitoring"]).json()["followup"]
     assert f is None
+
+
+# ------------------------------------------------- no costs for case managers
+def _fake_insights(main, monkeypatch):
+    """Stand-in for Gemini that records what it was given."""
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        return {"roi_rationale": ["about money"], "counterfactual_explanation": ["fix adherence"]}
+
+    monkeypatch.setattr(main, "generate_roi_and_counterfactual", fake)
+    return calls
+
+
+def _insights(main, world, email):
+    return as_user(main, world, email).post("/api/ai-insights", json={
+        "patient_id": A1, "risk_score": 55, "risk_band": "High", "drivers": []})
+
+
+def test_a_case_manager_gets_the_counterfactual_without_any_figures(main, world, monkeypatch):
+    calls = _fake_insights(main, monkeypatch)
+    r = _insights(main, world, "cm@a.test")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"counterfactual_explanation": ["fix adherence"], "costs_hidden": True}
+    assert calls[0]["roi"] is None                      # Gemini was given no money to quote
+
+
+def test_the_care_team_still_gets_the_roi(main, world, monkeypatch):
+    calls = _fake_insights(main, monkeypatch)
+    body = _insights(main, world, "doc.a@a.test").json()
+    assert body["estimated_readmission_cost_usd"] > 0 and "net_roi_usd" in body
+    assert calls[0]["roi"] is not None
+
+
+def test_the_trend_carries_no_cost_verdict_for_a_case_manager(main, world):
+    assert as_user(main, world, "cm@a.test").get(f"/api/patients/{A1}/trend").json()["roi_case"] is None
+    doctor = as_user(main, world, "doc.a@a.test").get(f"/api/patients/{A1}/trend").json()
+    assert doctor["roi_case"]["decision"] and "break-even" in doctor["roi_case"]["reason"]

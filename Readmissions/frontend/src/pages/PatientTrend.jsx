@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, User, ShieldCheck, TrendingUp, ChevronRight, AlertTriangle } from 'lucide-react';
 import WeeklyTrendPanel from '../components/dashboard/WeeklyTrendPanel';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
+import { can, COST_ROLES } from '../roles';
 
 export default function PatientTrend() {
   const { id } = useParams();
@@ -18,8 +19,11 @@ export default function PatientTrend() {
 
   // Whether there is a case for intervening at all. Decided by the API from
   // the itemised cost model, not here - see api/roi_model.roi_case.
+  // A role that does not see costs gets no verdict from the API (it is written
+  // in dollars), so it goes straight to the counterfactual.
   const roiCase = trend?.roi_case;
   const showRoi = roiCase ? roiCase.show_roi : true;
+  const seesCosts = can(COST_ROLES);
 
   const insights = (
     <AiInsightsPanel
@@ -106,6 +110,7 @@ export default function PatientTrend() {
               </div>
             </div>
           )}
+          {seesCosts && (
           <p className="text-sm text-gray-500">
             The estimate below covers intervening{' '}
             <span className="font-semibold text-gray-700">now</span>, at this patient's latest score
@@ -115,8 +120,9 @@ export default function PatientTrend() {
             )}
             .
           </p>
+          )}
           {insights}
-          {weekly && (
+          {seesCosts && weekly && (
             <p className="text-xs text-gray-400 italic">
               Weekly scores are the calibrated discharge probability adjusted by the monitoring
               rules, so read this figure as directional rather than as a calibrated expected value.
