@@ -121,6 +121,33 @@ def test_weekly_plan_without_patient_id_is_refused():
     assert any("patient identifier" in p for p in problems)
 
 
+def _stays(n_patients=50, per_patient=3):
+    n = n_patients * per_patient
+    return pd.DataFrame({"patient_id": np.repeat(np.arange(n_patients), per_patient).astype(str),
+                         "encounter_id": np.arange(n).astype(str),
+                         "hospital_id": ["H1", "H2", "H3"] * n_patients,
+                         "x": np.arange(n, dtype=float), "y": [0, 1, 0] * n_patients})
+
+
+def test_a_repeating_patient_column_must_be_the_split_id():
+    frame, base = _stays(), {"label_column": "y", "numeric_columns": ["x"]}
+    cols = list(frame.columns)
+    _, problems = ms.normalise_plan(base, cols, "discharge", frame)
+    assert any("'patient_id' repeats (150 rows for 50 values)" in p for p in problems)
+    _, problems = ms.normalise_plan({**base, "id_column": "encounter_id"}, cols, "discharge", frame)
+    assert any("'encounter_id' is different on every row" in p and "'patient_id'" in p
+               for p in problems)
+    _, problems = ms.normalise_plan({**base, "id_column": "patient_id"}, cols, "discharge", frame)
+    assert problems == []
+
+
+def test_a_repeating_hospital_column_is_not_taken_for_a_patient():
+    frame = _stays().drop(columns=["patient_id"])
+    _, problems = ms.normalise_plan({"label_column": "y", "numeric_columns": ["x"]},
+                                    list(frame.columns), "discharge", frame)
+    assert problems == []
+
+
 def test_unassigned_columns_are_dropped_visibly():
     plan, _ = ms.normalise_plan({"label_column": "y", "numeric_columns": ["a"]},
                                 ["y", "a", "forgotten"], "discharge")
@@ -460,6 +487,39 @@ def test_lookahead_check_fails_features_that_peek(tmp_path, cheat, history):
     assert not result["ok"]                      # ...but not the runtime one
     assert "Look-ahead check failed" in result["error"]
     assert ("w_mean" if history else "w_centred") in result["error"]
+
+
+_ROW_FOLDS = STANDARD_PIPELINE.replace("method=method, cv=calibration_cv)",
+                                       "method=method, cv=3)")
+
+
+def test_row_folds_inside_train_are_refused_when_patients_repeat(tmp_path):
+    """cv=3 calibrates with StratifiedKFold, which puts a patient's other weeks
+    in training while one is validated."""
+    assert _ROW_FOLDS != STANDARD_PIPELINE
+    wd, spec = _history_run_dir(tmp_path, _ROW_FOLDS, _weekly_scored(200, 4), False)
+    result = ms.run_sandbox("train", wd, spec, 120, lambda m: None)
+    assert not result["ok"]
+    assert "splits rows, not patients" in result["error"]
+
+
+def test_row_folds_are_allowed_when_every_patient_has_one_row(tmp_path):
+    frame = _weekly_scored(1500, 5).groupby("patient_id").tail(1)
+    assert frame["risk_score"].ge(40).sum() >= 10
+    wd, spec = _history_run_dir(tmp_path, _ROW_FOLDS, frame, False)
+    result = ms.run_sandbox("train", wd, spec, 120, lambda m: None)
+    assert result["ok"], result["error"]
+
+
+def test_the_standard_pipeline_keeps_patients_in_one_fold(tmp_path):
+    """Model selection (cross_val_score over three candidates) and calibration
+    both run on grouped folds, so the refusal never fires on our own code."""
+    logs = []
+    wd, spec = _history_run_dir(tmp_path, STANDARD_PIPELINE, _weekly_scored(200, 6), False)
+    spec["config"]["algorithm_preference"] = "auto"
+    result = ms.run_sandbox("train", wd, spec, 300, logs.append)
+    assert result["ok"], result["error"]
+    assert any("must keep each patient in one fold" in m for m in logs)
 
 
 def test_earlier_row_features_pass_the_lookahead_check(tmp_path):

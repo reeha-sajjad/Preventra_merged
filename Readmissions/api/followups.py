@@ -67,7 +67,14 @@ MAX_NOTE = 500
 # The alert-reply actions (doctor_service.RECOMMENDED_ACTIONS) that a case
 # manager arranges. "Send to the emergency department" is not one: that is
 # now, not a booking. "Medication change" and "refer" are the doctor's own.
-BOOKING_ACTIONS = ("contact_patient", "schedule_review", "arrange_labs", "home_visit")
+# "Increase monitoring frequency" is: more frequent check-ins have to be
+# arranged by someone, and that is coordination work.
+BOOKING_ACTIONS = ("contact_patient", "schedule_review", "arrange_labs", "home_visit",
+                   "increase_monitoring")
+# Who can hand a request over by replying to an alert: the care team, and the
+# superadmin answering in a doctor's inbox, as that doctor. Never a case
+# manager - they would be asking themselves.
+ALERT_REPLY_ROLES = REQUEST_ROLES + ("superadmin",)
 
 _indexed = set()
 
@@ -202,7 +209,7 @@ def from_alert(db, user: dict, alert: dict) -> Optional[dict]:
     already open for the patient, the reply is added to it as a note instead.
     Returns the request, or None when the reply needs no follow-up."""
     response = alert.get("response") or {}
-    if user["role"] not in REQUEST_ROLES:
+    if user["role"] not in ALERT_REPLY_ROLES:
         return None
     wanted = [a for a in response.get("actions") or [] if a in BOOKING_ACTIONS]
     if not wanted:
