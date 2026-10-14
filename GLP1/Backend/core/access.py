@@ -42,7 +42,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request
 
 from core import access_log
-from core.mongo import get_db
+from core.mongo import get_db, get_shared_identity_db
 from core.security import current_user
 
 COST_VIEW_ROLES = ("superadmin", "hospital_admin", "insurer")
@@ -76,9 +76,16 @@ TREATMENT_REASON = "treatment"
 COORDINATION_REASON = "case_management"
 AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,
                      "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON}
+# Emergency access ("break the glass", core/emergency.py): a doctor or nurse
+# opening a patient of their hospital who is not on their care team, with a
+# reason and a note, for EMERGENCY_HOURS. Logged under its own reason, and
+# reviewed afterwards by the hospital admin (45 CFR 164.312(a)(2)(ii)).
+EMERGENCY_REASON = "emergency_access"
+EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
-                  COORDINATION_REASON: "Care coordination (case manager)"}
+                  COORDINATION_REASON: "Care coordination (case manager)",
+                  EMERGENCY_REASON: "Emergency access (break the glass)"}
 
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
@@ -159,7 +166,34 @@ async def patient_scope(user: dict) -> Optional[list]:
     if query is None:
         return []
     docs = await get_db().patient_access.find(query, {"_id": 0, "patient_idx": 1}).to_list(length=None)
-    return [int(d["patient_idx"]) for d in docs]
+    mine = [int(d["patient_idx"]) for d in docs]
+    if role in CARE_TEAM_ROLES:
+        # Plus any patient opened with emergency access in the last 24 hours.
+        extra = await emergency_patients(user)
+        mine += sorted(extra - set(mine))
+    return mine
+
+
+async def emergency_patients(user: dict) -> set:
+    """Patients this doctor or nurse holds an unexpired emergency grant for."""
+    from datetime import datetime, timezone
+    docs = await get_shared_identity_db()[EMERGENCY_COLLECTION].find(
+        {"app": "glp1", "user_id": user["id"], "expires_at": {"$gt": datetime.now(timezone.utc)}},
+        {"_id": 0, "patient_id": 1}).to_list(length=None)
+    return {int(d["patient_id"]) for d in docs}
+
+
+async def on_care_team(user: dict, patient_idx: int) -> bool:
+    """Is the caller on this patient's care team (as opposed to holding an
+    emergency grant)?"""
+    query = {"patient_idx": int(patient_idx), "hospital_id": user.get("hospital_id")}
+    if user["role"] == "doctor":
+        query.update(doctor_query(user["id"]))
+    elif user["role"] == "nurse":
+        query["assigned_nurse_ids"] = user["id"]
+    else:
+        return False
+    return await get_db().patient_access.find_one(query, {"_id": 1}) is not None
 
 
 async def scope_of(user: dict = Depends(actor)) -> Optional[list]:
@@ -200,6 +234,10 @@ async def require_detail(user: dict, scope: Optional[list], patient_idx: int) ->
     require_patient(scope, patient_idx)
     automatic = AUTOMATIC_REASONS.get(user["role"])
     if automatic:
+        # A doctor or nurse in a patient they reach only by emergency access is
+        # logged as that, not as treatment by the care team.
+        if user["role"] in CARE_TEAM_ROLES and not await on_care_team(user, patient_idx):
+            automatic = EMERGENCY_REASON
         if not await access_log.has_opened(user, patient_idx):
             await access_log.record(user, patient_idx, await patient_hospital(patient_idx),
                                     automatic)

@@ -5,6 +5,7 @@ import { myRole } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
 import CareTeamCard from '../components/shared/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
+import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/shared/ClinicalGate';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
@@ -167,6 +168,9 @@ export default function PatientDetail() {
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
       
       {back}
+
+      {/* Reached by emergency access, not the care team. */}
+      <EmergencyBanner patientId={patient.id} />
 
       {/* Header Profile */}
       <div className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-center md:items-start justify-between gap-6">

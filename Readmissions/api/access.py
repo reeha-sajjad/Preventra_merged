@@ -45,6 +45,8 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+from api import auth
+
 # Collections holding one or more rows per patient, keyed by patient_id. Reads
 # through a ScopedDB are limited to the caller's patients on all of them.
 PATIENT_COLLECTIONS = ("patient_worklist", "weekly_monitoring", "care_actions", "alerts",
@@ -112,9 +114,16 @@ TREATMENT_REASON = "treatment"
 COORDINATION_REASON = "case_management"
 AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,
                      "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON}
+# Emergency access ("break the glass", api/emergency.py): a doctor or nurse
+# opening a patient of their hospital who is not on their care team, with a
+# reason and a note, for 24 hours. Logged under its own reason and reviewed by
+# the hospital admin (45 CFR 164.312(a)(2)(ii)). Same as GLP-1's.
+EMERGENCY_REASON = "emergency_access"
+EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
-                  COORDINATION_REASON: "Care coordination (case manager)"}
+                  COORDINATION_REASON: "Care coordination (case manager)",
+                  EMERGENCY_REASON: "Emergency access (break the glass)"}
 
 # The 403 a reason-role gets for the clinical layer of a patient it has not
 # opened this session. A structured detail so the frontends can tell it from
@@ -199,7 +208,34 @@ def patient_scope(db, user: dict) -> Optional[list]:
         query = None
     if query is None:
         return []
-    return [d["patient_id"] for d in db["care_actions"].find(query, {"patient_id": 1})]
+    mine = [d["patient_id"] for d in db["care_actions"].find(query, {"patient_id": 1})]
+    if role in ("doctor", "nurse"):
+        # Plus any patient opened with emergency access in the last 24 hours.
+        have = {str(p) for p in mine}
+        mine += sorted(p for p in emergency_patients(db, user) if p not in have)
+    return mine
+
+
+def emergency_patients(db, user: dict) -> set:
+    """Patients this doctor or nurse holds an unexpired emergency grant for."""
+    from datetime import datetime, timezone
+    return {d["patient_id"] for d in db.client[auth.IDENTITY_DB][EMERGENCY_COLLECTION].find(
+        {"app": "readmissions", "user_id": str(user["_id"]),
+         "expires_at": {"$gt": datetime.now(timezone.utc)}}, {"patient_id": 1})}
+
+
+def on_care_team(db, user: dict, patient_id) -> bool:
+    """Is the caller on this patient's care team (as opposed to holding an
+    emergency grant)?"""
+    query: dict = {"patient_id": {"$in": id_variants([patient_id])},
+                   "hospital_id": user.get("hospital_id")}
+    if user["role"] == "doctor":
+        query["assigned_doctor_id"] = {"$in": _doctor_ids_for(db, user)}
+    elif user["role"] == "nurse":
+        query["assigned_nurse_ids"] = str(user["_id"])
+    else:
+        return False
+    return db["care_actions"].find_one(query, {"_id": 1}) is not None
 
 
 def id_variants(ids) -> list:

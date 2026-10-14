@@ -7,6 +7,7 @@ import { SkeletonTable } from '../components/shared/LoadingSkeleton';
 import { SEGMENT_SHORT, SEGMENT_COLORS } from '../data/mockData';
 import { usePatients } from '../hooks/usePatients';
 import { useRole } from '../context/RoleContext';
+import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 // A patient's doctors. Rows from before a patient could have several carry
 // only `doctor`.
@@ -193,7 +194,7 @@ function SortHeader({ label, sortKey: sk, currentSort, currentDir, onSort }) {
 /* ── Main Component ───────────────────────────────────────────────── */
 export default function PatientRiskPanel() {
   const navigate = useNavigate();
-  const { isCostView, needsReason, canAssign } = useRole();
+  const { isCostView, needsReason, canAssign, isCareTeam } = useRole();
   const { patients, loading, redacted, reload } = usePatients();
   // Filters the Overview and the Staff page link in with.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -402,6 +403,8 @@ export default function PatientRiskPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* A patient not on this list: break the glass (doctors and nurses). */}
+          {isCareTeam && <EmergencyAccessButton className="whitespace-nowrap" />}
           <div className="relative flex-1 sm:flex-none">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input

@@ -194,8 +194,141 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
         </div>
       </div>
 
+      <EmergencyReview request={request} isSuper={isSuper} hospitals={hospitals} hospitalName={hospitalName} />
       <AccessLog request={request} isSuper={isSuper} hospitals={hospitals} hospitalName={hospitalName} />
     </div>
+  );
+}
+
+// Emergency access ("break the glass") to review - in both apps. A doctor or
+// nurse who opened a patient not on their care team, with their reason and
+// note; the admin marks each one appropriate, or not appropriate with a note
+// so it can be followed up (Readmissions/api/emergency.py, 45 CFR 164.312(a)(2)(ii)).
+function EmergencyReview({ request, isSuper, hospitals, hospitalName }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('to_review');
+  const [hospitalId, setHospitalId] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [editing, setEditing] = useState(null);        // { id, outcome, note }
+  const [busy, setBusy] = useState(false);
+  // Opens by itself when there is something to review; after that it stays
+  // however the admin leaves it (it does not snap shut after the last review).
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    const qs = new URLSearchParams(Object.entries({ status, hospital_id: hospitalId }).filter(([, v]) => v));
+    request(`/auth/admin/emergency-access?${qs}`)
+      .then((d) => {
+        if (!current) return;
+        setData(d); setError(null);
+        if (d.to_review > 0) setOpen(true);
+      })
+      .catch((e) => { if (current) setError(e.message); });
+    return () => { current = false; };
+  }, [request, status, hospitalId, reloadKey]);
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await request(`/auth/admin/emergency-access/${editing.id}/review`,
+                    { method: 'POST', body: { outcome: editing.outcome, note: editing.note } });
+      setEditing(null); setReloadKey((k) => k + 1);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const waiting = data?.to_review || 0;
+  return (
+    <details className={panel} open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer font-semibold text-gray-800">
+        Emergency access to review
+        {waiting > 0 && (
+          <span className="ml-2 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">{waiting}</span>
+        )}
+      </summary>
+      <p className="mt-2 text-xs text-gray-500">
+        A doctor or nurse opened a patient who is not on their care team (&ldquo;break the glass&rdquo;), with the
+        reason and note they gave. The record stayed open to them for 24 hours. Check each one was for a real
+        emergency; anything not appropriate needs a note so it can be followed up.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <select className={inputInline} value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="to_review">To review</option>
+          <option value="all">All</option>
+        </select>
+        {isSuper && (
+          <select className={inputInline} value={hospitalId} onChange={(e) => setHospitalId(e.target.value)}>
+            <option value="">All hospitals</option>
+            {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+          </select>
+        )}
+      </div>
+      {error && <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
+            <tr><th className="py-2 pr-3">When</th><th className="py-2 pr-3">Who</th>
+                <th className="py-2 pr-3">App</th><th className="py-2 pr-3">Patient</th>
+                {isSuper && <th className="py-2 pr-3">Hospital</th>}
+                <th className="py-2 pr-3">Reason and note</th><th className="py-2">Review</th></tr>
+          </thead>
+          <tbody>
+            {(data?.items || []).map((g) => (
+              <tr key={g.id} className="border-b border-gray-100 align-top">
+                <td className="py-2 pr-3 whitespace-nowrap text-xs text-gray-500">
+                  {new Date(g.granted_at).toLocaleString()}
+                  {g.active && <div className="mt-0.5 text-[11px] font-semibold text-red-700">still open</div>}
+                </td>
+                <td className="py-2 pr-3">
+                  <div className="text-gray-800">{g.user.name || g.user.email}</div>
+                  <div className="text-xs text-gray-500">{ROLE_LABELS[g.user.role] || g.user.role}</div>
+                </td>
+                <td className="py-2 pr-3 whitespace-nowrap text-gray-700">{APP_LABELS[g.app] || g.app}</td>
+                <td className="py-2 pr-3 font-mono text-xs text-gray-700">{g.patient_id}</td>
+                {isSuper && <td className="py-2 pr-3 text-gray-700">{hospitalName(g.hospital_id)}</td>}
+                <td className="py-2 pr-3 max-w-xs">
+                  <div className="text-gray-800">{g.reason_label}</div>
+                  <div className="text-xs text-gray-500">&ldquo;{g.note}&rdquo;</div>
+                </td>
+                <td className="py-2 min-w-[200px]">
+                  {g.review ? (
+                    <div>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${g.review.outcome === 'appropriate'
+                        ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{g.review.outcome_label}</span>
+                      <div className="mt-0.5 text-[11px] text-gray-500">{g.review.by.email}</div>
+                      {g.review.note && <div className="text-xs text-gray-600">{g.review.note}</div>}
+                    </div>
+                  ) : editing?.id === g.id ? (
+                    <div className="space-y-1.5">
+                      <select className={input} value={editing.outcome}
+                              onChange={(e) => setEditing({ ...editing, outcome: e.target.value })}>
+                        {(data.outcomes || []).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                      <input className={input} placeholder={editing.outcome === 'inappropriate' ? 'What was wrong (required)' : 'Note (optional)'}
+                             value={editing.note} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
+                      <div className="flex gap-1.5">
+                        <button type="button" className={button} disabled={busy} onClick={save}>Save</button>
+                        <button type="button" className={ghost} onClick={() => setEditing(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" className={ghost}
+                            onClick={() => setEditing({ id: g.id, outcome: 'appropriate', note: '' })}>Review</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {data && !data.items.length && (
+              <tr><td colSpan={isSuper ? 7 : 6} className="py-6 text-center text-gray-400">
+                {status === 'to_review' ? 'Nothing to review.' : 'No emergency access yet.'}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }
 
@@ -226,9 +359,10 @@ function AccessLog({ request, isSuper, hospitals, hospitalName }) {
         Access log{entries ? ` (${entries.length}${entries.length >= 200 ? '+' : ''})` : ''}
       </summary>
       <p className="mt-2 text-xs text-gray-500">
-        Every time a hospital admin, an insurer or our team opens a patient&apos;s clinical
-        details, with the reason they gave. Doctors, nurses and case managers see their own
-        patients&apos; details without being asked, so they do not appear here.
+        Every time someone opens a patient&apos;s clinical details, once per patient per
+        sign-in, with the reason. Hospital admins and insurers give a reason; for doctors and
+        nurses it is &ldquo;Treatment&rdquo;, for case managers &ldquo;Care coordination&rdquo;,
+        and &ldquo;Emergency access&rdquo; when they broke the glass.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <select className={inputInline} value={app} onChange={(e) => setApp(e.target.value)}>
