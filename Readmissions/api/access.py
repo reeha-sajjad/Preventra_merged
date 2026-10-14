@@ -50,7 +50,8 @@ from api import auth
 # Collections holding one or more rows per patient, keyed by patient_id. Reads
 # through a ScopedDB are limited to the caller's patients on all of them.
 PATIENT_COLLECTIONS = ("patient_worklist", "weekly_monitoring", "care_actions", "alerts",
-                       "clinical_alerts", "risk_registry", "notifications")
+                       "clinical_alerts", "risk_registry", "notifications", "followups",
+                       "care_team_history")
 
 # Which roles may do each kind of change. Reading is governed by the scope
 # alone; insurers and patients are read-only.

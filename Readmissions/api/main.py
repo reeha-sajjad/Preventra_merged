@@ -2657,6 +2657,15 @@ def set_care_team(payload: CareTeamRequest, request: Request):
                            add_nurse_ids=payload.add_nurse_ids)
 
 
+@app.get("/api/patients/{patient_id}/care-team/history")
+def get_care_team_history(patient_id: str, request: Request):
+    """Every change to one patient's care team, newest first: who changed it,
+    when, and from what to what. For the roles that assign care teams."""
+    _require_patient(request, patient_id)
+    _require(request, "assign")
+    return {"patient_id": patient_id, "changes": hospital.care_team_history(db, patient_id)}
+
+
 _SUMMARY_FIELDS = {"_id": 0, "patient_id": 1, "risk_score": 1, "risk_band": 1,
                    "current_score": 1, "current_band": 1, "monitoring_status": 1,
                    "trend_delta": 1, "weeks_tracked": 1, "discharge_date": 1}
@@ -2727,11 +2736,20 @@ def assign_coordinator(patient_id: str, payload: AssignCoordinatorRequest, reque
             raise HTTPException(status_code=404, detail="Doctor not found")
         fields["assigned_doctor_id"] = doctor_id or None
 
+    before = db["care_actions"].find_one(_patient_id_filter(patient_id),
+                                         {"assigned_doctor_id": 1, "assigned_nurse_ids": 1,
+                                          "hospital_id": 1})
     db["care_actions"].update_one(
         _patient_id_filter(patient_id),
         {"$set": fields, "$setOnInsert": {"notes": []}},
         upsert=True,
     )
+    if "assigned_doctor_id" in fields:
+        old = hospital._team(before)
+        hospital.archive_care_team_changes(
+            db, [(patient_id, (before or {}).get("hospital_id"), old,
+                  {**old, "doctor_id": fields["assigned_doctor_id"]})],
+            request.state.user, via="assign")
     return {"status": "assigned", "patient_id": patient_id,
             "coordinator_name": payload.coordinator_name,
             "assigned_doctor_id": fields.get("assigned_doctor_id")}
@@ -3080,6 +3098,15 @@ def get_doctor_notifications(doctor_id: str, request: Request):
     return doctor_service.unread_count(view, doctor_id)
 
 
+@app.get("/api/clinical-alerts/mine")
+def get_my_clinical_alerts(request: Request, status: Optional[str] = "open", limit: int = 50):
+    """Alerts about the caller's patients, whichever doctor they were routed to.
+    The nurse console: a nurse sees the alerts of the patients assigned to them."""
+    _require(request, "read_inboxes")
+    return {"alerts": doctor_service.alerts_for_patients(_view(request), status=status,
+                                                         limit=min(max(limit, 1), 200))}
+
+
 @app.get("/api/clinical-alerts/unrouted")
 def get_unrouted_alerts(request: Request, limit: int = 50):
     """Alerts with no registered doctor to send them to. Never silently dropped."""
@@ -3094,6 +3121,15 @@ def get_patient_clinical_alerts(patient_id: str, request: Request):
             "alerts": doctor_service.patient_alerts(_view(request), patient_id)}
 
 
+def _responder(request: Request) -> dict:
+    """Who actually acted on an alert, kept beside the doctor it is filed under:
+    a nurse answers in their own name, and a case manager covering a doctor's
+    inbox answers as that doctor but is still recorded."""
+    user = request.state.user
+    return {"id": str(user["_id"]), "name": user.get("name") or user.get("email", ""),
+            "email": user.get("email", ""), "role": user["role"]}
+
+
 def _require_clinical_alert(request: Request, alert_id: str) -> None:
     """404 unless the alert is about one of the caller's patients; 403 unless
     their role responds to alerts."""
@@ -3106,7 +3142,8 @@ def _require_clinical_alert(request: Request, alert_id: str) -> None:
 def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.acknowledge(db, alert_id, payload.doctor_id)
+        return doctor_service.acknowledge(db, alert_id, payload.doctor_id,
+                                          responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -3117,13 +3154,14 @@ def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: R
     try:
         alert = doctor_service.respond(
             db, alert_id, payload.doctor_id, payload.recommendation,
-            actions=payload.actions, urgency=payload.urgency)
+            actions=payload.actions, urgency=payload.urgency,
+            responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    # A reply that asks for a call, a review, bloods or a home visit goes to the
-    # hospital's case managers as a follow-up request (api/followups.py). The
+    # A reply that asks for a call, a review, bloods, a home visit or more
+    # frequent monitoring goes to the hospital's case managers as a follow-up request (api/followups.py). The
     # reply is already saved; a problem here must not undo or hide it.
     try:
         alert["followup"] = followups.from_alert(db, request.state.user, alert)
@@ -3137,7 +3175,8 @@ def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: R
 def dismiss_clinical_alert(alert_id: str, payload: DismissRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason)
+        return doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason,
+                                      responder=_responder(request))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

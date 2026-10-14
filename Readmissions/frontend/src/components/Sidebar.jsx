@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
          FlaskConical, Settings, CalendarClock } from 'lucide-react';
-import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting } from '../api';
+import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
 import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
          ROLE_LABELS } from '../roles';
@@ -32,13 +32,17 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   }, [open, onClose]);
 
   // Follow-up requests nobody has taken yet, for the badge on "Follow-ups".
-  // Re-read on every page change, so taking one updates the count.
+  // Re-read on every page change, and at once when this tab takes, finishes
+  // or creates one (FOLLOWUPS_CHANGED), so the count never lags a click.
   const [waiting, setWaiting] = useState(0);
   useEffect(() => {
     if (!can(FOLLOWUP_HANDLE_ROLES)) return undefined;
     let live = true;
-    getFollowUpsWaiting().then((d) => { if (live) setWaiting(d.waiting || 0); }).catch(() => {});
-    return () => { live = false; };
+    const refresh = () => getFollowUpsWaiting()
+      .then((d) => { if (live) setWaiting(d.waiting || 0); }).catch(() => {});
+    refresh();
+    window.addEventListener(FOLLOWUPS_CHANGED, refresh);
+    return () => { live = false; window.removeEventListener(FOLLOWUPS_CHANGED, refresh); };
   }, [location.pathname]);
 
   const role = readClaims()?.role;
