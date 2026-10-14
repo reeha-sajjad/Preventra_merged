@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getAiInsights } from '../../api';
+import { can, COST_ROLES } from '../../roles';
 import BulletList from './BulletList';
 import { Sparkles, Loader2, AlertCircle, DollarSign, Lightbulb, ChevronRight,
          ShieldCheck, TrendingUp, AlertTriangle } from 'lucide-react';
@@ -46,6 +47,9 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
   const [insights, setInsights] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Roles that do not see costs get the counterfactual only; the server sends
+  // nothing else (api/main.py get_ai_insights), this just labels the panel.
+  const seesCosts = can(COST_ROLES);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -79,7 +83,7 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
       <div className={`flex items-center justify-between ${compact ? 'mb-3' : 'mb-4 border-b pb-4'}`}>
         <h3 className={`font-semibold text-ns-navy flex items-center space-x-2 ${compact ? 'text-sm' : 'text-base'}`}>
           <Sparkles className="text-gray-400" size={compact ? 16 : 20} />
-          <span>AI Insights — ROI &amp; Counterfactual</span>
+          <span>{seesCosts ? <>AI Insights — ROI &amp; Counterfactual</> : 'AI Insights — What would lower the risk'}</span>
         </h3>
         {!insights && (
           <button
@@ -96,8 +100,9 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
 
       {!insights && !loading && !error && (
         <p className="text-sm text-gray-500">
-          Estimate the return on investment of a care-coordination intervention for this patient, and get a
-          counterfactual explaining what would most lower their risk.
+          {seesCosts
+            ? 'Estimate the return on investment of a care-coordination intervention for this patient, and get a counterfactual explaining what would most lower their risk.'
+            : 'Get a counterfactual explaining which of this patient’s risk factors, if addressed, would most lower their risk.'}
         </p>
       )}
 
@@ -112,7 +117,9 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
         <div className="space-y-4 animate-in fade-in duration-300">
           {/* ROI stats. Every figure is computed server-side from the itemised
               model in api/roi_model.py, so the breakdown below is the actual
-              arithmetic rather than a restatement of a lump sum. */}
+              arithmetic rather than a restatement of a lump sum. Absent for the
+              roles that do not see costs - the server sends none. */}
+          {!insights.costs_hidden && (
           <div>
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
               <DollarSign size={14} />
@@ -232,9 +239,10 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
 
             <BulletList items={insights.roi_rationale} className="text-sm text-gray-600 mt-3" />
           </div>
+          )}
 
           {/* Counterfactual — always the final block */}
-          <div className="border-t border-gray-100 pt-4">
+          <div className={insights.costs_hidden ? '' : 'border-t border-gray-100 pt-4'}>
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
               <Lightbulb size={14} />
               <span>Counterfactual Explanation</span>
