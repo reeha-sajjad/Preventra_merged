@@ -74,6 +74,14 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
+// Anything that can change the follow-up queue says so, and the menu's
+// waiting count (Sidebar.jsx) refreshes at once rather than on the next page.
+export const FOLLOWUPS_CHANGED = 'preventra:followups-changed';
+const followUpsChanged = (result) => {
+  try { window.dispatchEvent(new Event(FOLLOWUPS_CHANGED)); } catch { /* no window */ }
+  return result;
+};
+
 // ─── Real API implementations ──────────────────────────────────────────────
 const json = (body) => ({
   method: 'POST',
@@ -122,13 +130,18 @@ const RealAPI = {
 
   // ─── Follow-ups ──────────────────────────────────────────────────────────
   // Doctors and nurses ask, case managers arrange. See api/followups.py.
+  // Anything that can change the queue announces it (followUpsChanged), so the
+  // menu's waiting count refreshes at once rather than on the next page.
   getFollowUps: (status = 'active') => apiFetch(`/api/followups?status=${status}`),
   getFollowUpsWaiting: () => apiFetch('/api/followups/waiting'),
   getPatientFollowUp: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`),
-  requestFollowUp: (id, body) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`, json(body)),
+  requestFollowUp: (id, body) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`, json(body)).then(followUpsChanged),
   addFollowUpNote: (fid, text) => apiFetch(`/api/followups/${fid}/note`, json({ text })),
-  takeFollowUp: (fid) => apiFetch(`/api/followups/${fid}/take`, { method: 'POST' }),
-  finishFollowUp: (fid, body) => apiFetch(`/api/followups/${fid}/done`, json(body)),
+  takeFollowUp: (fid) =>
+    apiFetch(`/api/followups/${fid}/take`, { method: 'POST' }).then(followUpsChanged),
+  finishFollowUp: (fid, body) =>
+    apiFetch(`/api/followups/${fid}/done`, json(body)).then(followUpsChanged),
 
   // ─── Clinician loop ──────────────────────────────────────────────────────
   // Forecast -> alert -> the doctor's inbox -> a recommendation back on the
@@ -154,13 +167,18 @@ const RealAPI = {
   getDoctorNotifications: (doctorId) =>
     apiFetch(`/api/doctors/${encodeURIComponent(doctorId)}/notifications`),
   getUnroutedAlerts: () => apiFetch('/api/clinical-alerts/unrouted'),
+  /** The nurse console: alerts on the caller's own patients, whichever doctor they went to. */
+  getMyClinicalAlerts: (status = 'open') =>
+    apiFetch(`/api/clinical-alerts/mine?status=${encodeURIComponent(status)}`),
   getRecommendedActions: () => apiFetch('/api/clinical-alerts/actions'),
 
   acknowledgeClinicalAlert: (alertId, doctorId) =>
     apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/acknowledge`,
       json({ doctor_id: doctorId })),
+  // A reply can hand a follow-up request to the case managers.
   respondToClinicalAlert: (alertId, body) =>
-    apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/respond`, json(body)),
+    apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/respond`, json(body))
+      .then(followUpsChanged),
   dismissClinicalAlert: (alertId, doctorId, reason) =>
     apiFetch(`/api/clinical-alerts/${encodeURIComponent(alertId)}/dismiss`,
       json({ doctor_id: doctorId, reason })),
@@ -549,6 +567,7 @@ export const getForecastScan = clinicianOnly(RealAPI.getForecastScan);
 export const getDoctorAlerts = clinicianOnly(RealAPI.getDoctorAlerts);
 export const getDoctorNotifications = clinicianOnly(RealAPI.getDoctorNotifications);
 export const getUnroutedAlerts = clinicianOnly(RealAPI.getUnroutedAlerts);
+export const getMyClinicalAlerts = clinicianOnly(RealAPI.getMyClinicalAlerts);
 export const getRecommendedActions = clinicianOnly(RealAPI.getRecommendedActions);
 export const acknowledgeClinicalAlert = clinicianOnly(RealAPI.acknowledgeClinicalAlert);
 export const respondToClinicalAlert = clinicianOnly(RealAPI.respondToClinicalAlert);

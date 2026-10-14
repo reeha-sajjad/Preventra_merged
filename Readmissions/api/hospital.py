@@ -48,6 +48,56 @@ def _band(row: dict) -> str:
     return str(row.get("current_band") or row.get("risk_band") or "").capitalize()
 
 
+# ------------------------------------------------------- care-team history
+# `care_actions` holds each patient's care team as it is NOW, with the last
+# change's author and time. Every change, including the earlier ones that
+# record overwrites, is also archived here, one document per patient per
+# change, and never updated or deleted.
+CARE_TEAM_HISTORY = "care_team_history"
+
+
+def _team(row: Optional[dict]) -> dict:
+    row = row or {}
+    return {"doctor_id": row.get("assigned_doctor_id") or None,
+            "nurse_ids": [str(n) for n in (row.get("assigned_nurse_ids") or [])]}
+
+
+def archive_care_team_changes(db, changes: list, user: dict, via: str) -> int:
+    """Store (patient_id, hospital_id, before, after) changes; unchanged ones
+    are skipped. Returns how many were stored."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    by = {"id": str(user.get("_id", "")), "email": user.get("email", ""),
+          "name": user.get("name") or user.get("email", ""), "role": user.get("role", "")}
+    docs = [{"patient_id": str(pid), "hospital_id": hospital, "before": before, "after": after,
+             "changed_by": by, "changed_at": now, "via": via}
+            for pid, hospital, before, after in changes if before != after]
+    if docs:
+        db[CARE_TEAM_HISTORY].insert_many(docs)
+    return len(docs)
+
+
+def care_team_history(db, patient_id: str, limit: int = 100) -> list:
+    """Every change to one patient's care team, newest first, with names."""
+    rows = list(db[CARE_TEAM_HISTORY].find(
+        {"patient_id": {"$in": access.id_variants([patient_id])}}, {"_id": 0})
+        # changed_at is to the second; the id breaks ties in the order written.
+        .sort([("changed_at", -1), ("_id", -1)]).limit(limit))
+    doctor_ids = {t["doctor_id"] for r in rows for t in (r["before"], r["after"]) if t.get("doctor_id")}
+    nurse_ids = {n for r in rows for t in (r["before"], r["after"]) for n in t.get("nurse_ids", [])}
+    doctors = {d["doctor_id"]: d.get("name", d["doctor_id"])
+               for d in db["doctors"].find({"doctor_id": {"$in": list(doctor_ids)}},
+                                           {"doctor_id": 1, "name": 1})}
+    nurses = {str(u["_id"]): u.get("name") or u.get("email", "")
+              for u in auth.users(db).find({"_id": {"$in": _object_ids(nurse_ids)}},
+                                           {"name": 1, "email": 1})}
+
+    def named(team: dict) -> dict:
+        return {**team, "doctor": doctors.get(team.get("doctor_id"), team.get("doctor_id")),
+                "nurses": [nurses.get(n, n) for n in team.get("nurse_ids", [])]}
+
+    return [{**r, "before": named(r["before"]), "after": named(r["after"])} for r in rows]
+
+
 # ------------------------------------------------------------ care teams
 def owners(db, patient_ids) -> dict:
     """patient_id (as a string) -> its ownership record."""
@@ -177,6 +227,19 @@ def assign(db, user: dict, scope: Optional[list], patient_ids: list,
 
     result = db["care_actions"].update_many(
         {"patient_id": {"$in": access.id_variants(patient_ids)}}, update)
+
+    changes = []
+    for pid in patient_ids:
+        before = _team(own.get(pid))
+        after = dict(before)
+        if doctor_id is not None:
+            after["doctor_id"] = doctor_id or None
+        if nurse_ids is not None:
+            after["nurse_ids"] = [str(n) for n in dict.fromkeys(nurse_ids)]
+        elif add_nurse_ids:
+            after["nurse_ids"] = list(dict.fromkeys(before["nurse_ids"] + [str(n) for n in add_nurse_ids]))
+        changes.append((pid, hospital, before, after))
+    archive_care_team_changes(db, changes, user, via="care_team")
     return {"updated": result.matched_count, "patient_ids": patient_ids}
 
 
