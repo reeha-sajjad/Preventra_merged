@@ -386,3 +386,25 @@ def test_reading_your_account_is_not_an_opening(main, marked):
     before = len(log(marked))
     as_user(main, marked, "admin@a.test").get("/api/me")
     assert len(log(marked)) == before
+
+
+# -------------------------------------------------------------- my patients
+def test_my_patients_counts_only_the_doctors_and_nurses_own(main, world):
+    world["db"]["patient_worklist"].update_many({"patient_id": A2}, {"$set": {"monitoring_status": "deteriorating"}})
+    world["db"]["clinical_alerts"].update_many({}, {"$set": {"status": "pending"}})
+    doctor = as_user(main, world, "doc.a@a.test").get("/api/my-patients").json()
+    assert doctor["total"] == 2                                       # A1, A2
+    assert {a["id"] for a in doctor["attention"]} <= {A1, A2}
+    assert doctor["needs_attention"] == 1 and doctor["attention"][0]["id"] == A2   # worse first
+    assert doctor["open_alerts"] == 2                                 # CA-A1, CA-A2, both to DR-A
+    assert sum(doctor["bands"].values()) == 2
+
+    nurse = as_user(main, world, "nurse@a.test").get("/api/my-patients").json()
+    assert nurse["total"] == 3                                        # A1, A2, A3
+    assert nurse["open_alerts"] == 3
+
+
+@pytest.mark.parametrize("email", ["admin@a.test", "cm@a.test", "claims@acme.test", "me@patient.test",
+                                   "ops@team.test"])
+def test_my_patients_is_only_for_doctors_and_nurses(main, world, email):
+    assert as_user(main, world, email).get("/api/my-patients").status_code == 403

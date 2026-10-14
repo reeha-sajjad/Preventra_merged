@@ -13,6 +13,7 @@ export default function TopNav({ onMenuClick = () => {} }) {
     if (path === '/patients') return 'Patients';
     if (path.startsWith('/patients/')) return 'Patient Detail';
     if (path === '/staff') return 'Staff';
+    if (path === '/follow-ups') return 'Follow-ups';
     if (path === '/settings') return 'Settings';
     if (path === '/my-record') return 'My record';
     if (path === '/analytics') return 'Analytics';

@@ -10,7 +10,7 @@ import {
   dismissClinicalAlert, getUnroutedAlerts, startForecastScan, getForecastScan,
 } from '../api';
 import { readClaims } from '../api/auth';
-import { can, REGISTRY_ROLES } from '../roles';
+import { can, REGISTRY_ROLES, FOLLOWUP_REQUEST_ROLES } from '../roles';
 
 // Which doctor the console is acting as. Persisted so a refresh does not send
 // the user back to the picker, and namespaced so it cannot collide with
@@ -18,6 +18,9 @@ import { can, REGISTRY_ROLES } from '../roles';
 const IDENTITY_KEY = 'preventra.doctorId';
 const POLL_INTERVAL_MS = 30000;
 const SCAN_POLL_MS = 3000;
+
+// Reply actions a case manager arranges (api/followups.py BOOKING_ACTIONS).
+const BOOKING_ACTIONS = ['contact_patient', 'schedule_review', 'arrange_labs', 'home_visit'];
 
 const SEVERITY_STYLE = {
   critical: 'bg-risk-high text-white',
@@ -504,6 +507,12 @@ function AlertCard({ alert, doctorId, actions, urgencies, onOpenPatient, onResol
                 </button>
               ))}
             </div>
+            {/* api/followups.py BOOKING_ACTIONS: these become a follow-up request. */}
+            {can(FOLLOWUP_REQUEST_ROLES) && picked.some((k) => BOOKING_ACTIONS.includes(k)) && (
+              <p className="mt-1.5 text-xs text-gray-500">
+                Your hospital&apos;s case managers will get this as a follow-up request to arrange.
+              </p>
+            )}
           </div>
 
           <div className="flex items-end gap-3 flex-wrap">

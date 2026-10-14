@@ -18,7 +18,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException
 
-from api import access, auth, doctor_service
+from api import access, auth, doctor_service, risk_watch
 
 OPEN_ALERT_STATUSES = list(doctor_service._STATUS_OPEN)
 HIGH = "High"
@@ -207,6 +207,79 @@ def me(db, user: dict, scope: Optional[list]) -> dict:
             "role": user["role"], "hospital": _hospital_name(db, user.get("hospital_id")),
             "insurer": insurer,
             "patients": None if scope is None else len({str(p) for p in scope})}
+
+
+# -------------------------------------------------------------- my patients
+NEEDS_ATTENTION = ("action_required", "deteriorating")
+ATTENTION_SHOWN = 8
+_MY_FIELDS = {"_id": 0, "patient_id": 1, "risk_score": 1, "risk_band": 1, "current_score": 1,
+              "current_band": 1, "trend_delta": 1, "monitoring_status": 1, "primary_diagnosis": 1,
+              "group_label": 1, "primary_driver_label": 1, "driver_1": 1, "driver_2": 1,
+              "driver_3": 1, "discharge_date": 1}
+
+
+def _score(row: dict) -> float:
+    try:
+        return float(row.get("current_score", row.get("risk_score", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _top(counts: dict, n: int = 6) -> list:
+    return [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:n]]
+
+
+def my_patients(db, view, user: dict, batch_dates: list, driver_of) -> dict:
+    """The home page of a doctor or nurse: their own patients, latest batch.
+
+    Everything is read through `view`, which only holds the caller's patients
+    (access.ScopedDB), so nothing here can count or name anyone else's. The
+    same layout as GLP-1's "My patients" (GLP1/Frontend/src/pages/CareHome.jsx).
+    `driver_of(patient_id, row)` is the worklist's own "main reason" pick, so
+    the home page and the patient list name the same reason for a patient.
+    """
+    out = {"batch_date": batch_dates[-1] if batch_dates else None, "total": 0,
+           "bands": {"High": 0, "Medium": 0, "Low": 0}, "needs_attention": 0,
+           "rising": 0, "open_alerts": 0, "conditions": [], "reasons": [], "attention": []}
+    if not batch_dates:
+        return out
+    rows = list(view["patient_worklist"].find({"batch_date": batch_dates[-1]}, _MY_FIELDS))
+    conditions, reasons, attention = {}, {}, []
+    for r in rows:
+        pid = str(r.get("patient_id", "")).strip()
+        if not pid:
+            continue
+        band = _band(r)
+        if band in out["bands"]:
+            out["bands"][band] += 1
+        label = r.get("group_label") or "Other"
+        conditions[label] = conditions.get(label, 0) + 1
+        reason = r.get("primary_driver_label") or driver_of(pid, r)
+        if reason:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        status = r.get("monitoring_status") or ""
+        if status in NEEDS_ATTENTION:
+            out["needs_attention"] += 1
+        if status in NEEDS_ATTENTION or band == HIGH:
+            attention.append({"id": pid, "risk_score": _score(r), "risk_band": band,
+                              "trend_delta": r.get("trend_delta"), "monitoring_status": status,
+                              "primary_diagnosis": r.get("primary_diagnosis") or "",
+                              "main_reason": reason or ""})
+    out["total"] = sum(out["bands"].values()) or len(rows)
+    out["conditions"], out["reasons"] = _top(conditions), _top(reasons)
+    # Getting worse first, then the highest risk.
+    attention.sort(key=lambda a: (a["monitoring_status"] not in NEEDS_ATTENTION, -a["risk_score"], a["id"]))
+    out["attention_total"] = len(attention)
+    out["attention"] = attention[:ATTENTION_SHOWN]
+
+    out["rising"] = risk_watch.watchlist(view, db, user, limit=1)["total"]
+    # A doctor's open alerts are the ones addressed to them; a nurse sees the
+    # open alerts on the patients they look after.
+    alerts = {"status": {"$in": OPEN_ALERT_STATUSES}}
+    if user["role"] == "doctor":
+        alerts["doctor_id"] = {"$in": access._doctor_ids_for(db, user)}
+    out["open_alerts"] = view["clinical_alerts"].count_documents(alerts)
+    return out
 
 
 def overview(db, view, user: dict, batch_dates: list) -> dict:
