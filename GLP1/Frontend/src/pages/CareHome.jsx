@@ -9,6 +9,7 @@ import { SEGMENT_SHORT, SEGMENT_COLORS } from '../data/mockData';
 import { usePatients } from '../hooks/usePatients';
 import { useRole } from '../context/RoleContext';
 import PageState from '../components/shared/PageState';
+import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 // Same bands as the Patients page and the risk badges (index.css .risk-*).
 const BANDS = [
@@ -78,6 +79,8 @@ export default function CareHome() {
             Your hospital admin or case manager adds you to patients&rsquo; care teams. Once they do,
             those patients appear here.
           </p>
+          <div className="mt-4 flex justify-center"><EmergencyAccessButton /></div>
+          <p className="mt-2 text-[11px] text-gray-400">Treating a patient who isn&rsquo;t on your list in an emergency? Use emergency access.</p>
         </div>
       </div>
     );
@@ -101,10 +104,13 @@ export default function CareHome() {
               {roleLabel ? ` as ${/^[aeiou]/i.test(roleLabel) ? 'an' : 'a'} ${roleLabel.toLowerCase()}` : ''}
             </p>
           </div>
-          <Link to="/patients" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
-                style={{ color: 'var(--color-primary)' }}>
-            Open patient list <ArrowRight size={13} />
-          </Link>
+          <div className="flex items-center gap-3">
+            <EmergencyAccessButton />
+            <Link to="/patients" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
+                  style={{ color: 'var(--color-primary)' }}>
+              Open patient list <ArrowRight size={13} />
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">

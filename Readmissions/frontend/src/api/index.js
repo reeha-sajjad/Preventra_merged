@@ -120,6 +120,11 @@ const RealAPI = {
   openPatient: (id, reason) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/open`, json({ reason })),
 
+  // ─── Emergency access ("break the glass") - api/emergency.py ─────────────
+  emergencyLookup: (patientId) => apiFetch('/api/emergency-access/lookup', json({ patient_id: patientId })),
+  emergencyGrant: (body) => apiFetch('/api/emergency-access', json(body)),
+  getPatientEmergency: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/emergency`),
+
   // ─── Follow-ups ──────────────────────────────────────────────────────────
   // Doctors and nurses ask, case managers arrange. See api/followups.py.
   getFollowUps: (status = 'active') => apiFetch(`/api/followups?status=${status}`),
@@ -410,6 +415,9 @@ export const changePassword    = realOnly(RealAPI.changePassword);
 export const getOverview       = realOnly(RealAPI.getOverview);
 export const getStaff          = realOnly(RealAPI.getStaff);
 export const getMyPatients     = realOnly(RealAPI.getMyPatients);
+export const emergencyLookup     = realOnly(RealAPI.emergencyLookup);
+export const emergencyGrant      = realOnly(RealAPI.emergencyGrant);
+export const getPatientEmergency = realOnly(RealAPI.getPatientEmergency);
 export const getFollowUps        = realOnly(RealAPI.getFollowUps);
 export const getFollowUpsWaiting = realOnly(RealAPI.getFollowUpsWaiting);
 export const getPatientFollowUp  = realOnly(RealAPI.getPatientFollowUp);

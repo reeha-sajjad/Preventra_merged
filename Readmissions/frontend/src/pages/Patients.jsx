@@ -6,7 +6,8 @@ import PatientWorklist from '../components/dashboard/PatientWorklist';
 import PatientDetailPanel from '../components/dashboard/PatientDetailPanel';
 import RisingRiskPanel from '../components/dashboard/RisingRiskPanel';
 import { getStaff } from '../api';
-import { can, STAFF_ROLES, WATCH_ROLES } from '../roles';
+import { can, STAFF_ROLES, WATCH_ROLES, MY_PATIENTS_ROLES } from '../roles';
+import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 /**
  * Who are my patients? The same page for every role; the backend decides whose
@@ -53,6 +54,10 @@ export default function Patients() {
       {/* A doctor's or nurse's own patients who got worse, above everything
           else on their list. Not on a care-team drill-down, which is someone
           else's list. */}
+      {/* A patient not on this list: break the glass (doctors and nurses). */}
+      {can(MY_PATIENTS_ROLES) && (
+        <div className="mb-4 flex justify-end"><EmergencyAccessButton /></div>
+      )}
       {can(WATCH_ROLES) && !careFilter && <RisingRiskPanel />}
       <FilterBar />
       {careFilter && (

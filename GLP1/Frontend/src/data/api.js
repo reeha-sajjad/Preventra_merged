@@ -146,6 +146,13 @@ export const api = {
   markNotificationsSeen: (body)  => post("/api/notifications/seen", body),
 
   // Follow-up requests (Backend/core/followups.py)
+  // Emergency access ("break the glass") - Backend/core/emergency.py
+  emergencyLookup:      (idx)    => post("/api/emergency-access/lookup", { patient_idx: Number(idx) }),
+  emergencyGrant:       (body)   => post("/api/emergency-access", body),
+  getPatientEmergency:  (id)     => get(`/api/patients/${id}/emergency`),
+  // Medication changes - Backend/core/medications.py
+  getMedications:       (id)     => get(`/api/patients/${id}/medications`),
+  recordMedicationChange: (id, body) => post(`/api/patients/${id}/medications`, body),
   getPatientFollowUp:   (id)     => get(`/api/patients/${id}/followup`),
   /** { urgency: 'urgent' | 'routine', note? } - doctors and hospital nurses */
   requestFollowUp:      (id, body) => post(`/api/patients/${id}/followup`, body),

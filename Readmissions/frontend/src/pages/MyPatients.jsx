@@ -9,6 +9,7 @@ import { readClaims } from '../api/auth';
 import RiskBadge from '../components/shared/RiskBadge';
 import TrendStatusBadge from '../components/shared/TrendStatusBadge';
 import RisingRiskPanel from '../components/dashboard/RisingRiskPanel';
+import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 /**
  * "My patients": the home page of a doctor or nurse. Their own patients only -
@@ -134,6 +135,8 @@ export default function MyPatients() {
             Your hospital admin or case manager adds you to patients&rsquo; care teams. Once they do,
             those patients appear here.
           </p>
+          <div className="mt-4 flex justify-center"><EmergencyAccessButton /></div>
+          <p className="mt-2 text-xs text-gray-400">Treating a patient who isn&rsquo;t on your list in an emergency? Use emergency access.</p>
         </div>
       </div>
     );
@@ -153,11 +156,14 @@ export default function MyPatients() {
             to you as {isDoctor ? 'their doctor' : 'their nurse'}.
           </p>
         </div>
-        {data.batch_date && (
-          <div className="rounded-full border bg-white px-3 py-1.5 text-sm text-gray-500">
-            Batch date: <strong>{data.batch_date}</strong>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <EmergencyAccessButton />
+          {data.batch_date && (
+            <div className="rounded-full border bg-white px-3 py-1.5 text-sm text-gray-500">
+              Batch date: <strong>{data.batch_date}</strong>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

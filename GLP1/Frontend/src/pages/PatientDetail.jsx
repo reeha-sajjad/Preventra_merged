@@ -9,6 +9,8 @@ import { useRole } from '../context/RoleContext';
 import { usePatients } from '../hooks/usePatients';
 import CareTeamCard from '../components/hospital/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
+import MedicationCard from '../components/medications/MedicationCard';
+import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/hospital/ClinicalGate';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
@@ -142,7 +144,7 @@ function DriverCard({ rank, driver, direction, shap }) {
 export default function PatientDetail() {
   const { id }   = useParams();
   const navigate = useNavigate();
-  const { isCostView, isPatient, canAssign } = useRole();
+  const { isCostView, isPatient, canAssign, isCareTeam } = useRole();
   const { summary, data: patientData, loading: patientLoading, reload } = usePatientRecord(id);
   const patientList = usePatients();
   const careTeamChanged = () => { reload(); patientList?.reload(); };
@@ -233,6 +235,9 @@ export default function PatientDetail() {
       {/* ── Back button ──────────────────────────────────────────── */}
       {backButton}
 
+      {/* ── Reached by emergency access, not the care team ─────────── */}
+      {isCareTeam && <EmergencyBanner patientIdx={patient.patient_idx} />}
+
       {/* ── Finance-view context banner ──────────────────────────── */}
       {isCostView && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm font-medium mb-5 animate-fade-up"
@@ -309,6 +314,13 @@ export default function PatientDetail() {
       {!isPatient && (
         <div className="mb-6">
           <FollowUpCard patientIdx={patient.patient_idx} />
+        </div>
+      )}
+
+      {/* ── Medication: current drug and recorded changes ─────────── */}
+      {!isPatient && (
+        <div className="mb-6">
+          <MedicationCard patientIdx={patient.patient_idx} />
         </div>
       )}
 

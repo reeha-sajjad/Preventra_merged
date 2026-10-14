@@ -30,6 +30,7 @@ from api import access_log
 from api import hospital
 from api import risk_watch
 from api import followups
+from api import emergency
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -309,6 +310,26 @@ def admin_access_log(hospital_id: Optional[str] = None,
     return access_log.entries(db, actor, hospital_id=hospital_id, app=app_name, limit=limit)
 
 
+class EmergencyReview(BaseModel):
+    outcome: str
+    note: Optional[str] = None
+
+
+@app.get("/auth/admin/emergency-access")
+def admin_emergency_access(status: str = Query("to_review", description="to_review | all"),
+                           hospital_id: Optional[str] = None,
+                           actor: dict = Depends(require_manager)):
+    """Every emergency ("break the glass") access in the hospital, both apps,
+    for the hospital admin to review (api/emergency.py)."""
+    return emergency.review_list(db, actor, status=status, hospital_id=hospital_id)
+
+
+@app.post("/auth/admin/emergency-access/{grant_id}/review")
+def admin_review_emergency_access(grant_id: str, body: EmergencyReview,
+                                  actor: dict = Depends(require_manager)):
+    return emergency.review(db, actor, grant_id, body.outcome, body.note)
+
+
 @app.get("/auth/config")
 def auth_configuration():
     """Configuration state, carrying no secret. Lets a misconfigured deploy be
@@ -434,6 +455,10 @@ def _require_detail(request: Request, patient_id) -> None:
     user = request.state.user
     automatic = access.AUTOMATIC_REASONS.get(user["role"])
     if automatic:
+        # A doctor or nurse reaching a patient only by emergency access is
+        # logged as that, not as treatment by the care team.
+        if user["role"] in ("doctor", "nurse") and not access.on_care_team(db, user, patient_id):
+            automatic = access.EMERGENCY_REASON
         session = request.state.session
         if not access_log.has_opened(db, user, access_log.APP, patient_id, session):
             access_log.record(db, user, access_log.APP, patient_id, _patient_hospital(patient_id),
@@ -2568,6 +2593,44 @@ def take_followup(followup_id: str, request: Request):
 def finish_followup(followup_id: str, body: FollowUpDone, request: Request):
     return followups.complete(db, request.state.user, _scope(request), followup_id,
                               body.outcome, body.note)
+
+
+# ---------------------------------------------------------------------------
+# Emergency access - "break the glass" (api/emergency.py; the same as GLP-1's)
+# ---------------------------------------------------------------------------
+class EmergencyLookup(BaseModel):
+    patient_id: str
+
+
+class EmergencyGrant(BaseModel):
+    patient_id: str
+    reason: str
+    note: str
+
+
+@app.post("/api/emergency-access/lookup")
+def emergency_lookup(body: EmergencyLookup, request: Request):
+    """Is this exact patient number in my hospital, and already on my list?"""
+    return emergency.lookup(db, request.state.user, _scope(request), body.patient_id)
+
+
+@app.post("/api/emergency-access", status_code=201)
+def emergency_grant(body: EmergencyGrant, request: Request):
+    """Open a patient who is not on my care team, for 24 hours, with a reason."""
+    return emergency.grant(db, request.state.user, _scope(request), body.patient_id,
+                           body.reason, body.note, request.state.session)
+
+
+@app.get("/api/emergency-access/mine")
+def emergency_mine(request: Request):
+    return {"grants": emergency.mine(db, request.state.user)}
+
+
+@app.get("/api/patients/{patient_id}/emergency")
+def patient_emergency(patient_id: str, request: Request):
+    """The caller's emergency grant for this patient, for the banner."""
+    _require_patient(request, patient_id)
+    return {"grant": emergency.for_patient(db, request.state.user, patient_id)}
 
 
 @app.get("/api/staff")
