@@ -5,25 +5,27 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, UserCircle, PieChart, TrendingDown, UsersRound,
   Calculator, Settings, ChevronLeft, ChevronRight,
-  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock,
+  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock, ListChecks,
 } from 'lucide-react';
 import { api } from '../../data/api';
 import HospitalPicker from '../hospital/HospitalPicker';
 import NotificationBell from './NotificationBell';
 
-// `only` names the RoleContext flag a page needs; pages for other roles are
+// `section` is the menu heading an item sits under. `only` names the RoleContext flag a page needs; pages for other roles are
 // hidden, not dimmed (the backend refuses them anyway).
 const NAV_ITEMS = [
-  { to: '/',         icon: LayoutDashboard, label: 'Overview',             primary: null, only: 'hasOverview' },
-  { to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
-  { to: '/patients', icon: Users,           label: 'Patients',             primary: null },
-  { to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
-  { to: '/follow-ups', icon: CalendarClock, label: 'Follow-ups',           primary: null, only: 'handlesFollowUps', badge: 'followups' },
-  { to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },
-  { to: '/survival', icon: TrendingDown,    label: 'Survival Analysis',    primary: null },
+  { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'Overview',             primary: null, only: 'hasOverviewHome' },
+  { section: 'overview', to: '/',         icon: ListChecks,      label: 'Today',                primary: null, only: 'isCaseManager' },
+  { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Hospital overview',    primary: null, only: 'isCaseManager' },
+  { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
+  { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null },
+  { section: 'overview', to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
+  { section: 'overview', to: '/follow-ups', icon: CalendarClock, label: 'Follow-ups',           primary: null, only: 'handlesFollowUps', badge: 'followups' },
+  { section: 'analytics', to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },
+  { section: 'analytics', to: '/survival', icon: TrendingDown,    label: 'Survival Analysis',    primary: null },
   // { to: '/cost',     icon: DollarSign,      label: 'Cost-Effectiveness',   primary: 'cost' },
-  { to: '/budget',      icon: Calculator,     label: 'Budget Simulator',     primary: 'cost' },
-  { to: '/consequence', icon: AlertTriangle,  label: 'Cost of Inaction',     primary: 'cost' },
+  { section: 'financial', to: '/budget',      icon: Calculator,     label: 'Budget Simulator',     primary: 'cost' },
+  { section: 'financial', to: '/consequence', icon: AlertTriangle,  label: 'Cost of Inaction',     primary: 'cost' },
   // { to: '/settings', icon: Settings,        label: 'Settings & Data Info', primary: null },
 ];
 
@@ -167,15 +169,15 @@ export default function AppShell({ children }) {
           ) : (<>
           {/* Section: Overview */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-3 pb-1">Overview</div>}
-          {NAV_ITEMS.slice(0, 5).filter(allowed).map(item => (
-            <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView}
+          {NAV_ITEMS.filter((i) => i.section === 'overview' && allowed(i)).map(item => (
+            <NavItem key={item.label} item={item} collapsed={isCollapsed} isCostView={isCostView}
               extra={item.to === '/' ? { end: true } : {}} badges={badges} />
           ))}
 
           {/* Section: Analytics */}
           {!isCollapsed && <div className="text-[10px] text-white/25 uppercase tracking-widest px-3 pt-4 pb-1">Analytics</div>}
-          {NAV_ITEMS.slice(5, 7).map(item => (
-            <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
+          {NAV_ITEMS.filter((i) => i.section === 'analytics' && allowed(i)).map(item => (
+            <NavItem key={item.label} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
           {/* Section: Financial - only for the roles that own the budget; hidden,
@@ -186,8 +188,8 @@ export default function AppShell({ children }) {
               <div className="text-[9px] bg-blue-500/30 text-blue-300 px-1.5 py-0.5 rounded-full">Primary</div>
             </div>
           )}
-          {isCostView && NAV_ITEMS.slice(7, 9).map(item => (
-            <NavItem key={item.to} item={item} collapsed={isCollapsed} isCostView={isCostView} />
+          {isCostView && NAV_ITEMS.filter((i) => i.section === 'financial' && allowed(i)).map(item => (
+            <NavItem key={item.label} item={item} collapsed={isCollapsed} isCostView={isCostView} />
           ))}
 
           {/* Settings */}

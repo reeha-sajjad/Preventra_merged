@@ -9,6 +9,7 @@ import ChatWidget from './components/chatbot/ChatWidget';
 import { useAppLoader } from './hooks/useAppLoader';
 import ExecutiveSummary from './pages/ExecutiveSummary';
 import CareHome from './pages/CareHome';
+import CaseManagerHome from './pages/CaseManagerHome';
 import PatientRiskPanel from './pages/PatientRiskPanel';
 import PatientDetail from './pages/PatientDetail';
 import SegmentExplorer from './pages/SegmentExplorer';
@@ -45,7 +46,7 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps } = useRole();
+  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager } = useRole();
 
   if (isPatient) {
     return (
@@ -61,9 +62,12 @@ function RoleRoutes() {
   return (
     <>
       <Routes>
-        <Route path="/"             element={hasOverview ? <ExecutiveSummary />
+        <Route path="/"             element={isCaseManager ? <CaseManagerHome />
+                                             : hasOverview ? <ExecutiveSummary />
                                              : isCareTeam ? <CareHome />
                                              : <Navigate to="/patients" replace />} />
+        {/* Case managers' home is "Today"; their hospital Overview lives here. */}
+        {isCaseManager && <Route path="/overview" element={<ExecutiveSummary />} />}
         <Route path="/patients"     element={<PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}
         {handlesFollowUps && <Route path="/follow-ups" element={<FollowUps />} />}

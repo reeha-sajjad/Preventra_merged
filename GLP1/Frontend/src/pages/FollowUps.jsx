@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarClock, Inbox, Hourglass, AlertTriangle, ChevronRight, TrendingDown } from 'lucide-react';
 import { api } from '../data/api';
 import { RiskBadge } from '../components/shared';
 import { useRole } from '../context/RoleContext';
-import { DoneDialog, StatusPill, UrgencyPill } from '../components/followups/shared';
+import { DoneDialog, HandOverDialog, StatusPill, UrgencyPill } from '../components/followups/shared';
 import { ago } from '../components/followups/format';
 
 /**
@@ -23,12 +23,23 @@ export default function FollowUps() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [doneFor, setDoneFor] = useState(null);
+  const [handFor, setHandFor] = useState(null);
+  // "Only mine": the requests the caller has taken (?mine=1 from the Today page).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mine = searchParams.get('mine') === '1';
+  const setMine = (on) => setSearchParams(on ? { mine: '1' } : {}, { replace: true });
 
   const load = useCallback(() => {
     api.getFollowUps(tab).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   }, [tab]);
   useEffect(() => { load(); }, [load]);
   const switchTab = (k) => { if (k !== tab) { setData(null); setTab(k); } };
+
+  const putBack = async (f) => {
+    setBusy(f.id); setError(null);
+    try { await api.releaseFollowUp(f.id); } catch (e) { setError(e.message); }
+    setBusy(null); load();
+  };
 
   const take = async (f) => {
     setBusy(f.id); setError(null);
@@ -37,7 +48,8 @@ export default function FollowUps() {
   };
 
   const counts = data?.counts ?? { open: 0, in_progress: 0, overdue: 0 };
-  const items = data?.items ?? [];
+  const all = data?.items ?? [];
+  const items = mine ? all.filter((i) => i.mine) : all;
   const tile = (Icon, label, value, sub, color) => (
     <div className="rounded-xl border border-gray-100 p-3">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
@@ -79,6 +91,10 @@ export default function FollowUps() {
               {label}
             </button>
           ))}
+          <label className="ml-auto mb-1 inline-flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer select-none">
+            <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="accent-blue-700" />
+            Only mine
+          </label>
         </div>
 
         {error && <p className="m-4 rounded-md px-3 py-2 text-sm" style={{ background: '#FFEBEE', color: '#C62828' }}>{error}</p>}
@@ -90,7 +106,7 @@ export default function FollowUps() {
               <CalendarClock size={18} style={{ color: '#2E7D32' }} />
             </div>
             <div className="mt-3 text-sm font-medium text-gray-700">
-              {tab === 'active' ? 'No follow-ups waiting' : 'Nothing finished in the last 30 days'}
+              {mine ? 'None of these are yours' : tab === 'active' ? 'No follow-ups waiting' : 'Nothing finished in the last 30 days'}
             </div>
             <div className="mt-0.5 text-xs text-gray-400">New requests from doctors and nurses appear here and in your bell.</div>
           </div>
@@ -157,6 +173,17 @@ export default function FollowUps() {
                             </button>
                           </div>
                         )}
+                        {/* Hand over / put back: whoever holds it, or an admin (who can also assign an open one). */}
+                        {tab === 'active' && !othersTook && (f.status === 'in_progress' || !isCaseManager) && (
+                          <div className="flex justify-end gap-3 mt-1.5 text-[11px] font-semibold">
+                            <button type="button" onClick={() => setHandFor(f)} style={{ color: 'var(--color-primary)' }}
+                              className="hover:underline">{f.status === 'open' ? 'Assign to…' : 'Hand over'}</button>
+                            {f.status === 'in_progress' && (
+                              <button type="button" disabled={busy === f.id} onClick={() => putBack(f)}
+                                className="text-gray-500 hover:underline disabled:opacity-50">Put back</button>
+                            )}
+                          </div>
+                        )}
                         {tab === 'done' && (
                           <button type="button" onClick={() => navigate(`/patients/${f.patient_idx}`)}
                             aria-label={`Open patient ${f.patient_idx}`} className="text-gray-300 hover:text-gray-500">
@@ -173,6 +200,8 @@ export default function FollowUps() {
         )}
       </div>
 
+      {handFor && <HandOverDialog followup={handFor} onClose={() => setHandFor(null)}
+                                  onDone={() => { setHandFor(null); load(); }} />}
       {doneFor && <DoneDialog followup={doneFor} onClose={() => setDoneFor(null)}
                               onDone={() => { setDoneFor(null); load(); }} />}
     </div>

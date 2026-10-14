@@ -64,3 +64,26 @@ async def take_followup(followup_id: str, user: dict = Depends(actor),
 async def finish_followup(followup_id: str, body: DoneRequest, user: dict = Depends(actor),
                           scope: Optional[list] = Depends(scope_of)):
     return await followups.complete(user, scope, followup_id, body.outcome, body.note)
+
+class HandOverRequest(BaseModel):
+    to_user_id: str
+
+
+@router.get("/followups/handlers")
+async def followup_handlers(user: dict = Depends(actor)):
+    """The hospital's case managers, to hand a request to."""
+    return {"handlers": await followups.handlers(user)}
+
+
+@router.post("/followups/{followup_id}/release")
+async def release_followup(followup_id: str, user: dict = Depends(actor),
+                           scope: Optional[list] = Depends(scope_of)):
+    """Put a taken request back in the queue."""
+    return await followups.release(user, scope, followup_id)
+
+
+@router.post("/followups/{followup_id}/hand-over")
+async def hand_over_followup(followup_id: str, body: HandOverRequest, user: dict = Depends(actor),
+                             scope: Optional[list] = Depends(scope_of)):
+    """Give a request to another case manager of the hospital."""
+    return await followups.hand_over(user, scope, followup_id, body.to_user_id)

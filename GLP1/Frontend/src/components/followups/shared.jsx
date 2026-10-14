@@ -105,3 +105,76 @@ export function DoneDialog({ followup, onClose, onDone }) {
     </div>
   );
 }
+
+/** Hand a request to another case manager of the hospital (or, for an admin,
+ *  assign an open one). Backend/core/followups.py hand_over. */
+export function HandOverDialog({ followup, onClose, onDone }) {
+  const [people, setPeople] = useState(null);
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    api.getFollowUpHandlers()
+      .then((d) => { if (live) setPeople(d.handlers.filter((h) => h.id !== followup.taken_by?.id)); })
+      .catch((e) => { if (live) setError(e.message); });
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => { live = false; window.removeEventListener('keydown', onKey); };
+  }, [followup, onClose]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!to) { setError('Choose who to give it to.'); return; }
+    setBusy(true); setError(null);
+    try { onDone(await api.handOverFollowUp(followup.id, to)); }
+    catch (err) { setError(err.message); setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.4)' }}
+         onClick={onClose}>
+      <form onSubmit={save} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true"
+            aria-label="Hand over follow-up" className="card w-full max-w-sm shadow-2xl" style={{ padding: 0 }}>
+        <div className="flex items-start justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800">
+              {followup.status === 'open' ? 'Assign follow-up' : 'Hand over follow-up'}
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">Patient #{followup.patient_idx}
+              {followup.taken_by ? ` · now with ${followup.taken_by.name}` : ''}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          {!people && !error && <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />}
+          {people && people.length === 0 && (
+            <p className="text-sm text-gray-500">There is no other case manager in this hospital to give it to.</p>
+          )}
+          {people && people.length > 0 && (
+            <label className="block">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Give it to</span>
+              <select value={to} onChange={(e) => setTo(e.target.value)}
+                className="mt-1.5 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+                <option value="">Choose a case manager…</option>
+                {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+          <p className="text-[11px] text-gray-400">They become the person handling it. The change is kept in the request&rsquo;s history.</p>
+          {error && <p className="rounded-md px-3 py-2 text-sm" style={{ background: '#FFEBEE', color: '#C62828' }}>{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100">
+          <button type="button" onClick={onClose}
+            className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button type="submit" disabled={busy || !people?.length}
+            className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white disabled:opacity-50"
+            style={{ background: 'var(--color-primary)' }}>
+            {busy && <Loader2 size={15} className="animate-spin" />} {followup.status === 'open' ? 'Assign' : 'Hand over'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

@@ -161,6 +161,10 @@ export const api = {
   addFollowUpNote:      (fid, text) => post(`/api/followups/${fid}/note`, { text }),
   takeFollowUp:         (fid)    => post(`/api/followups/${fid}/take`, {}),
   /** { outcome: 'booked' | 'unreachable' | 'not_needed', note? } */
+  getFollowUpHandlers:  ()       => get("/api/followups/handlers"),
+  releaseFollowUp:      (fid)    => post(`/api/followups/${fid}/release`, {}),
+  handOverFollowUp:     (fid, toUserId) => post(`/api/followups/${fid}/hand-over`, { to_user_id: toUserId }),
+  getCaseManagerToday:  ()       => get("/api/case-manager/today"),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 
   // Consequence Model (Phase 4 "Cost of Inaction" screen)

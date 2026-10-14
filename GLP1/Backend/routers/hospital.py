@@ -8,10 +8,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from core import hospital
+from core import casemanager, hospital
 from core.access import ASSIGN_ROLES, OVERVIEW_ROLES, STAFF_ROLES, actor, require_role, scope_of
 
 router = APIRouter()
+
+
+@router.get("/case-manager/today")
+async def case_manager_today(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
+    """A case manager's home page: their hospital, and what needs doing."""
+    return await casemanager.today(user, scope)
 
 
 @router.get("/me")

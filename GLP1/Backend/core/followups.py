@@ -57,7 +57,7 @@ OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
 MAX_NOTE = 500
 
-_indexed = False
+_indexed: set = set()          # databases that have the indexes (one per test world, too)
 
 
 def _collection():
@@ -65,11 +65,11 @@ def _collection():
 
 
 async def ensure_indexes() -> None:
-    global _indexed
-    if not _indexed:
+    key = id(get_db())
+    if key not in _indexed:
         await _collection().create_index("active_patient", unique=True, sparse=True)
         await _collection().create_index([("hospital_id", 1), ("status", 1)])
-        _indexed = True
+        _indexed.add(key)
 
 
 def _now() -> datetime:
@@ -260,6 +260,74 @@ async def complete(user: dict, scope: Optional[list], followup_id: str,
                  "done_by": who, "done_at": now, **taken},
         "$unset": {"active_patient": ""},
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
+    return public(await _collection().find_one({"_id": doc["_id"]}))
+
+
+async def handlers(user: dict) -> list:
+    """The active case managers of the caller's hospital - who a request can be
+    handed to."""
+    _require_handler(user)
+    hospital = hospital_of(user)
+    if not hospital:
+        return []
+    docs = await get_shared_identity_db().users.find(
+        {"role": "case_manager", "status": "active", "hospital_id": hospital},
+        {"name": 1, "email": 1}).to_list(length=None)
+    return sorted(({"id": str(d["_id"]), "name": d.get("name") or d.get("email", ""),
+                    "email": d.get("email", "")} for d in docs), key=lambda p: p["name"].lower())
+
+
+def _may_reassign(user: dict, doc: dict) -> None:
+    """A taken request can be handed over or put back by whoever holds it, or
+    by the hospital admin or superadmin (someone is off sick, on leave)."""
+    holder = (doc.get("taken_by") or {}).get("id")
+    if user["role"] == "case_manager" and holder != user["id"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "not_yours", "message": f"{(doc.get('taken_by') or {}).get('name', 'Someone')} is handling this",
+            "followup": public(doc)})
+
+
+async def release(user: dict, scope: Optional[list], followup_id: str) -> dict:
+    """Put a taken request back in the queue, for any case manager to take."""
+    _require_handler(user)
+    doc = await _load(user, scope, followup_id)
+    if doc["status"] != "in_progress":
+        raise HTTPException(status_code=409, detail="Only a request someone has taken can be put back")
+    _may_reassign(user, doc)
+    who, now = await _who(user), _now()
+    result = await _collection().update_one({"_id": doc["_id"], "status": "in_progress"}, {
+        "$set": {"status": "open"}, "$unset": {"taken_by": "", "taken_at": ""},
+        "$push": {"history": {"action": "released", "by": who, "at": now,
+                              "from": doc.get("taken_by")}}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
+    return public(await _collection().find_one({"_id": doc["_id"]}))
+
+
+async def hand_over(user: dict, scope: Optional[list], followup_id: str, to_user_id: str) -> dict:
+    """Give a request to another case manager of the same hospital. Works on an
+    open request too (an admin sharing out the work)."""
+    _require_handler(user)
+    doc = await _load(user, scope, followup_id)
+    if doc["status"] == "done":
+        raise HTTPException(status_code=409, detail="This request is already done")
+    if doc["status"] == "in_progress":
+        _may_reassign(user, doc)
+    elif user["role"] == "case_manager":
+        raise HTTPException(status_code=409, detail="Take the request first, or let a colleague take it")
+    target = next((h for h in await handlers(user) if h["id"] == to_user_id), None)
+    if target is None or doc.get("hospital_id") != hospital_of(user):
+        raise HTTPException(status_code=422, detail="Choose a case manager of this hospital")
+    if (doc.get("taken_by") or {}).get("id") == to_user_id:
+        raise HTTPException(status_code=409, detail=f"{target['name']} already has this request")
+    who, now = await _who(user), _now()
+    to = {"id": target["id"], "name": target["name"], "email": target["email"], "role": "case_manager"}
+    result = await _collection().update_one({"_id": doc["_id"], "status": doc["status"]}, {
+        "$set": {"status": "in_progress", "taken_by": to, "taken_at": now},
+        "$push": {"history": {"action": "handed_over", "by": who, "at": now,
+                              "from": doc.get("taken_by"), "to": to}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
     return public(await _collection().find_one({"_id": doc["_id"]}))
