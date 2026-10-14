@@ -76,19 +76,23 @@ SCORE_FLOOR, SCORE_CEIL = 1.0, 96.0
 # "<label>: <value> (<explanation>)" and the API parses it back on the last
 # " (". See api/mimic_scoring._split_driver.
 
+# The wording below is shared by every condition, so it stays general. Fluid,
+# congestion and diuretic language belongs to the heart failure and kidney
+# profiles, which override these phrasings - a hip fracture patient losing a
+# kilogram has not had a "diuresis".
 def _rule_weight(kg):
     if kg >= 2.0:
         return 7.0, "gain_major", (
-            "a gain of more than 2 kg in a week indicates fluid retention and is an "
-            "early sign of decompensation",
-            "weight moving this fast is fluid rather than tissue, which is how "
-            "congestion shows up days before breathlessness does",
+            "a gain of more than 2 kg in a week is faster than body tissue can be "
+            "gained, so retained fluid is the usual explanation",
+            "weight moving this fast is more likely fluid than tissue, and it is "
+            "worth asking about swelling and breathlessness",
             "a rise this size in seven days is unlikely to be tissue, so it is worth "
             "a call to find out what is behind it",
         )
     if kg >= 1.0:
         return 3.0, "gain_mild", (
-            "steady weight gain suggests fluid is starting to accumulate",
+            "steady weight gain this week, worth watching to see whether it continues",
             "a rise of about a kilogram a week is the beginning of a trend rather "
             "than day-to-day variation",
             "not alarming on its own, but the direction is wrong for this stage of "
@@ -96,11 +100,12 @@ def _rule_weight(kg):
         )
     if kg <= -1.0:
         return -1.0, "loss", (
-            "weight is coming down, consistent with fluid clearing as expected",
-            "the post-discharge diuresis is working, which is what a good first "
-            "fortnight looks like",
-            "a controlled fall in weight is the expected response to the discharge "
-            "regimen",
+            "weight is coming down a little, which on its own is not a concern at "
+            "this stage",
+            "a modest fall in weight in the first weeks home is common as appetite "
+            "and activity settle",
+            "weight is below the discharge reading, worth noting but not a warning "
+            "sign on its own",
         )
     return 0.0, "stable", (
         "weight is stable week on week",
@@ -466,8 +471,8 @@ def _rule_walk_distance(pct):
         return 5.5, "collapsed", (
             "walking distance has more than halved against this patient's own usual "
             "range, which is a large functional loss in a short time",
-            "a fall this steep in exercise tolerance is one of the earliest signs of "
-            "decompensation, and it shows up before most readings do",
+            "a fall this steep in exercise tolerance is one of the earliest signs "
+            "that recovery is going backwards, and it shows up before most readings do",
         )
     if pct < 70:
         return 3.0, "reduced", (
@@ -546,10 +551,10 @@ def _rule_temperature(celsius):
     if celsius >= 38.0:
         return 6.0, "fever", (
             "a temperature of 38 degrees or more is the threshold that defines fever, "
-            "and after surgery or sepsis it needs assessing the same day rather than "
-            "being watched",
-            "at or above 38 degrees this is a fever, and in a patient recently treated "
-            "for infection that is an assessment today",
+            "and after surgery or a serious infection it needs assessing the same day "
+            "rather than being watched",
+            "at or above 38 degrees this is a fever, and in a patient recovering from "
+            "surgery or infection that is an assessment today",
         )
     if celsius >= 37.5:
         return 3.0, "raised", (
@@ -562,12 +567,13 @@ def _rule_temperature(celsius):
         return 3.5, "low", (
             "an unusually low temperature can accompany serious infection just as fever "
             "does, particularly in older patients",
-            "hypothermia in someone recently septic is not reassuring, it is the other "
-            "half of the same warning",
+            "a low temperature in someone recovering from surgery or infection is not "
+            "reassuring, it can be the other half of the same warning",
         )
     return -0.5, "normal", (
         "temperature is normal",
-        "no fever, which is the single most useful thing to know after an infection",
+        "no fever, which is one of the most useful things to know at this stage of "
+        "recovery",
     )
 
 
@@ -625,9 +631,9 @@ def _rule_pain_trend(trend):
 def _rule_antibiotic_course(status):
     points, phrasings = {
         "stopped_early": (6.0, (
-            "stopping an antibiotic course early after sepsis is the highest-priority "
-            "item on this card. It is how a treated infection returns, and returns "
-            "harder to treat",
+            "stopping an antibiotic course early after a serious infection is the "
+            "highest-priority item on this card. It is how a treated infection returns, "
+            "and returns harder to treat",
             "an unfinished course leaves the infection partly treated, which is worse "
             "than untreated and should be chased today",
         )),
@@ -637,7 +643,7 @@ def _rule_antibiotic_course(status):
         )),
         "completed": (-2.0, (
             "the full antibiotic course was completed, which is the single most "
-            "important thing after treatment for sepsis",
+            "important thing after treatment for a serious infection",
             "course finished as prescribed, which removes the most common route back to "
             "hospital in this group",
         )),
@@ -764,13 +770,22 @@ _PROBE_VALUES = {
 _extremes_cache: dict = {}
 
 
-def group_extremes(group: str) -> tuple:
-    """(worst attainable adjustment, best attainable adjustment) for a group."""
-    if group in _extremes_cache:
-        return _extremes_cache[group]
+def group_extremes(group: str, weights=None) -> tuple:
+    """(worst attainable adjustment, best attainable adjustment) for a group.
 
+    `weights` are the weights the week is actually scored with - the merged
+    weights of a patient with several conditions. They must be the same ones
+    used for scoring, or the range is measured on one scale and the week on
+    another: a patient whose merged weights exceed their plan's was scaled up
+    past the general range.
+    """
     profile = profile_for(group)
-    weights, overrides = profile["weights"], profile["rules"]
+    weights = profile["weights"] if weights is None else weights
+    cache_key = (group, tuple(sorted(weights.items())))
+    if cache_key in _extremes_cache:
+        return _extremes_cache[cache_key]
+
+    overrides = profile["rules"]
     worst = best = 0.0
     for key, (_, _, default_rule) in signals_for(group).items():
         rule = overrides.get(key, default_rule)
@@ -779,14 +794,14 @@ def group_extremes(group: str) -> tuple:
         worst += max(points) * w
         best += min(points) * w
 
-    _extremes_cache[group] = (worst, best)
+    _extremes_cache[cache_key] = (worst, best)
     return worst, best
 
 
-def _normalise(raw_total: float, group: str) -> float:
+def _normalise(raw_total: float, group: str, weights=None) -> float:
     """Scale a group's raw adjustment onto the general group's range."""
     ref_worst, ref_best = group_extremes("general")
-    worst, best = group_extremes(group)
+    worst, best = group_extremes(group, weights)
     if raw_total > 0 and worst > 0:
         return raw_total / worst * ref_worst
     if raw_total < 0 and best < 0:
@@ -874,7 +889,7 @@ GROUP_PROFILES = {
                 "a rising resting pulse in chronic lung disease often arrives a day or "
                 "two before the breathlessness does, so it is worth taking seriously early",
             ("weight_change_kg", "gain_mild"):
-                "weight is not the signal to watch in chronic lung disease. The oxygen "
+                "weight counts for little in chronic lung disease. The oxygen "
                 "saturation and how far they can walk matter far more",
         },
         "priority_signals": ("spo2", "adherence_pct", "heart_rate", "refill_status"),
@@ -884,18 +899,22 @@ GROUP_PROFILES = {
         "focus": "Finishing the antibiotic course, and any sign the infection is back.",
         "weights": {"heart_rate": 1.5, "spo2": 1.3, "adherence_pct": 1.4,
                     "weight_change_kg": 0.4, "followup_status": 1.2},
+        # Adherence here is the whole discharge regimen. The antibiotic course has
+        # its own signal, so this wording must not claim the course is unfinished:
+        # it used to, on cards whose antibiotic line said "completed".
         "phrasing": {
             ('weight_change_kg', 'gain_major'):
-                "weight is not the signal to watch after sepsis. The temperature, the pulse and finishing the antibiotic course are what matter",
+                "weight counts for little after a serious infection. The temperature, the pulse and finishing the antibiotic course are what matter",
             ("adherence_pct", "below_threshold"):
-                "after sepsis the antibiotic course is the whole treatment, and a partly "
-                "taken course is how an infection returns resistant",
+                "after a serious infection, doses missed from the discharge regimen leave "
+                "the patient less protected while they recover. The antibiotic course has "
+                "its own line on this card",
             ("adherence_pct", "very_low"):
-                "an unfinished antibiotic course after sepsis is the highest-priority "
-                "item on this card - it should be chased today",
+                "most of the discharge regimen is not being taken, which after a serious "
+                "infection should be followed up today",
             ("heart_rate", "tachy_high"):
-                "a fast resting pulse in the weeks after sepsis is the classic first sign "
-                "the infection has not cleared",
+                "a fast resting pulse in the weeks after a serious infection is the "
+                "classic first sign it has not cleared",
         },
         "priority_signals": ("heart_rate", "adherence_pct", "spo2", "followup_status"),
     },
@@ -946,7 +965,7 @@ GROUP_PROFILES = {
                     "weight_change_kg": 0.3, "followup_status": 1.2},
         "phrasing": {
             ('weight_change_kg', 'gain_major'):
-                "weight is not the signal that matters after a stroke. Blood pressure and staying on the anticoagulant are what prevent a second event",
+                "weight counts for little after a stroke. Blood pressure and staying on the anticoagulant are what prevent a second event",
             ("adherence_pct", "below_threshold"):
                 "after a stroke, missed doses of an anticoagulant or antiplatelet are "
                 "directly a second-stroke risk, not a general adherence concern",
@@ -985,7 +1004,7 @@ GROUP_PROFILES = {
                     "weight_change_kg": 0.2, "sbp": 0.3, "heart_rate": 0.4, "spo2": 0.3},
         "phrasing": {
             ('weight_change_kg', 'gain_major'):
-                "weight is not a meaningful signal in mental health recovery, and a change this size is more often an effect of the medication than a warning about anything",
+                "weight counts for little in mental health recovery, and a change this size is more often an effect of the medication than a warning about anything",
             ('weight_change_kg', 'gain_mild'):
                 "weight gain is a common side effect of psychiatric medication rather than a risk signal, though it is worth mentioning because it is a common reason people stop taking them",
             ("followup_status", "missed"):
@@ -1359,6 +1378,12 @@ def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
         points = round(points * weights.get(key, 1.0), 2)
 
         why = phrasing_overrides.get((key, branch))
+        # A plan's wording that plays a signal down ("weight is not a useful
+        # signal during surgical recovery") is only true while the signal IS
+        # played down. When another of the patient's conditions raised its
+        # weight, the shared wording is used instead.
+        if why is not None and weights.get(key, 1.0) > profile["weights"].get(key, 1.0):
+            why = None
         if why is None:
             if isinstance(phrasings, str):
                 phrasings = (phrasings,)
@@ -1371,7 +1396,7 @@ def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
 
     # Equalise the range across groups, and scale the displayed contributions by
     # the same factor so the card's numbers still add up to the adjustment.
-    normalised = _normalise(total, group)
+    normalised = _normalise(total, group, weights)
     if total and abs(total - normalised) > 1e-9:
         factor = normalised / total
         contributions = [(round(p * factor, 2), d) for p, d in contributions]

@@ -32,6 +32,12 @@ notebooks/mimic/solved-mimic-icd-feature-enginering.ipynb, against a 19.02% base
 
 A 2.8x spread across groups, and none of them is negligibly small.
 
+Those figures predate three changes, so they describe the original
+definitions: sepsis_infection now also takes the serious infections its label
+names (pneumonia, urinary and skin infections and others), renal takes a
+principal diagnosis of acute kidney injury, and poisonings no longer count as
+surgical_injury.
+
 Note respiratory sits at 1.01x - almost exactly the base rate. It still earns
 its own rules, but for a different reason: the SIGNALS differ. An oxygen
 saturation of 91% is alarming after a pulmonary embolism and near-normal in
@@ -79,21 +85,29 @@ GROUP_PATTERNS = [
      r"^(39891|402(01|11|91)|404(01|03|11|13|91|93)|425[456789]|428)",
      r"^(I099|I110|I130|I132|I255|I420|I42[56789]|I43|I50|P290)"),
 
+    # Acute kidney injury (584 / N17) is matched on the PRINCIPAL code only, and
+    # deliberately has no title keyword: it is a common secondary diagnosis in
+    # sepsis and heart failure, and as a keyword it would take over their plans.
     ("renal", "Kidney disease",
-     r"^(40301|40311|40391|40402|40403|40412|40413|40492|40493|58[26]|5830[0-7]|585|586|5880|V420|V451|V56)",
-     r"^(I120|I131|N03[2-7]|N05[2-7]|N1[89]|N250|Z49[0-2]|Z940|Z992)"),
+     r"^(40301|40311|40391|40402|40403|40412|40413|40492|40493|584|58[26]|5830[0-7]|585|586|5880|V420|V451|V56)",
+     r"^(I120|I131|N03[2-7]|N05[2-7]|N17|N1[89]|N250|Z49[0-2]|Z940|Z992)"),
 
     ("respiratory", "Chronic lung disease",
      r"^(4168|4169|49[0-6]|50[0-5]|5064|5081|5088)",
      r"^(I27[89]|J4[0-7]|J6[0-7]|J684|J70[13])"),
 
+    # Sepsis plus the serious infections the group's label promises and its
+    # signals (temperature, antibiotic course, new confusion) are built for:
+    # pneumonia and aspiration, lung abscess and empyema, pyelonephritis and
+    # urinary infection, cellulitis and skin abscess, osteomyelitis,
+    # endocarditis, C. difficile, peritonitis, meningitis, COVID-19.
     ("sepsis_infection", "Sepsis or serious infection",
-     r"^(038|9959[12])",
-     r"^(A40|A41|R652)"),
+     r"^(038|9959[12]|48[0-6]|5070|510|513|590|5990|68[12]|730[0-2]|421|00845|567|32[0-2])",
+     r"^(A40|A41|R652|J1[2-8]|J690|J85|J86|N10|N390|L0[23]|M86|I33|A047|K65|G0[0-3]|U071)"),
 
     ("oncology", "Cancer",
      r"^(1[4-9][0-9]|20[0-8]|2386)",
-     r"^(C[0-2][0-6]|C3[0-4]|C3[789]|C4[01]|C43|C4[5-9]|C5[0-8]|C6[0-9]|C7[0-9]|C8[01458]|C9[0-7])"),
+     r"^(C[01][0-9]|C2[0-6]|C3[0-4]|C3[789]|C4[01]|C43|C4[5-9]|C5[0-8]|C6[0-9]|C7[0-9]|C8[0-58]|C9[0-7])"),
 
     ("diabetes", "Diabetes",
      r"^(250)",
@@ -107,13 +121,19 @@ GROUP_PATTERNS = [
      r"^(36234|43[0-8]|3341|342|343|344[0-6]|3449)",
      r"^(G4[56]|H340|I6[0-9]|G041|G114|G80[12]|G8[12]|G83[0-49])"),
 
+    # Injuries (800-959, S00-T35), other external causes (T66-T77, T79) and
+    # complications of care (996-999, T80-T98). Poisoning and toxic effects
+    # (960-995, T36-T65) and allergic reactions (T78) are left out: an overdose
+    # is not a wound to inspect or a walk to measure.
     ("surgical_injury", "Surgery or injury recovery",
-     r"^(8[0-9][0-9]|9[0-8][0-9]|99[0-9])",
-     r"^([ST])"),
+     r"^(8[0-9][0-9]|9[0-5][0-9]|99[6-9])",
+     r"^(S|T[0-2][0-9]|T3[0-5]|T6[6-9]|T7[0-79]|T[89][0-9])"),
 
+    # ICD-10 poisonings coded as intentional self-harm (sixth character 2) are
+    # a mental health admission, whatever the substance.
     ("mental_health", "Mental health",
      r"^(29[0-9]|3[01][0-9])",
-     r"^(F[0-9])"),
+     r"^(F[0-9]|T(3[6-9]|[45][0-9]|6[0-5])[0-9A-Z]{2}2)"),
 ]
 
 # Keyword fallbacks, matched against diagnosis TITLES. Used when the principal
@@ -124,9 +144,16 @@ GROUP_KEYWORDS = {
     "heart_failure":    ("heart failure",),
     "renal":            ("kidney disease", "renal failure", "end stage renal",
                          "renal insufficiency", "nephropathy", "dialysis"),
+    # "chronic respiratory failure", not "respiratory failure": the acute kind
+    # comes with sepsis, pneumonia and COVID, and this group's oxygen rule
+    # assumes a patient who lives at 88-92%.
     "respiratory":      ("chronic obstructive", "copd", "emphysema", "asthma",
-                         "chronic airway obstruction", "respiratory failure"),
-    "sepsis_infection": ("sepsis", "septicemia", "septic shock", "septicaemia"),
+                         "chronic airway obstruction", "chronic respiratory failure"),
+    "sepsis_infection": ("sepsis", "septicemia", "septic shock", "septicaemia",
+                         "pneumonia", "pneumonitis due to inhalation", "empyema",
+                         "abscess of lung", "pyelonephritis", "urinary tract infection",
+                         "cellulitis", "osteomyelitis", "endocarditis", "clostridium difficile",
+                         "clostridioides difficile", "peritonitis", "meningitis", "covid-19"),
     "oncology":         ("malignant neoplasm", "carcinoma", "lymphoma", "leukemia",
                          "leukaemia", "metastatic", "metastasis", "myeloma"),
     "diabetes":         ("diabetes", "diabetic"),
@@ -138,9 +165,14 @@ GROUP_KEYWORDS = {
                          "stroke"),
     "surgical_injury":  ("fracture", "postoperative", "post-operative",
                          "complication of", "wound", "amputation"),
+    # Not "substance" on its own: it matched "Adverse effect of other drugs ...
+    # and biological substances", an E-code on a large share of admissions.
     "mental_health":    ("depress", "anxiety", "schizophren", "bipolar", "psychosis",
-                         "psychotic", "suicidal", "alcohol dependence",
-                         "substance", "opioid dependence"),
+                         "psychotic", "suicidal", "suicide", "self-harm", "self-inflicted",
+                         "alcohol dependence", "alcohol abuse", "opioid dependence",
+                         "opioid abuse", "cocaine abuse", "cannabis abuse", "drug abuse",
+                         "drug dependence", "substance abuse", "substance use",
+                         "substance dependence"),
 }
 
 GROUP_LABELS = {key: label for key, label, _, _ in GROUP_PATTERNS}
@@ -333,18 +365,24 @@ def monitoring_groups(primary_code: str = "", primary_diagnosis: str = "",
                       secondary_diagnoses: Optional[list] = None) -> list:
     """
     The conditions that shape a patient's weekly monitoring: every group their
-    diagnoses match, plan group first, plus "general" when any recorded
-    diagnosis matched NO group.
+    diagnoses match, plan group first, plus "general" when the REASON FOR
+    ADMISSION - the principal diagnosis - matched no group.
 
     The "general" entry matters. A patient admitted with liver failure whose
     only matched diagnosis is bipolar disorder would otherwise be monitored as
     a mental health patient alone, with their vitals muted - the liver disease
     is real even though no group names it, and it makes vitals matter.
+
+    An unmatched SECONDARY diagnosis does not add it. Almost every patient has
+    one - hypertension, hyperlipidaemia, obesity - and when they counted,
+    "general" joined 97% of patients and its ordinary weight of 1.0 overrode
+    every group's down-weighting: weight was scored in full after a hip
+    fracture while the card said it was noise. Extreme readings in a muted
+    signal are still caught by the red flags in models/monitoring_rules.
     """
     keys = [m["group"] for m in classify_all(primary_code, primary_diagnosis, secondary_diagnoses)]
     unmatched = bool((primary_code or primary_diagnosis)
                      and not (_match_code(primary_code) or _match_title(primary_diagnosis)))
-    unmatched = unmatched or any(t and not _match_title(t) for t in (secondary_diagnoses or []))
     if unmatched or not keys:
         keys.append("general")
     return keys

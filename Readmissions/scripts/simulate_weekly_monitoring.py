@@ -220,6 +220,13 @@ def observe_week(week: int, n_weeks: int, deteriorating: bool,
         refill_p = [0.04, 0.08, 0.78, 0.10]
         follow_p = [0.06, 0.64, 0.30]
 
+    # In cancer the danger runs the other way: a declining patient LOSES weight
+    # (poor intake, cachexia) and a recovering one holds or regains it, which is
+    # what the oncology weight rule scores. Mirroring the same draw keeps every
+    # other patient's data identical.
+    if group == "oncology":
+        weight = -weight
+
     refill = rng.choice(["missed", "late", "collected", "not due"],
                         p=np.array(refill_p) / sum(refill_p))
     follow = rng.choice(["missed", "attended", "not due"],
@@ -404,8 +411,12 @@ def main():
         prev_adj, prev_score = 0.0, base
         prev_obs, prev_drv = None, None
         for wk in range(1, a.weeks + 1):
-            contacted = rng.random() > NO_CONTACT_RATE
-            if contacted or prev_obs is None:
+            # The first week always has its readings: there is nothing earlier to
+            # carry forward, so a "no contact" first week used to be scored on new
+            # readings while being marked as not reported. The draw is kept so
+            # every later week's data is unchanged.
+            contacted = rng.random() > NO_CONTACT_RATE or prev_obs is None
+            if contacted:
                 obs = observe_week(wk, a.weeks, bool(deteriorating[i]),
                                    float(severity[i]), rng, group=grp["group"],
                                    groups=conditions)
