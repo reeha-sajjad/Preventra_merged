@@ -17,6 +17,10 @@ Four pieces make that work. They are listed in build order, because each depends
 **Before starting:** merge `main` into `ReadmissionDataPipeline`. Commit `a4cda07` (weekly
 monitoring aligned with the discharge diagnosis) is on `main` only, and workstream C depends on it.
 
+> **Status, 15 October 2026: A to D are built** on `readmission-case-manager` (on top of `main`, so
+> `a4cda07` is included). See [Implementation notes](#implementation-notes) at the end for the
+> runbook, where the build differs from this plan, and the known limitations.
+
 ---
 
 ## 0. Decisions this plan rests on
@@ -563,3 +567,85 @@ curl -X POST "$PILOT_API/ingest/v1/files" -H "Authorization: Bearer ing_ic_4f9a2
   -F encounters=@encounters.csv -F patients=@patients.csv -F diagnoses=@diagnoses.csv \
   -F labs=@labs.csv -F medications=@medications.csv -F procedures=@procedures.csv
 ```
+
+---
+
+## Implementation notes
+
+### Where things are
+
+| Piece | Code | Tests |
+|---|---|---|
+| A1 feature builder | `features/discharge_features.py`, `ingestion/vocab.py`, `ingestion/mimic_adapter.py` (MIMIC tables in canonical form, for the parity test) | `tests/units/test_discharge_features.py` |
+| A2 weekly rows | `features/weekly_rows.py`: `flatten`, `week_number`, `to_observations`, `model_rows`, `readmitted_within` | through the two below |
+| A3 exports | `scripts/export_discharge_training_csv.py --hospital`, `scripts/export_weekly_training_csv.py --hospital` | `test_ingest_scoring.py` |
+| B ingest API | `api/ingest.py`, `ingestion/schema.py`, `ingestion/canonical.py` | `tests/units/test_ingest.py` |
+| C scoring and worker | `api/scoring_service.py`, `ingestion/worker.py`, `api/worklist_summary.py`, `model_studio.active_model_for` / `system_actor` | `tests/units/test_ingest_scoring.py` |
+| D explanations | `api/studio_runner._explain`, `models/studio_drivers.py` | `test_model_studio.py` (explanations), `test_ingest_scoring.py` |
+
+### Runbook
+
+1. **Deploy.** The image now carries `features/` and `ingestion/` (`.dockerignore` excluded both
+   until now, and the API imports them, so an image without them does not start). Add the worker
+   as a second Railway service: same repo, root `/Readmissions`, Config-as-code path
+   `/Readmissions/railway.worker.json` (start command `python -m ingestion.worker`, no HTTP
+   healthcheck). Give it `MONGO_URI` and `MONGO_DB`, and nothing else: it signs no tokens and
+   calls no LLM, so it needs no `SHARED_SECRET_KEY`, `API_KEY` or Gemini key.
+2. **Locally,** from `Readmissions/`: `.venv/bin/python -m ingestion.worker --once` drains the
+   queue and exits; without `--once` it keeps polling. Against a throwaway `MONGO_DB` only.
+3. **Credential.** Signed in as the hospital's admin (or as the superadmin, with `hospital_id` in
+   the body or the hospital picked), `POST /api/ingest/clients {"patient_prefix": "CGH"}`. The
+   token comes back once. The hospital must exist; the prefix is 2 to 10 capitals or digits and
+   becomes the start of every patient id (`CGH-<patient_key>`). Revoke with
+   `DELETE /api/ingest/clients/{client_id}`.
+4. **Codes.** If the hospital sends its own codes, `PUT /api/ingest/mapping` with
+   `{"admission_type": {"ER": "EMERGENCY"}, "discharge_disposition": {...}, ...}`. Every value
+   must be a canonical one (`ingestion/vocab.py`), or the whole mapping is refused with the reasons.
+5. **Check the credential:** `GET /ingest/v1/ping`. Then send (appendix), and follow each batch
+   with `GET /ingest/v1/batches/{batch_id}`: `queued`, `processing`, `done` or `failed`, with what
+   was not scored and why.
+6. **First model.** Once outcomes have accrued, export the training files and train in Model
+   Studio with the identifier and date columns the scripts print:
+   `scripts/export_discharge_training_csv.py --hospital <id>` and
+   `scripts/export_weekly_training_csv.py --hospital <id>`. Both write to `~/Downloads`.
+
+### Where the build differs from the plan
+
+- **A2.** `weekly_frame(stay, weeks)` became two functions. `to_observations` turns a week's
+  readings into what the monitoring rules score. `model_rows` builds what a weekly model trains on
+  and scores: the flattened week, the discharge score, age and sex. It leaves out the week's own
+  score, because once a weekly model is deployed that score is the model's own answer.
+- **A3, weekly.** The export rebuilds each series from `ingest_weeks` and `risk_registry`, not from
+  `weekly_monitoring`. A new discharge replaces the patient's series on the dashboard, and the
+  series it replaces are the ones that ended in a readmission.
+- **B3.** Sex, marital status and race may come on the encounter (as in the appendix) or in a
+  `patient` block (as `patients.csv` sends them). `icd_version` takes `"10"` from a CSV cell.
+  `abnormal_flag` also takes `HH` and `LL`.
+- **B4.** `ingest_weeks` is keyed by `(hospital_id, encounter_key, week_number)`. The encounter
+  already identifies the patient, and the route checks that the `patient_key` sent matches it.
+- **C5.** Outcomes are linked whenever a patient's stays are scored, rather than when a stay is
+  stored. The exports work out the outcome afresh, so a stay nobody has touched since its 30 days
+  passed is still exported as a "no".
+- **Beyond the plan.**
+  - A patient whose newest stay ended in death or hospice comes off the worklist and out of
+    weekly monitoring; their scored discharges stay in `risk_registry`.
+  - Weekly scores are banded by the model that scored the discharge, so week 0 and week 1 mean
+    the same thing by "High".
+  - A deployed weekly model whose inputs the rows mostly lack (under 60%) leaves the rules'
+    scores in place, with a note on the job, as the discharge path already did. A weekly model
+    trained on the demo export would otherwise score pilot weeks on missing columns.
+  - A credential can only be created for a hospital that exists.
+
+### Known limitations
+
+- **Race.** The built-in model learned MIMIC's 33 race values; a hospital sends one of 8. The
+  parity test compares against the coarsened values.
+- **No ICD title lookup.** A diagnosis sent without a description shows its code as the title,
+  and its condition group comes from the code alone.
+- **Charlson malignancy pattern** kept as trained (A1).
+- **Explanations** of a history model change only the patient's latest row (D). On weekly cards,
+  the lines are the monitoring rules' readings even when a weekly model set the score.
+- **Rolling batch.** Ingested rows join the current `batch_date`. The executive summary's counts
+  are recomputed; its week-on-week change is not.
+- **Rate limit** is counted per API process. With more than one replica, each counts separately.
+

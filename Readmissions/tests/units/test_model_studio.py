@@ -7,6 +7,7 @@ generated code fails. The data is synthetic (scripts/make_studio_demo_data.py)
 with a known risk function, so "did it find the signal" has an answer.
 """
 
+import json
 import os
 import sys
 import time
@@ -609,3 +610,78 @@ def test_week_numbers_order_rows_but_do_not_pick_the_test_patients():
     assert test_ids != all_ids[-len(test_ids):]          # not simply the last ids
     sides = pd.DataFrame({"pid": frame.patient_id, "side": split}).groupby("pid").side.nunique()
     assert sides.max() == 1
+
+
+# ------------------------------------------------------------------ explanations
+def _explain_run(tmp_path, frame, cfg, group_field=None):
+    wd = tmp_path / "explain"
+    wd.mkdir()
+    frame.to_csv(wd / "train.csv", index=False)
+    (wd / "pipeline_code.py").write_text(STANDARD_PIPELINE)
+    result = ms.run_sandbox("train", str(wd), {"config": cfg, "train_file": "train.csv",
+                                               "target_field": "__label__", "group_field": group_field},
+                            120, lambda m: None)
+    assert result["ok"], result["error"]
+    reference = json.loads((wd / "train_result.json").read_text())["reference_values"]
+
+    def explain(rows: pd.DataFrame, config: dict) -> dict:
+        rows.to_csv(wd / "score.csv", index=False)
+        item = {"name": "t", "path": str(wd / "score.csv"), "out": str(wd / "pred.csv"),
+                "explain_out": str(wd / "explain.json")}
+        result = ms.run_sandbox("predict", str(wd), {"config": config, "inputs": [item]}, 120,
+                                lambda m: None)
+        assert result["ok"], result["error"]
+        return json.loads((wd / "explain.json").read_text())
+    return reference, explain
+
+
+def test_explanations_name_what_raised_the_patients_risk(tmp_path):
+    rng = np.random.default_rng(7)
+    n = 600
+    frame = pd.DataFrame({"x1": rng.normal(0, 1, n), "x2": rng.normal(0, 1, n), "noise": rng.normal(0, 1, n)})
+    frame["__label__"] = (rng.random(n) < 1 / (1 + np.exp(-(2.5 * frame.x1 + 0.5 * frame.x2)))).astype(int)
+    cfg = {"label_column": "y", "feature_columns": ["x1", "x2", "noise"],
+           "numeric_columns": ["x1", "x2", "noise"], "categorical_columns": [],
+           "algorithm_preference": "logistic_regression"}
+    reference, explain = _explain_run(tmp_path, frame, cfg)
+    assert abs(reference["x1"]) < 0.2                   # the training median, saved with the model
+
+    rows = pd.DataFrame({"x1": [3.0, 0.0], "x2": [0.5, 0.0], "noise": [0.0, 0.0],
+                         ms.EXPLAIN_FIELD: [1, 0]})
+    out = explain(rows, {**cfg, "reference_values": reference})
+    assert out["reference"] == "training" and list(out["rows"]) == ["0"]     # the marked row only
+    top = out["rows"]["0"][0]
+    assert (top["feature"], top["value"]) == ("x1", 3.0) and top["delta"] > 0.2
+    # A model saved before reference values existed compares with the file's own.
+    assert explain(rows, cfg)["reference"] == "file"
+
+
+def test_a_history_models_explanations_keep_the_files_row_numbers(tmp_path):
+    frame = _weekly_scored(200, 8)
+    frame["__label__"] = (frame["risk_score"] >= 40).astype(int)
+    frame["__group__"] = frame["patient_id"]
+    frame["__order__"] = frame["week_number"].astype(float)
+    cfg = {"label_column": "risk_score", "feature_columns": ["weight_change_kg", "adherence_pct"],
+           "numeric_columns": ["weight_change_kg", "adherence_pct"], "categorical_columns": [],
+           "algorithm_preference": "logistic_regression", "history": True,
+           "history_group_column": "__group__", "history_order_column": "__order__"}
+    reference, explain = _explain_run(tmp_path, frame, cfg, group_field="__group__")
+    # Newest week first, so the runner's patient-then-week order differs from the file's.
+    rows = pd.DataFrame({"__group__": ["A", "A", "B"], "__order__": [2.0, 1.0, 1.0],
+                         "weight_change_kg": [6.0, 0.0, 0.0], "adherence_pct": [85, 85, 85],
+                         ms.EXPLAIN_FIELD: [1, 0, 0]})
+    out = explain(rows, {**cfg, "reference_values": reference})
+    assert list(out["rows"]) == ["0"]
+    assert out["rows"]["0"][0]["feature"] == "weight_change_kg" and out["rows"]["0"][0]["value"] == 6.0
+
+
+def test_a_studio_driver_reads_like_a_built_in_one():
+    from api.mimic_scoring import _split_driver
+    from models.studio_drivers import format_studio_driver
+    line = format_studio_driver("lab_creatinine_last", 3.5, 0.0712)
+    assert line == ("Creatinine, last value before discharge: 3.5 (raises this patient's risk by "
+                    "about 7.1 points compared with a typical patient in the training data)")
+    parts = _split_driver(line)
+    assert (parts["label"], parts["value"]) == ("Creatinine, last value before discharge", "3.5")
+    other = format_studio_driver("ejection_fraction", 25, -0.03, lowers=True)
+    assert other.startswith("Ejection fraction: 25 (lowers") and other.count(" (") == 1

@@ -122,6 +122,88 @@ def _features(module, raw, config):
     return X.reset_index(drop=True)
 
 
+EXPLAIN_FIELD = "__explain__"          # 1 on the rows to explain (model_studio.EXPLAIN_FIELD)
+EXPLAIN_MAX_ROWS = 2000
+EXPLAIN_TOP = 3
+
+
+def _reference_values(raw) -> dict:
+    """Each input's typical value in the training data: the median of a numeric
+    column, the most frequent value of any other. Explanations compare a
+    patient with this typical patient."""
+    import pandas as pd
+
+    out = {}
+    for col in raw.columns:
+        s = raw[col]
+        num = pd.to_numeric(s, errors="coerce")
+        if s.notna().any() and num.notna().sum() >= 0.9 * s.notna().sum():
+            out[col] = None if num.dropna().empty else float(num.median())
+        else:
+            mode = s.dropna().astype(str).mode()
+            out[col] = None if mode.empty else str(mode.iloc[0])
+    return out
+
+
+def _plain(value):
+    """A JSON-safe copy of one input value, for the explanation."""
+    import math
+    if value is None:
+        return None
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value if isinstance(value, (int, float, str, bool)) else str(value)
+
+
+def _explain(module, estimator, columns, raw, config, mask, positions, out_path) -> None:
+    """
+    Why each marked row scored what it did, for any model.
+
+    For every input, the marked rows' value is replaced by the training data's
+    typical value (config["reference_values"]; the file's own when a model was
+    saved without them) and the rows are scored again. The drop in risk is how
+    much that value raised the patient's risk compared with a typical patient.
+    The top three increases are the drivers; when fewer than three raise it,
+    the largest decreases fill in, marked "lowers". Not SHAP: interactions
+    between inputs are ignored, so read it as indicative.
+
+    Earlier rows of the same patient are left as they are, so a model built on
+    each patient's history is explained on the latest row's own values.
+    """
+    import numpy as np
+
+    rows = np.flatnonzero(mask)[:EXPLAIN_MAX_ROWS]
+    explained = {}
+    if len(rows):
+        base = np.asarray(estimator.predict_proba(_features(module, raw, config)
+                                                  .reindex(columns=columns)))[:, 1]
+        reference = config.get("reference_values") or {}
+        batch = _reference_values(raw[config["feature_columns"]]) if not reference else {}
+        deltas = {}
+        for col in config["feature_columns"]:
+            typical = reference.get(col, batch.get(col))
+            if typical is None:
+                continue
+            changed = raw.copy()
+            changed.loc[changed.index[rows], col] = typical
+            p = np.asarray(estimator.predict_proba(_features(module, changed, config)
+                                                   .reindex(columns=columns)))[:, 1]
+            deltas[col] = base[rows] - p[rows]
+        for i, r in enumerate(rows):
+            ranked = sorted(((float(d[i]), col) for col, d in deltas.items()), reverse=True)
+            up = [(d, c) for d, c in ranked if d > 1e-4][:EXPLAIN_TOP]
+            down = sorted(((d, c) for d, c in ranked if d < -1e-4))[:EXPLAIN_TOP - len(up)]
+            explained[int(r if positions is None else positions[r])] = (
+                [{"feature": c, "value": _plain(raw.iloc[r][c]), "delta": round(d, 4)} for d, c in up]
+                + [{"feature": c, "value": _plain(raw.iloc[r][c]), "delta": round(d, 4), "lowers": True}
+                   for d, c in down])
+    with open(out_path, "w") as fh:
+        json.dump({"rows": explained, "reference": "training" if config.get("reference_values") else "file"},
+                  fh)
+
+
 def _same(a, b) -> bool:
     import numpy as np
     import pandas as pd
@@ -265,7 +347,9 @@ def run_train(workdir: str, job: dict) -> None:
     with open(f"{workdir}/train_result.json", "w") as fh:
         json.dump({"report": report if isinstance(report, dict) else {"note": str(report)},
                    "n_features": int(X.shape[1]),
-                   "feature_names": list(X.columns)[:500]}, fh, default=str)
+                   "feature_names": list(X.columns)[:500],
+                   "reference_values": _reference_values(df[config["feature_columns"]])},
+                  fh, default=str)
     _emit("done")
 
 
@@ -309,6 +393,11 @@ def run_predict(workdir: str, job: dict) -> None:
         pd.DataFrame({"score": _restore(proba, positions)}).to_csv(item["out"], index=False)
         _emit("log", message=f"Scored {len(df):,} rows from {item['name']}",
               missing_inputs=missing)
+
+        if item.get("explain_out"):
+            mask = (pd.to_numeric(df[EXPLAIN_FIELD], errors="coerce").fillna(0).astype(int).values == 1
+                    if EXPLAIN_FIELD in df.columns else np.ones(len(df), dtype=bool))
+            _explain(module, estimator, columns, raw, config, mask, positions, item["explain_out"])
 
         if item.get("importance_label_field"):
             from sklearn.inspection import permutation_importance

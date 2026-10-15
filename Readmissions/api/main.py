@@ -30,6 +30,7 @@ from api import access_log
 from api import hospital
 from api import risk_watch
 from api import followups
+from api import ingest
 from api import emergency
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
@@ -87,7 +88,9 @@ def require_manual_entry():
 # defeats the point of having one. Everything under /auth/ that needs a user
 # checks the bearer token itself.
 def _skips_api_key(path: str) -> bool:
-    return path == "/healthz" or path.startswith("/auth/")
+    # /ingest/ is a hospital's own systems, authenticated by its per-hospital
+    # ingest credential (api/ingest.py) - never by this browser key.
+    return path == "/healthz" or path.startswith("/auth/") or path.startswith("/ingest/")
 
 
 def require_api_key(request: Request,
@@ -392,6 +395,17 @@ db = _mongo_client[get_db_name()]
 # rather than wherever the product collections are set up.
 shared_auth.ensure_indexes(db)
 access_log.ensure_indexes(db)
+
+# The ingest API (api/ingest.py) reads the database through a getter, so it
+# always uses this module's db - the same handle as every other route.
+ingest.bind(lambda: db)
+try:
+    ingest.ensure_indexes(db)
+except Exception as exc:                                  # noqa: BLE001
+    # Created again on the first ingest request if the database was down at boot.
+    print(f"WARNING: could not create the ingest indexes ({type(exc).__name__}: {exc})")
+app.include_router(ingest.router)
+app.include_router(ingest.admin)
 
 
 # ---------------------------------------------------------------------------

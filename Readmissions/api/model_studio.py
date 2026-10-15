@@ -969,6 +969,9 @@ def _accept_code(job: dict, code: str, origin: str, attempts: list) -> bool:
         job["code_sections"] = studio_guard.sections(code)
         job["code_attempts"] = attempts
         job["train_report"] = result
+        # The training data's typical value of each input, saved with the model:
+        # its explanations compare a patient with this typical patient.
+        job["config"]["reference_values"] = result.get("reference_values") or {}
     algo = (result.get("report") or {}).get("algorithm", "model")
     _step(job, "train", "done", f"{algo} · {result.get('n_features')} features")
     return True
@@ -991,6 +994,19 @@ def _predict(workdir: str, code: str, config: dict, inputs: list, log,
 
 def _scores(path: str) -> np.ndarray:
     return pd.read_csv(path)["score"].astype(float).values
+
+
+# Marks the rows of a scoring file to explain (studio_runner.EXPLAIN_FIELD).
+EXPLAIN_FIELD = "__explain__"
+
+
+def read_explanations(path: str) -> dict:
+    """{row position in the scored file: [{feature, value, delta, lowers?}]}"""
+    try:
+        with open(path) as fh:
+            return {int(k): v for k, v in json.load(fh).get("rows", {}).items()}
+    except (OSError, ValueError):
+        return {}
 
 
 def _evaluate(db, job: dict, user: dict, base: Optional[dict]) -> None:
@@ -1558,6 +1574,20 @@ def get_model(db, model_id: str, user: dict) -> dict:
     if out.get("code"):
         out["code_sections"] = studio_guard.sections(out["code"])
     return out
+
+
+def system_actor(hospital_id) -> dict:
+    """Who the ingestion worker acts as when it scores a hospital's patients:
+    that hospital's view, with no person behind it. It sees that hospital's
+    models only (_visible), exactly as its admin would."""
+    return {"_id": "ingest-worker", "role": "superadmin", "email": "ingest-worker",
+            "acting_hospital_id": hospital_id}
+
+
+def active_model_for(db, hospital_id, target: str) -> Optional[dict]:
+    """The model deployed for this hospital and target, or the built-in one -
+    for callers with no signed-in user, such as the ingestion worker."""
+    return active_model(db, system_actor(hospital_id), target)
 
 
 def active_model_id(db, user: dict, target: str) -> str:

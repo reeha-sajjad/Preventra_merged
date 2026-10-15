@@ -1,0 +1,26 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile",
+    "watchPatterns": [
+      "/Readmissions/api/**",
+      "/Readmissions/models/**",
+      "/Readmissions/features/**",
+      "/Readmissions/ingestion/**",
+      "/Readmissions/requirements-api.txt",
+      "/Readmissions/Dockerfile",
+      "/Readmissions/.dockerignore",
+      "/Readmissions/railway.worker.json",
+      "/Readmissions/data/mimic/model/results/phase1_model.joblib",
+      "/Readmissions/data/mimic/model/results/mimic_feature_spec.json",
+      "/Readmissions/data/mimic/model/results/model_card_phase1.json",
+      "/Readmissions/docs/mimic/band_thresholds_mimic.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "python -m ingestion.worker",
+    "restartPolicyType": "ALWAYS",
+    "numReplicas": 1
+  }
+}
