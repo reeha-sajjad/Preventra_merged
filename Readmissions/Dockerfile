@@ -15,6 +15,11 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 # model bundle is training output and is excluded by .dockerignore.
 COPY api/ ./api/
 COPY models/ ./models/
+# The ingest API and its worker (python -m ingestion.worker, the same image
+# with another start command - see railway.worker.json) build the 94 inputs
+# and the weekly rows here.
+COPY features/ ./features/
+COPY ingestion/ ./ingestion/
 # Three files, not two. model_card_phase1.json backs /api/model/metrics, which
 # the whole Analytics page depends on - and its handler raises 503 rather than
 # inventing figures when the card is absent, so omitting it takes the page down.

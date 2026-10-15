@@ -6,6 +6,8 @@
     "watchPatterns": [
       "/Readmissions/api/**",
       "/Readmissions/models/**",
+      "/Readmissions/features/**",
+      "/Readmissions/ingestion/**",
       "/Readmissions/requirements-api.txt",
       "/Readmissions/Dockerfile",
       "/Readmissions/.dockerignore",

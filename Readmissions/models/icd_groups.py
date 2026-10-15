@@ -256,7 +256,7 @@ def _match_title(title: str) -> Optional[str]:
 
 
 def _candidates(primary_code: str, primary_diagnosis: str,
-                secondary_diagnoses: list) -> list:
+                secondary_diagnoses: list, secondary_codes: Optional[list] = None) -> list:
     """
     Every (rank, tiebreak, key, confidence, matched_on, evidence) a patient's
     recorded diagnoses support. Shared by classify() and classify_all() so the
@@ -276,16 +276,26 @@ def _candidates(primary_code: str, primary_diagnosis: str,
         out.append((rank[key], 1, key, "moderate", "principal_title",
                     f"principal diagnosis - {primary_diagnosis}"))
 
+    # Ingested stays carry the code of every diagnosis, not just the
+    # principal one (the MIMIC loader kept titles only), so a secondary
+    # condition is matched exactly, the way the notebook grouped.
+    for code in secondary_codes or []:
+        key = _match_code(code)
+        if key:
+            out.append((rank[key], 2, key, "high", "secondary_code",
+                        f"secondary diagnosis {code}"))
+
     for title in secondary_diagnoses or []:
         key = _match_title(title)
         if key:
-            out.append((rank[key], 2, key, "moderate", "secondary_title",
+            out.append((rank[key], 3, key, "moderate", "secondary_title",
                         f"secondary diagnosis - {title}"))
     return out
 
 
 def classify(primary_code: str = "", primary_diagnosis: str = "",
-             secondary_diagnoses: Optional[list] = None) -> dict:
+             secondary_diagnoses: Optional[list] = None,
+             secondary_codes: Optional[list] = None) -> dict:
     """
     Assign THE monitoring group - the one plan this patient is followed under.
 
@@ -308,7 +318,7 @@ def classify(primary_code: str = "", primary_diagnosis: str = "",
     "which one do we monitor them for"; classify_all answers "which do they
     have", and that is the one to filter on.
     """
-    candidates = _candidates(primary_code, primary_diagnosis, secondary_diagnoses)
+    candidates = _candidates(primary_code, primary_diagnosis, secondary_diagnoses, secondary_codes)
     if not candidates:
         return {
             "group": "general",
@@ -329,7 +339,8 @@ def classify(primary_code: str = "", primary_diagnosis: str = "",
 
 
 def classify_all(primary_code: str = "", primary_diagnosis: str = "",
-                 secondary_diagnoses: Optional[list] = None) -> list:
+                 secondary_diagnoses: Optional[list] = None,
+                 secondary_codes: Optional[list] = None) -> list:
     """
     EVERY group the patient's recorded diagnoses support, best evidence first.
 
@@ -352,7 +363,7 @@ def classify_all(primary_code: str = "", primary_diagnosis: str = "",
     the absence of a specific condition, so it is not a membership.
     """
     best: dict = {}
-    for cand in _candidates(primary_code, primary_diagnosis, secondary_diagnoses):
+    for cand in _candidates(primary_code, primary_diagnosis, secondary_diagnoses, secondary_codes):
         rank, tiebreak, key = cand[0], cand[1], cand[2]
         if key not in best or (rank, tiebreak) < (best[key][0], best[key][1]):
             best[key] = cand
@@ -362,7 +373,8 @@ def classify_all(primary_code: str = "", primary_diagnosis: str = "",
 
 
 def monitoring_groups(primary_code: str = "", primary_diagnosis: str = "",
-                      secondary_diagnoses: Optional[list] = None) -> list:
+                      secondary_diagnoses: Optional[list] = None,
+                      secondary_codes: Optional[list] = None) -> list:
     """
     The conditions that shape a patient's weekly monitoring: every group their
     diagnoses match, plan group first, plus "general" when the REASON FOR
@@ -380,7 +392,7 @@ def monitoring_groups(primary_code: str = "", primary_diagnosis: str = "",
     fracture while the card said it was noise. Extreme readings in a muted
     signal are still caught by the red flags in models/monitoring_rules.
     """
-    keys = [m["group"] for m in classify_all(primary_code, primary_diagnosis, secondary_diagnoses)]
+    keys = [m["group"] for m in classify_all(primary_code, primary_diagnosis, secondary_diagnoses, secondary_codes)]
     unmatched = bool((primary_code or primary_diagnosis)
                      and not (_match_code(primary_code) or _match_title(primary_diagnosis)))
     if unmatched or not keys:

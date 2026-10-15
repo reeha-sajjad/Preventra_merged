@@ -83,6 +83,9 @@ ACTIONS = {
     # choosing which model scores that hospital's patients. An administrative
     # decision about the hospital's tooling, so the roles that run the account.
     "manage_models":  ("superadmin", "hospital_admin"),
+    # The hospital's ingest credentials and code mappings (api/ingest.py):
+    # which systems may send its records, and how its codes are read.
+    "manage_ingest":  ("superadmin", "hospital_admin"),
     # Cost and ROI figures (api/roi_model.py): what a readmission costs, what an
     # intervention costs, and the return. A case manager coordinates care and
     # manages neither people nor money, so they get the clinical half of those

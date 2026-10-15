@@ -41,8 +41,22 @@ for clinical claims.
     .venv/bin/python scripts/export_weekly_training_csv.py
     .venv/bin/python scripts/export_weekly_training_csv.py --no-leaks --out /tmp/weekly.csv
 
+A HOSPITAL'S OWN WEEKS (--hospital <id>)
+----------------------------------------
+The weeks that hospital sent through the ingest API, one row per monitoring
+week, built by the same code the worker scores a deployed weekly model with
+(features/weekly_rows.model_rows): the week's readings relative to discharge,
+the discharge score, age and sex - and not the week's own score, which after a
+weekly model is deployed is that model's answer. The outcome is
+`readmitted_within_7d`: an unplanned admission in the 7 days after the week,
+from the hospital's stored stays; blank while those 7 days have not passed.
+Each series is rebuilt from ingest_weeks, so the weeks before a readmission
+are included even after the new discharge replaced them on the dashboard.
+
+    .venv/bin/python scripts/export_weekly_training_csv.py --hospital <hospital_id>
+
 The default output is ~/Downloads, not the repository: rows carry MIMIC-derived
-patient ids, which must not be committed.
+patient ids, or a hospital's patient records, which must not be committed.
 """
 from __future__ import annotations
 
@@ -50,6 +64,7 @@ import argparse
 import os
 import sys
 import time
+from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -58,11 +73,10 @@ from dotenv import load_dotenv
 from pymongo.errors import PyMongoError
 
 from api.db_utils import get_db_name, get_mongo_client
+from features.weekly_rows import flatten, model_rows, readmitted_within
 
 COLLECTION = "weekly_monitoring"
 DEFAULT_OUT = os.path.join(os.path.expanduser("~"), "Downloads", "weekly_monitoring_trainable.csv")
-# How a row was produced, not anything about the patient.
-BOOKKEEPING = ("model_version", "scored_by", "source", "pinned_by", "group_evidence", "group_label")
 LEAKS = ("next_week_risk_band", "next_week_driver_1", "simulated_trajectory")
 
 
@@ -79,32 +93,6 @@ def fetch(db, attempts: int = 3) -> list:
             time.sleep(3 * attempt)
 
 
-def flatten(docs: list) -> pd.DataFrame:
-    df = pd.DataFrame(docs)
-
-    def nested(col, prefix=""):
-        values = df[col] if col in df.columns else pd.Series([None] * len(df))
-        part = pd.json_normalize(values.apply(lambda v: v if isinstance(v, dict) else {}).tolist())
-        return part.rename(columns=lambda c: f"{prefix}{c}")
-
-    signals = nested("monitoring")
-    baseline = nested("discharge_baseline", "baseline_").drop(
-        columns=["baseline_source", "baseline_group"], errors="ignore")
-    baseline = baseline.rename(columns=lambda c: c.replace("baseline_baseline_", "baseline_"))
-    flags = df.get("red_flags", pd.Series([[]] * len(df))).apply(
-        lambda v: v if isinstance(v, list) else [])
-    groups = df.get("monitoring_groups", pd.Series([[]] * len(df))).apply(
-        lambda v: ",".join(map(str, v)) if isinstance(v, list) else "")
-
-    flat = df.drop(columns=["monitoring", "discharge_baseline", "red_flags", "monitoring_groups",
-                            *BOOKKEEPING], errors="ignore")
-    flat = pd.concat([flat.reset_index(drop=True), signals, baseline], axis=1)
-    flat["n_red_flags"] = flags.apply(len).values
-    flat["red_flags"] = flags.apply(lambda v: "; ".join(map(str, v))).values
-    flat["monitoring_groups"] = groups.values
-    return flat
-
-
 def add_next_week(flat: pd.DataFrame) -> pd.DataFrame:
     """The same patient's following week: the outcome, and the planted leaks."""
     flat = flat.sort_values(["patient_id", "week_number"]).reset_index(drop=True)
@@ -116,15 +104,66 @@ def add_next_week(flat: pd.DataFrame) -> pd.DataFrame:
     return flat
 
 
+def hospital_table(db, hospital_id: str, as_of=None) -> pd.DataFrame:
+    """One row per monitoring week the hospital sent, with readmitted_within_7d."""
+    from api import scoring_service
+    as_of = pd.Timestamp(as_of) if as_of else pd.Timestamp.now()
+    by_patient = defaultdict(list)
+    for stay in db[scoring_service.STAYS].find({"hospital_id": hospital_id}, {"_id": 0}):
+        by_patient[stay["patient_id"]].append(stay)
+    frames = []
+    for stays in by_patient.values():
+        stays.sort(key=lambda st: pd.Timestamp(st["encounter"]["admit_datetime"]))
+        for i, stay in enumerate(stays):
+            week0 = scoring_service.week0_for(db, hospital_id, stay)
+            docs = scoring_service.scored_weeks(db, hospital_id, stay, week0) if week0 else []
+            if not docs:
+                continue
+            rows = model_rows([week0] + docs, stay).iloc[1:].copy()
+            # The next admission, if unplanned, is the readmission - as for the
+            # 30-day outcome (features/discharge_features.cohort).
+            nxt = stays[i + 1]["encounter"] if i + 1 < len(stays) else None
+            planned = nxt and (nxt.get("admission_type") == "ELECTIVE" or nxt.get("planned_admission"))
+            readmit_at = nxt["admit_datetime"] if nxt and not planned else None
+            rows["readmitted_within_7d"] = readmitted_within(rows["week_date"], readmit_at, 7, as_of).values
+            frames.append(rows)
+    if not frames:
+        return pd.DataFrame()
+    table = pd.concat(frames, ignore_index=True)
+    first = ["patient_id", "week_number", "week_date", "readmitted_within_7d"]
+    return table[first + [c for c in table.columns if c not in first]]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument("--out", default=None)
     ap.add_argument("--no-leaks", action="store_true", help="leave the planted leak columns out")
+    ap.add_argument("--hospital", default=None,
+                    help="export this hospital's ingested weeks instead of weekly_monitoring")
     args = ap.parse_args()
 
     load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
     db = get_mongo_client(os.environ["MONGO_URI"])[get_db_name()]
+    if args.hospital:
+        out = args.out or os.path.join(os.path.expanduser("~"), "Downloads",
+                                       f"{args.hospital}_weekly_trainable.csv")
+        table = hospital_table(db, args.hospital)
+        if table.empty:
+            raise SystemExit(f"No scored ingested weeks for hospital '{args.hospital}'.")
+        os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+        table.to_csv(out, index=False)
+        known = table["readmitted_within_7d"].notna()
+        print(f"{len(table):,} weeks, {table['patient_id'].nunique():,} patients, {table.shape[1]} columns")
+        print(f"Outcome known (trainable): {known.sum():,}; readmitted within 7 days: "
+              f"{table.loc[known, 'readmitted_within_7d'].mean():.1%}" if known.any()
+              else "No outcome is known yet.")
+        print("In Model Studio: outcome readmitted_within_7d; patient identifier patient_id; "
+              "date week_date.")
+        print(f"Written to {os.path.abspath(out)}")
+        return
+
+    args.out = args.out or DEFAULT_OUT
     docs = fetch(db)
     if not docs:
         raise SystemExit(f"{COLLECTION} is empty.")

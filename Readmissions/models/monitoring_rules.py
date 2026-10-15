@@ -1356,6 +1356,11 @@ def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
     total = flag_total = 0.0
     for offset, (key, (label, fmt, default_rule)) in enumerate(signals_for(group).items()):
         if key not in obs:
+            if key not in DISEASE_NEUTRAL:
+                # A shared reading this week did not report. A real feed rarely
+                # sends all seven (ingestion/schema.py Readings), so it adds
+                # nothing and stays off the card rather than being invented.
+                continue
             # A disease signal the caller did not supply. Scoring its neutral
             # value contributes nothing rather than treating silence as good
             # news - see DISEASE_NEUTRAL.
