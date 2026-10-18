@@ -1,11 +1,12 @@
-"""User Management: hospitals, insurers, and the accounts that work for them.
+"""User Management: hospitals, insurers, pharmacies, and the accounts that work for them.
 
 Accounts are shared by both products, so this lives once, here in the shared
 auth service, and both apps' Settings pages call it.
 
 Who may do what - enforced here, never only in a frontend:
 
-    superadmin      creates hospitals, insurers and hospital admins; manages
+    superadmin      creates hospitals, insurers, pharmacies and hospital admins;
+                    places insurer and pharmacy staff; manages
                     every account except other superadmins
     hospital_admin  manages doctors, nurses, case managers and patients in its
                     own hospital, and nothing outside it
@@ -43,6 +44,7 @@ from api import auth
 
 HOSPITALS = "hospitals"
 INSURERS = "insurers"
+PHARMACIES = "pharmacies"
 
 MANAGER_ROLES = ("superadmin", "hospital_admin")
 
@@ -74,6 +76,10 @@ def insurers(db):
     return _identity(db)[INSURERS]
 
 
+def pharmacies(db):
+    return _identity(db)[PHARMACIES]
+
+
 def temporary_password() -> str:
     return "".join(secrets.choice(_TEMP_ALPHABET) for _ in range(12))
 
@@ -98,6 +104,7 @@ def admin_view(account: dict) -> dict:
     return {**auth.public_view(account),
             "name": account.get("name", ""),
             "insurer_id": account.get("insurer_id"),
+            "pharmacy_id": account.get("pharmacy_id"),
             # What a self-signup asked for; None for accounts an admin created.
             "requested_role": account.get("requested_role"),
             "requested_hospital_id": account.get("requested_hospital_id"),
@@ -129,6 +136,16 @@ def create_insurer(db, actor: dict, name: str) -> dict:
     return _create_org(insurers(db), actor, name)
 
 
+def create_pharmacy(db, actor: dict, name: str) -> dict:
+    _require_superadmin(actor)
+    return _create_org(pharmacies(db), actor, name)
+
+
+def list_pharmacies(db, actor: dict) -> list:
+    require_manager(actor)
+    return [{"id": p["_id"], "name": p["name"]} for p in pharmacies(db).find().sort("name", 1)]
+
+
 def list_hospitals(db, actor: dict) -> list:
     """Every hospital for the superadmin; only its own for a hospital admin."""
     require_manager(actor)
@@ -151,7 +168,7 @@ def _check_assignable(actor: dict, role: str) -> None:
 
 
 def _placement(db, actor: dict, role: str, hospital_id: Optional[str],
-               insurer_id: Optional[str]) -> dict:
+               insurer_id: Optional[str], pharmacy_id: Optional[str] = None) -> dict:
     """Where an account with this role belongs, checked against what exists and
     what the actor may touch. A hospital admin can only ever place people in
     its own hospital, whatever the request says."""
@@ -162,14 +179,22 @@ def _placement(db, actor: dict, role: str, hospital_id: Optional[str],
             raise HTTPException(status_code=422, detail=f"A {role} must belong to a hospital")
         if not hospitals(db).find_one({"_id": hospital_id}):
             raise HTTPException(status_code=422, detail=f"No hospital '{hospital_id}'")
-        return {"hospital_id": hospital_id, "insurer_id": None}
+        return {"hospital_id": hospital_id, "insurer_id": None, "pharmacy_id": None}
     if role == "insurer":
         if not insurer_id:
             raise HTTPException(status_code=422, detail="An insurer account must belong to an insurer")
         if not insurers(db).find_one({"_id": insurer_id}):
             raise HTTPException(status_code=422, detail=f"No insurer '{insurer_id}'")
-        return {"hospital_id": None, "insurer_id": insurer_id}
-    return {"hospital_id": None, "insurer_id": None}
+        return {"hospital_id": None, "insurer_id": insurer_id, "pharmacy_id": None}
+    if role == "pharmacy":
+        # A pharmacy's staff belong to the pharmacy, which our team assigns -
+        # like an insurer's. They see the patients who fill there, in any hospital.
+        if not pharmacy_id:
+            raise HTTPException(status_code=422, detail="A pharmacy account must belong to a pharmacy")
+        if not pharmacies(db).find_one({"_id": pharmacy_id}):
+            raise HTTPException(status_code=422, detail=f"No pharmacy '{pharmacy_id}'")
+        return {"hospital_id": None, "insurer_id": None, "pharmacy_id": pharmacy_id}
+    return {"hospital_id": None, "insurer_id": None, "pharmacy_id": None}
 
 
 def _load_target(db, actor: dict, user_id: str) -> dict:
@@ -185,10 +210,10 @@ def _load_target(db, actor: dict, user_id: str) -> dict:
 
 
 def _is_unattached_signup(target: dict) -> bool:
-    """A self-signup nobody has approved yet: pending, in no hospital or insurer.
-    (A suspended account is pending too, but keeps its hospital.)"""
+    """A self-signup nobody has approved yet: pending, in no hospital, insurer
+    or pharmacy. (A suspended account is pending too, but keeps its hospital.)"""
     return (target["status"] == "pending" and not target.get("hospital_id")
-            and not target.get("insurer_id"))
+            and not target.get("insurer_id") and not target.get("pharmacy_id"))
 
 
 def _is_request_for(actor: dict, target: dict) -> bool:
@@ -220,7 +245,7 @@ def list_users(db, actor: dict, hospital_id: Optional[str] = None,
         # Its own staff and patients, plus the sign-ups asking to join it.
         query["$or"] = [
             {"hospital_id": actor["hospital_id"], "role": {"$in": [*ASSIGNABLE["hospital_admin"], "hospital_admin"]}},
-            {"status": "pending", "hospital_id": None, "insurer_id": None,
+            {"status": "pending", "hospital_id": None, "insurer_id": None, "pharmacy_id": None,
              "requested_hospital_id": actor["hospital_id"] or "__none__",
              "role": {"$in": list(ASSIGNABLE["hospital_admin"])}},
         ]
@@ -253,7 +278,8 @@ def patient_insurers(db, accounts: list) -> dict:
 
 
 def create_user(db, actor: dict, email: str, role: str, name: str = "",
-                hospital_id: Optional[str] = None, insurer_id: Optional[str] = None) -> dict:
+                hospital_id: Optional[str] = None, insurer_id: Optional[str] = None,
+                pharmacy_id: Optional[str] = None) -> dict:
     """Add an account with a temporary password, or approve a pending self-signup
     with the same email. Returns the account and, for a new one, the temporary
     password - shown once and never stored in plain text."""
@@ -262,7 +288,7 @@ def create_user(db, actor: dict, email: str, role: str, name: str = "",
     email = auth.normalise_email(email)
     if not auth._EMAIL_RE.match(email):
         raise HTTPException(status_code=422, detail="A valid email address is required")
-    place = _placement(db, actor, role, hospital_id, insurer_id)
+    place = _placement(db, actor, role, hospital_id, insurer_id, pharmacy_id)
     now = auth._now()
     fields = {"role": role, "status": "active", "name": (name or "").strip(),
               **place, "updated_at": now}
@@ -298,7 +324,8 @@ def create_user(db, actor: dict, email: str, role: str, name: str = "",
 
 def update_user(db, actor: dict, user_id: str, role: Optional[str] = None,
                 status: Optional[str] = None, hospital_id: Optional[str] = None,
-                insurer_id: Optional[str] = None, name: Optional[str] = None) -> dict:
+                insurer_id: Optional[str] = None, name: Optional[str] = None,
+                pharmacy_id: Optional[str] = None) -> dict:
     """Change a role, approve or suspend (status), move or name an account."""
     require_manager(actor)
     target = _load_target(db, actor, user_id)
@@ -316,7 +343,8 @@ def update_user(db, actor: dict, user_id: str, role: Optional[str] = None,
         if not hospital_id and _is_unattached_signup(current):
             hospital_id = target.get("requested_hospital_id")
     place = _placement(db, actor, new_role, hospital_id,
-                       insurer_id if insurer_id is not None else target.get("insurer_id"))
+                       insurer_id if insurer_id is not None else target.get("insurer_id"),
+                       pharmacy_id if pharmacy_id is not None else target.get("pharmacy_id"))
     fields = {"role": new_role, "status": status or current["status"], **place,
               "updated_at": auth._now()}
     if name is not None:
@@ -351,7 +379,7 @@ def list_public_hospitals(db) -> list:
 
 
 def import_users(db, actor: dict, csv_text: str, hospital_id: Optional[str] = None,
-                 insurer_id: Optional[str] = None) -> dict:
+                 insurer_id: Optional[str] = None, pharmacy_id: Optional[str] = None) -> dict:
     """Create accounts from CSV with columns email, name, role (header row
     required). Each row succeeds or fails on its own, so one bad line does not
     lose the rest; failures come back with their line number."""
@@ -370,7 +398,7 @@ def import_users(db, actor: dict, csv_text: str, hospital_id: Optional[str] = No
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         try:
             result = create_user(db, actor, row.get("email", ""), row.get("role", "").lower(),
-                                 row.get("name", ""), hospital_id, insurer_id)
+                                 row.get("name", ""), hospital_id, insurer_id, pharmacy_id)
             created.append({"line": line, **result})
         except HTTPException as exc:
             failed.append({"line": line, "email": row.get("email", ""), "error": exc.detail})

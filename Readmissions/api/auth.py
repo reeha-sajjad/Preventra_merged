@@ -78,7 +78,7 @@ USERS_COLLECTION = "users"
 # used in the database, the token, both backends and both frontends. GLP-1 keeps
 # a copy in GLP1/Backend/core/security.py that must stay identical to this one.
 ROLES = ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager",
-         "insurer", "patient")
+         "insurer", "pharmacy", "patient")
 STATUSES = ("pending", "active")
 
 # What a self-signup becomes when it names no role (an older portal, or a
@@ -90,10 +90,12 @@ DEFAULT_ROLE = "case_manager"
 # admin approves it - confirming the role or changing it as they do. What it
 # buys is a sign-up list the admin can sort by who people say they are.
 # superadmin is never on offer; that account comes from scripts/create_superadmin.py.
-SIGNUP_ROLES = ("doctor", "nurse", "case_manager", "hospital_admin", "insurer", "patient")
+SIGNUP_ROLES = ("doctor", "nurse", "case_manager", "hospital_admin", "insurer", "pharmacy",
+                "patient")
 
 # Roles that work for one hospital. superadmin belongs to none, because it
-# oversees all of them; insurer belongs to an insurer organisation instead.
+# oversees all of them; insurer belongs to an insurer organisation instead, and
+# pharmacy (a pharmacy's staff) to a pharmacy organisation.
 HOSPITAL_ROLES = ("hospital_admin", "doctor", "nurse", "case_manager", "patient")
 
 # Enforced by the database itself once scripts/migrate_user_roles.py has run, so
@@ -344,6 +346,7 @@ def _was_declined(account: dict) -> bool:
     so replacing it gives nobody anything they did not have."""
     return (bool(account.get("declined")) and account.get("status") == "pending"
             and not account.get("hospital_id") and not account.get("insurer_id")
+            and not account.get("pharmacy_id")
             and not account.get("requested_hospital_id"))
 
 

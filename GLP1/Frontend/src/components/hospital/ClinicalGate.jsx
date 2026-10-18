@@ -7,8 +7,11 @@ import { api } from '../../data/api';
  * clinical details - vitals, drug, pharmacy, risk drivers - for one patient,
  * after they say why. The backend writes the reason to the access log and
  * refuses the details without it; this is only the form.
+ *
+ * A pharmacy (overviewOnly) gets a note instead: no reason opens the clinical
+ * layer for a pharmacy, and the backend refuses it (Backend/core/access.py).
  */
-export default function ClinicalGate({ patientIdx, reasons = [], onOpened }) {
+export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overviewOnly = false }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -26,6 +29,26 @@ export default function ClinicalGate({ patientIdx, reasons = [], onOpened }) {
       setBusy(false);
     }
   };
+
+  if (overviewOnly) {
+    return (
+      <div className="card p-6 flex items-start gap-3 animate-fade-up">
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+             style={{ background: '#EBF4FF', color: 'var(--color-primary)' }}>
+          <Lock size={16} />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            Clinical details are not shared with pharmacies
+          </h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            You see this patient&rsquo;s risk, care team and case manager. Vitals and dropout drivers stay
+            with the hospital&rsquo;s care team.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit} className="card p-6 space-y-4 animate-fade-up">

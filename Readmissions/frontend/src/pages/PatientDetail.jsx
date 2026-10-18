@@ -65,7 +65,7 @@ export default function PatientDetail() {
       .then((sum) => {
         if (!live) return null;
         setSummary(sum);
-        if (sum.detail_access === 'reason_required') return null;
+        if (sum.detail_access === 'reason_required' || sum.detail_access === 'overview_only') return null;
         return getPatientById(id).then((patientData) => {
           if (!live) return;
           setPatient(patientData);
@@ -146,7 +146,8 @@ export default function PatientDetail() {
         </div>
         <CareTeamCard summary={summary} onChanged={reload} />
         <FollowUpCard patientId={summary.id} />
-        <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload} />
+        <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload}
+          overviewOnly={summary.detail_access === 'overview_only'} />
       </div>
     );
   }

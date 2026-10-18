@@ -26,7 +26,7 @@ _bearer_scheme = HTTPBearer()
 # owns the accounts. The two services deploy separately, so they cannot share
 # one module.
 ROLES = ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager",
-         "insurer", "patient")
+         "insurer", "pharmacy", "patient")
 STATUSES = ("pending", "active")
 DEFAULT_ROLE = "case_manager"
 
@@ -46,6 +46,7 @@ def effective(account: dict) -> dict:
     return {"id": str(account["_id"]), "email": account.get("email", ""),
             "role": role, "status": status, "hospital_id": hospital_id,
             "insurer_id": account.get("insurer_id"),
+            "pharmacy_id": account.get("pharmacy_id"),
             "must_change_password": bool(account.get("must_change_password")),
             "app_access": account.get("app_access") or ["glp1", "readmissions"]}
 

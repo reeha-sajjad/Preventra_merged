@@ -7,8 +7,11 @@ import { openPatient } from '../../api';
  * clinical details - diagnoses, risk drivers, notes, alerts - for one patient,
  * after they say why. The backend writes the reason to the access log and
  * refuses the details without it; this is only the form.
+ *
+ * A pharmacy (overviewOnly) gets a note instead: no reason opens the clinical
+ * layer for a pharmacy, and the backend refuses it (api/access.py).
  */
-export default function ClinicalGate({ patientId, reasons = [], onOpened, compact = false }) {
+export default function ClinicalGate({ patientId, reasons = [], onOpened, compact = false, overviewOnly = false }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -26,6 +29,21 @@ export default function ClinicalGate({ patientId, reasons = [], onOpened, compac
       setBusy(false);
     }
   };
+
+  if (overviewOnly) {
+    return (
+      <div className={`bg-white rounded-xl border border-gray-200 shadow-sm ${compact ? 'p-4' : 'p-6'} flex items-start gap-3`}>
+        <div className="rounded-full bg-ns-navy/5 p-2 text-ns-navy"><Lock size={18} /></div>
+        <div>
+          <h3 className="font-semibold text-ns-navy">Clinical details are not shared with pharmacies</h3>
+          <p className="text-sm text-gray-600 mt-0.5">
+            You see this patient&apos;s risk, care team and case manager. Diagnoses, risk drivers and
+            notes stay with the hospital&apos;s care team.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={submit}

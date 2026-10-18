@@ -11,6 +11,7 @@ const ROLE_LABELS = {
   nurse:          'Nurse',
   case_manager:   'Case manager',
   insurer:        'Insurer',
+  pharmacy:       'Pharmacy',
   patient:        'Patient',
 };
 

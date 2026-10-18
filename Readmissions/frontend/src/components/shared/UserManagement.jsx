@@ -9,12 +9,13 @@ import { useCallback, useEffect, useState } from 'react';
 
 const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
-  nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', patient: 'Patient',
+  nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
+  patient: 'Patient',
 };
 
 // Mirrors ASSIGNABLE in Readmissions/api/user_admin.py.
 const ASSIGNABLE = {
-  superadmin: ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'insurer', 'patient'],
+  superadmin: ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'insurer', 'pharmacy', 'patient'],
   hospital_admin: ['doctor', 'nurse', 'case_manager', 'patient'],
 };
 const HOSPITAL_ROLES = ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'patient'];
@@ -44,6 +45,7 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
   const [requests, setRequests] = useState([]);
   const [hospitals, setHospitals] = useState([]);
   const [insurers, setInsurers] = useState([]);
+  const [pharmacies, setPharmacies] = useState([]);
   // role files the list by role - including what each pending sign-up asked to be.
   const [filter, setFilter] = useState({ hospital_id: '', status: '', role: '' });
   const [error, setError] = useState(null);
@@ -78,12 +80,13 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
       request('/auth/admin/hospitals'),
       isSuper ? request('/auth/admin/insurers') : Promise.resolve([]),
       request('/auth/admin/users?status=pending'),
-    ]).then(([u, h, i, pending]) => {
+      isSuper ? request('/auth/admin/pharmacies') : Promise.resolve([]),
+    ]).then(([u, h, i, pending, ph]) => {
       if (!current) return;
-      setUsers(u); setHospitals(h); setInsurers(i); setError(null);
+      setUsers(u); setHospitals(h); setInsurers(i); setPharmacies(ph); setError(null);
       // A suspended account is pending too, but keeps its hospital; a sign-up
       // is attached to nothing yet.
-      setRequests(pending.filter((a) => !a.hospital_id && !a.insurer_id));
+      setRequests(pending.filter(isSignup));
     }).catch((e) => { if (current) setError(e.message); });
     return () => { current = false; };
   }, [request, filter, isSuper, reloadKey]);
@@ -102,7 +105,7 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
       <div>
         <h2 className="text-lg font-semibold text-gray-800">User Management</h2>
         <p className="text-sm text-gray-500">
-          {isSuper ? 'All hospitals and insurers.' : `Staff and patients of ${hospitalName(me?.hospital_id)}.`}
+          {isSuper ? 'All hospitals, insurers and pharmacies.' : `Staff and patients of ${hospitalName(me?.hospital_id)}.`}
           {' '}Accounts work in both GLP-1 and Readmissions.
         </p>
       </div>
@@ -122,19 +125,22 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
       {notice && <Notice notice={notice} onClose={() => setNotice(null)} />}
 
       {isSuper && (
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 md:grid-cols-3">
           <OrgPanel title="Hospitals" items={hospitals} busy={busy}
                     onCreate={(name) => run(() => request('/auth/admin/hospitals', { method: 'POST', body: { name } }))} />
           <OrgPanel title="Insurers" items={insurers} busy={busy}
                     onCreate={(name) => run(() => request('/auth/admin/insurers', { method: 'POST', body: { name } }))} />
+          <OrgPanel title="Pharmacies" items={pharmacies} busy={busy}
+                    onCreate={(name) => run(() => request('/auth/admin/pharmacies', { method: 'POST', body: { name } }))} />
         </div>
       )}
 
-      <AddUser assignable={assignable} isSuper={isSuper} hospitals={hospitals} insurers={insurers} busy={busy}
+      <AddUser assignable={assignable} isSuper={isSuper} hospitals={hospitals} insurers={insurers}
+               pharmacies={pharmacies} busy={busy}
                onAdd={(body) => run(() => request('/auth/admin/users', { method: 'POST', body }),
                                     (out) => setNotice({ kind: 'created', results: [out] }))} />
 
-      <ImportCsv isSuper={isSuper} hospitals={hospitals} insurers={insurers} busy={busy}
+      <ImportCsv isSuper={isSuper} hospitals={hospitals} insurers={insurers} pharmacies={pharmacies} busy={busy}
                  onImport={(body) => run(() => request('/auth/admin/users/import', { method: 'POST', body }),
                                          (out) => setNotice({ kind: 'import', ...out }))} />
 
@@ -171,7 +177,7 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
               {/* A hospital admin only ever sees its own hospital's people, so a
                   hospital column would say the same thing on every row. */}
               <tr><th className="py-2 pr-3">Account</th><th className="py-2 pr-3">Role</th>
-                  {isSuper && <><th className="py-2 pr-3">Hospital</th><th className="py-2 pr-3">Insurer</th></>}
+                  {isSuper && <><th className="py-2 pr-3">Hospital</th><th className="py-2 pr-3">Insurer / pharmacy</th></>}
                   <th className="py-2 pr-3">Status</th>
                   <th className="py-2 pr-3">Created</th><th className="py-2" /></tr>
             </thead>
@@ -182,7 +188,7 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
                 <UserRow key={`${u.sub}:${u.status}:${u.hospital_id}:${u.requested_hospital_id}`}
                          user={u} me={me} myId={myId} isSuper={isSuper}
                          assignable={assignable} hospitals={hospitals} insurers={insurers}
-                         hospitalName={hospitalName} busy={busy}
+                         pharmacies={pharmacies} hospitalName={hospitalName} busy={busy}
                          onSave={(body) => run(() => request(`/auth/admin/users/${u.sub}`, { method: 'PATCH', body }))}
                          onDecline={() => run(() => request(`/auth/admin/users/${u.sub}/decline`, { method: 'POST' }))} />
               ))}
@@ -413,7 +419,8 @@ function AccessLog({ request, isSuper, hospitals, hospitalName }) {
 }
 
 // A self-signup nobody has approved yet: pending, attached to nothing.
-const isSignup = (user) => user.status === 'pending' && !user.hospital_id && !user.insurer_id;
+const isSignup = (user) => user.status === 'pending' && !user.hospital_id && !user.insurer_id
+  && !user.pharmacy_id;
 
 // Can this signed-in manager change this row? The same rules as the server's
 // _may_manage, so the controls shown are the ones that will work.
@@ -425,17 +432,21 @@ function canManage(user, me, myId, isSuper) {
     || (isSignup(user) && user.requested_hospital_id === me?.hospital_id);
 }
 
-function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, hospitalName, busy, onSave, onDecline }) {
+function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, pharmacies = [], hospitalName, busy,
+                  onSave, onDecline }) {
   const [role, setRole] = useState(user.role);
   // A sign-up starts on the hospital it asked to join, so approving it is one click.
   const startingHospital = user.hospital_id || user.requested_hospital_id || '';
   const [hospitalId, setHospitalId] = useState(startingHospital);
   const [insurerId, setInsurerId] = useState(user.insurer_id || '');
+  const [pharmacyId, setPharmacyId] = useState(user.pharmacy_id || '');
   const editable = canManage(user, me, myId, isSuper);
   const changed = role !== user.role || (hospitalId || null) !== (startingHospital || null)
-                  || (insurerId || null) !== (user.insurer_id || null);
+                  || (insurerId || null) !== (user.insurer_id || null)
+                  || (pharmacyId || null) !== (user.pharmacy_id || null);
   const placement = () => (HOSPITAL_ROLES.includes(role) ? { hospital_id: hospitalId || null }
-                           : role === 'insurer' ? { insurer_id: insurerId || null } : {});
+                           : role === 'insurer' ? { insurer_id: insurerId || null }
+                           : role === 'pharmacy' ? { pharmacy_id: pharmacyId || null } : {});
 
   return (
     <tr className="border-b border-gray-100 align-top">
@@ -483,7 +494,15 @@ function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, hos
               <option value="">— choose —</option>
               {insurers.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
-          ) : user.insurer_id || user.patient_insurer_id
+          ) : editable && role === 'pharmacy' ? (
+            // Pharmacy staff: the pharmacy they work at, which decides whose
+            // patients they see (the ones who fill there).
+            <select className={input} value={pharmacyId} onChange={(e) => setPharmacyId(e.target.value)}>
+              <option value="">— choose —</option>
+              {pharmacies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          ) : user.pharmacy_id ? (pharmacies.find((p) => p.id === user.pharmacy_id)?.name || user.pharmacy_id)
+          : user.insurer_id || user.patient_insurer_id
             // Insurer staff: the company they work for. A patient: the insurance
             // on their patient record (looked up live by the auth service).
             ? (insurers.find((i) => i.id === (user.insurer_id || user.patient_insurer_id))?.name
@@ -530,7 +549,8 @@ function OrgPanel({ title, items, busy, onCreate }) {
       <h3 className="mb-2 font-semibold text-gray-800">{title} ({items.length})</h3>
       <form className="mb-3 flex gap-2"
             onSubmit={(e) => { e.preventDefault(); if (name.trim()) { onCreate(name.trim()); setName(''); } }}>
-        <input className={input} placeholder={`New ${title.toLowerCase().slice(0, -1)} name`}
+        <input className={input}
+               placeholder={`New ${title.toLowerCase().replace(/ies$/, 'y').replace(/s$/, '')} name`}
                value={name} onChange={(e) => setName(e.target.value)} />
         <button className={button} disabled={busy || !name.trim()}>Add</button>
       </form>
@@ -541,9 +561,9 @@ function OrgPanel({ title, items, busy, onCreate }) {
   );
 }
 
-function AddUser({ assignable, isSuper, hospitals, insurers, busy, onAdd }) {
+function AddUser({ assignable, isSuper, hospitals, insurers, pharmacies = [], busy, onAdd }) {
   const [form, setForm] = useState({ email: '', name: '', role: assignable[0] || '',
-                                     hospital_id: '', insurer_id: '' });
+                                     hospital_id: '', insurer_id: '', pharmacy_id: '' });
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   return (
     <div className={panel}>
@@ -557,7 +577,8 @@ function AddUser({ assignable, isSuper, hospitals, insurers, busy, onAdd }) {
               e.preventDefault();
               onAdd({ email: form.email, name: form.name, role: form.role,
                       hospital_id: isSuper && HOSPITAL_ROLES.includes(form.role) ? form.hospital_id || null : null,
-                      insurer_id: form.role === 'insurer' ? form.insurer_id || null : null });
+                      insurer_id: form.role === 'insurer' ? form.insurer_id || null : null,
+                      pharmacy_id: form.role === 'pharmacy' ? form.pharmacy_id || null : null });
               setForm({ ...form, email: '', name: '' });
             }}>
         <input className={input} type="email" required placeholder="Email" value={form.email} onChange={set('email')} />
@@ -575,6 +596,11 @@ function AddUser({ assignable, isSuper, hospitals, insurers, busy, onAdd }) {
             <option value="">Insurer…</option>
             {insurers.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           </select>
+        ) : form.role === 'pharmacy' ? (
+          <select className={input} required value={form.pharmacy_id} onChange={set('pharmacy_id')}>
+            <option value="">Pharmacy…</option>
+            {pharmacies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
         ) : <div />}
         <button className={button} disabled={busy}>Add</button>
       </form>
@@ -582,10 +608,11 @@ function AddUser({ assignable, isSuper, hospitals, insurers, busy, onAdd }) {
   );
 }
 
-function ImportCsv({ isSuper, hospitals, insurers, busy, onImport }) {
+function ImportCsv({ isSuper, hospitals, insurers, pharmacies = [], busy, onImport }) {
   const [csv, setCsv] = useState('');
   const [hospitalId, setHospitalId] = useState('');
   const [insurerId, setInsurerId] = useState('');
+  const [pharmacyId, setPharmacyId] = useState('');
   const readFile = (e) => {
     const file = e.target.files?.[0];
     if (file) file.text().then(setCsv);
@@ -602,7 +629,7 @@ function ImportCsv({ isSuper, hospitals, insurers, busy, onImport }) {
         <textarea className={`${input} h-28 font-mono text-xs`} value={csv} onChange={(e) => setCsv(e.target.value)}
                   placeholder={'email,name,role\ndoc@hospital.org,Dr Jane Smith,doctor'} />
         {isSuper && (
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="grid gap-2 md:grid-cols-3">
             <select className={input} value={hospitalId} onChange={(e) => setHospitalId(e.target.value)}>
               <option value="">Hospital for hospital roles…</option>
               {hospitals.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
@@ -611,10 +638,15 @@ function ImportCsv({ isSuper, hospitals, insurers, busy, onImport }) {
               <option value="">Insurer for insurer rows…</option>
               {insurers.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
+            <select className={input} value={pharmacyId} onChange={(e) => setPharmacyId(e.target.value)}>
+              <option value="">Pharmacy for pharmacy rows…</option>
+              {pharmacies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           </div>
         )}
         <button className={button} disabled={busy || !csv.trim()}
-                onClick={() => onImport({ csv, hospital_id: hospitalId || null, insurer_id: insurerId || null })}>
+                onClick={() => onImport({ csv, hospital_id: hospitalId || null, insurer_id: insurerId || null,
+                                          pharmacy_id: pharmacyId || null })}>
           Import
         </button>
       </div>

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import core.model as model
 from core import access_log, hospital
 from core.mongo import get_db
-from core.access import (REASONS, ASSIGN_ROLES, actor, detail_access, needs_reason, patient_hospital,
+from core.access import (REASONS, ASSIGN_ROLES, actor, detail_access, needs_reason, overview_only, patient_hospital,
                          redact, require_detail, require_patient, scope_of, scope_query)
 from schemas.patient_views import PatientPharmacyView
 
@@ -202,6 +202,8 @@ async def open_patient(patient_idx: int, req: OpenPatientRequest, user: dict = D
     require_patient(scope, patient_idx)
     if not needs_reason(user):
         return {"patient_idx": patient_idx, "detail_access": "open"}
+    if overview_only(user):
+        raise HTTPException(status_code=403, detail="Pharmacies see the overview of a patient only")
     if req.reason not in REASONS:
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if not await access_log.has_opened(user, patient_idx):

@@ -19,6 +19,7 @@ data reload does not orphan anyone:
     hospital_admin, case_manager  their hospital
     doctor, nurse                 their hospital's patients assigned to them
     insurer                       their members, in any hospital
+    pharmacy                      patients who fill at their pharmacy, in any hospital
     patient                       their own record
     anyone without a placement    nobody
 
@@ -57,6 +58,11 @@ ASSIGN_ROLES = ("superadmin", "hospital_admin", "case_manager")
 
 # ------------------------------------------------ overview and clinical layer
 REASON_ROLES = ("hospital_admin", "insurer")
+# Overview layer only, with no reason that opens the rest: a pharmacy needs to
+# know who to call about a refill and how at risk they are, not diagnoses,
+# vitals or risk drivers (45 CFR 164.502(b), minimum necessary). Mirrors
+# Readmissions/api/access.py.
+OVERVIEW_ONLY_ROLES = ("pharmacy",)
 
 # Must match REASONS in Readmissions/api/access.py: one access log, one list.
 REASONS = {
@@ -92,6 +98,8 @@ LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
 
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
+OVERVIEW_ONLY = {"code": "overview_only",
+                 "message": "Pharmacies see a patient's overview only"}
 
 # Fields of a patient row that belong to the clinical layer. The overview layer
 # is what is left: patient_idx, dropout risk and prediction, care team, insurer.
@@ -121,7 +129,13 @@ def doctor_query(doctor_id: str) -> dict:
 
 
 def needs_reason(user: dict) -> bool:
-    return user["role"] in REASON_ROLES
+    """Gets the overview layer by default (redacted lists)."""
+    return user["role"] in REASON_ROLES or user["role"] in OVERVIEW_ONLY_ROLES
+
+
+def overview_only(user: dict) -> bool:
+    """Never gets the clinical layer, whatever reason is given."""
+    return user["role"] in OVERVIEW_ONLY_ROLES
 
 
 def redact(row: dict) -> dict:
@@ -162,6 +176,8 @@ async def patient_scope(user: dict) -> Optional[list]:
         query = {"hospital_id": hospital, "assigned_nurse_ids": uid} if hospital else None
     elif role == "insurer":
         query = {"insurer_id": user["insurer_id"]} if user.get("insurer_id") else None
+    elif role == "pharmacy":
+        query = {"pharmacy_id": user["pharmacy_id"]} if user.get("pharmacy_id") else None
     elif role == "patient":
         query = {"patient_account_id": uid}
     else:
@@ -225,6 +241,8 @@ async def detail_access(user: dict, patient_idx: int) -> str:
     """open | granted | reason_required, for a patient already in scope."""
     if not needs_reason(user):
         return "open"
+    if overview_only(user):
+        return "overview_only"           # a pharmacy: no reason opens the rest
     granted = await access_log.has_opened(user, patient_idx)
     return "granted" if granted else "reason_required"
 
@@ -249,7 +267,10 @@ async def require_detail(user: dict, scope: Optional[list], patient_idx: int) ->
             from core import notifications                  # avoid an import cycle
             await notifications.mark_seen(user, [patient_idx])
         return
-    if await detail_access(user, patient_idx) == "reason_required":
+    state = await detail_access(user, patient_idx)
+    if state == "overview_only":
+        raise HTTPException(status_code=403, detail=OVERVIEW_ONLY)
+    if state == "reason_required":
         raise HTTPException(status_code=403, detail=REASON_REQUIRED)
 
 

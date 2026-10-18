@@ -237,6 +237,7 @@ class CreateUserRequest(BaseModel):
     name: str = ""
     hospital_id: Optional[str] = None
     insurer_id: Optional[str] = None
+    pharmacy_id: Optional[str] = None
 
 
 class UpdateUserRequest(BaseModel):
@@ -244,6 +245,7 @@ class UpdateUserRequest(BaseModel):
     status: Optional[str] = None
     hospital_id: Optional[str] = None
     insurer_id: Optional[str] = None
+    pharmacy_id: Optional[str] = None
     name: Optional[str] = None
 
 
@@ -251,6 +253,7 @@ class ImportUsersRequest(BaseModel):
     csv: str
     hospital_id: Optional[str] = None
     insurer_id: Optional[str] = None
+    pharmacy_id: Optional[str] = None
 
 
 @app.get("/auth/admin/hospitals")
@@ -273,6 +276,16 @@ def admin_create_insurer(body: OrgRequest, actor: dict = Depends(require_manager
     return user_admin.create_insurer(db, actor, body.name)
 
 
+@app.get("/auth/admin/pharmacies")
+def admin_list_pharmacies(actor: dict = Depends(require_manager)):
+    return user_admin.list_pharmacies(db, actor)
+
+
+@app.post("/auth/admin/pharmacies", status_code=201)
+def admin_create_pharmacy(body: OrgRequest, actor: dict = Depends(require_manager)):
+    return user_admin.create_pharmacy(db, actor, body.name)
+
+
 @app.get("/auth/admin/users")
 def admin_list_users(hospital_id: Optional[str] = None, status: Optional[str] = None,
                      role: Optional[str] = None, actor: dict = Depends(require_manager)):
@@ -282,14 +295,14 @@ def admin_list_users(hospital_id: Optional[str] = None, status: Optional[str] = 
 @app.post("/auth/admin/users", status_code=201)
 def admin_create_user(body: CreateUserRequest, actor: dict = Depends(require_manager)):
     return user_admin.create_user(db, actor, body.email, body.role, body.name,
-                                  body.hospital_id, body.insurer_id)
+                                  body.hospital_id, body.insurer_id, body.pharmacy_id)
 
 
 @app.patch("/auth/admin/users/{user_id}")
 def admin_update_user(user_id: str, body: UpdateUserRequest,
                       actor: dict = Depends(require_manager)):
     return user_admin.update_user(db, actor, user_id, body.role, body.status,
-                                  body.hospital_id, body.insurer_id, body.name)
+                                  body.hospital_id, body.insurer_id, body.name, body.pharmacy_id)
 
 
 @app.post("/auth/admin/users/{user_id}/decline")
@@ -300,7 +313,8 @@ def admin_decline_signup(user_id: str, actor: dict = Depends(require_manager)):
 
 @app.post("/auth/admin/users/import")
 def admin_import_users(body: ImportUsersRequest, actor: dict = Depends(require_manager)):
-    return user_admin.import_users(db, actor, body.csv, body.hospital_id, body.insurer_id)
+    return user_admin.import_users(db, actor, body.csv, body.hospital_id, body.insurer_id,
+                                   body.pharmacy_id)
 
 
 @app.get("/auth/admin/access-log")
@@ -453,6 +467,8 @@ def _detail_access(request: Request, patient_id) -> str:
     user = request.state.user
     if not access.needs_reason(user):
         return "open"
+    if access.overview_only(user):
+        return "overview_only"           # a pharmacy: no reason opens the rest
     return "granted" if str(patient_id) in _opened(request) else "reason_required"
 
 
@@ -478,7 +494,10 @@ def _require_detail(request: Request, patient_id) -> None:
             access_log.record(db, user, access_log.APP, patient_id, _patient_hospital(patient_id),
                               automatic, session)
         return
-    if _detail_access(request, patient_id) == "reason_required":
+    state = _detail_access(request, patient_id)
+    if state == "overview_only":
+        raise HTTPException(status_code=403, detail=access.OVERVIEW_ONLY)
+    if state == "reason_required":
         raise HTTPException(status_code=403, detail=access.REASON_REQUIRED)
 
 
@@ -2748,6 +2767,8 @@ def open_patient(patient_id: str, payload: OpenPatientRequest, request: Request)
     user = request.state.user
     if not access.needs_reason(user):
         return {"patient_id": patient_id, "detail_access": "open"}
+    if access.overview_only(user):
+        raise HTTPException(status_code=403, detail="Pharmacies see the overview of a patient only")
     if payload.reason not in access.REASONS:
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if str(patient_id) not in _opened(request):

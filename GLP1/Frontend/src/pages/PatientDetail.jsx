@@ -158,7 +158,7 @@ export default function PatientDetail() {
   );
 
   // Overview layer only, until a hospital admin or insurer gives a reason.
-  if (summary && !patientData && summary.detail_access === 'reason_required') {
+  if (summary && !patientData && ['reason_required', 'overview_only'].includes(summary.detail_access)) {
     const pct = Math.round(summary.dropout_prob * 100);
     const color = getRiskColor(pct);
     const isDropout = summary.prediction === 'Dropout Risk';
@@ -191,7 +191,8 @@ export default function PatientDetail() {
           </div>
         </div>
         <CareTeamCard team={summary} patientIdx={summary.patient_idx} canAssign={summary.can_assign} onChanged={careTeamChanged} />
-        <ClinicalGate patientIdx={summary.patient_idx} reasons={summary.reasons} onOpened={reload} />
+        <ClinicalGate patientIdx={summary.patient_idx} reasons={summary.reasons} onOpened={reload}
+          overviewOnly={summary.detail_access === 'overview_only'} />
       </div>
     );
   }

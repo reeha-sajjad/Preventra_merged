@@ -35,7 +35,7 @@ export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];
 
 export const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Nurse',
-  case_manager: 'Case manager', insurer: 'Insurer', patient: 'Patient',
+  case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy', patient: 'Patient',
 };
 
 export const myRole = () => readClaims()?.role || 'case_manager';

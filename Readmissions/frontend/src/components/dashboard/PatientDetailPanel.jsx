@@ -62,7 +62,7 @@ export default function PatientDetailPanel({ patientId, onClose, onChanged }) {
       .then((sum) => {
         if (!live) return null;
         setSummary(sum);
-        if (sum.detail_access === 'reason_required') return null;
+        if (sum.detail_access === 'reason_required' || sum.detail_access === 'overview_only') return null;
         return getPatientById(patientId).then((data) => { if (live) setPatient(data); });
       })
       .then(() => { if (live) setLoading(false); })
@@ -152,7 +152,8 @@ export default function PatientDetailPanel({ patientId, onClose, onChanged }) {
                 </div>
               </div>
               <CareTeamCard summary={summary} onChanged={() => { reload(); onChanged?.(); }} />
-              <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload} compact />
+              <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload} compact
+                overviewOnly={summary.detail_access === 'overview_only'} />
             </div>
           )}
 

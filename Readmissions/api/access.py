@@ -7,6 +7,7 @@ itself does not:
 
     hospital_id         the hospital the patient belongs to
     insurer_id          who pays for them
+    pharmacy_id         the pharmacy they fill at (scripts/seed_pharmacies.py)
     assigned_doctor_id  a doctor_id in the `doctors` registry (unchanged)
     assigned_nurse_ids  shared_identity user ids
     patient_account_id  the patient's own login, if they have one
@@ -21,6 +22,7 @@ What each role sees:
     doctor                        their hospital's patients assigned to them
     nurse                         their hospital's patients assigned to them
     insurer                       their members, in any hospital
+    pharmacy                      patients who fill at their pharmacy, in any hospital
     patient                       their own record
     anyone without a placement    nothing
 
@@ -36,8 +38,10 @@ treat them, so by default they get the overview layer: who the patient is,
 their risk, their care team and their insurer. The clinical layer - diagnoses,
 risk drivers, notes, alerts, trend - opens one patient at a time, after they
 give a reason, which is written to the access log (api/access_log.py). The
-superadmin is never asked but is logged too. Everyone else who can see a
-patient sees all of it.
+superadmin is never asked but is logged too. A pharmacy's staff get the overview
+layer only and cannot open the clinical layer at all - no reason unlocks a
+diagnosis for a pharmacy (45 CFR 164.502(b), minimum necessary). Everyone else
+who can see a patient sees all of it.
 """
 from __future__ import annotations
 
@@ -96,6 +100,9 @@ ACTIONS = {
 
 # ------------------------------------------------ overview and clinical layer
 REASON_ROLES = ("hospital_admin", "insurer")
+# Overview layer only, with no reason that opens the rest: a pharmacy needs to
+# know who to call about a refill and how at risk they are, not their diagnoses.
+OVERVIEW_ONLY_ROLES = ("pharmacy",)
 
 # What a hospital admin or insurer may give as the reason for opening a
 # patient's clinical details. Stored as the key, shown as the label.
@@ -133,6 +140,9 @@ LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
 # any other refusal and show the prompt instead of an error.
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
+# The 403 a pharmacy gets for the clinical layer: there is no reason to give.
+OVERVIEW_ONLY = {"code": "overview_only",
+                 "message": "Pharmacies see a patient's overview only"}
 
 # Fields of a worklist row, or a patient record, that belong to the clinical
 # layer. Everything else - id, risk scores and bands, trend status, discharge
@@ -155,7 +165,13 @@ def sees_costs(user: dict) -> bool:
 
 
 def needs_reason(user: dict) -> bool:
-    return user["role"] in REASON_ROLES
+    """Gets the overview layer by default (redacted lists and views)."""
+    return user["role"] in REASON_ROLES or user["role"] in OVERVIEW_ONLY_ROLES
+
+
+def overview_only(user: dict) -> bool:
+    """Never gets the clinical layer, whatever reason is given."""
+    return user["role"] in OVERVIEW_ONLY_ROLES
 
 
 def redact(row: dict) -> dict:
@@ -205,6 +221,8 @@ def patient_scope(db, user: dict) -> Optional[list]:
         query = {"hospital_id": hospital, "assigned_nurse_ids": uid} if hospital else None
     elif role == "insurer":
         query = {"insurer_id": user["insurer_id"]} if user.get("insurer_id") else None
+    elif role == "pharmacy":
+        query = {"pharmacy_id": user["pharmacy_id"]} if user.get("pharmacy_id") else None
     elif role == "patient":
         query = {"patient_account_id": uid}
     else:
