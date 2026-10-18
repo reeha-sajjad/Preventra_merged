@@ -57,7 +57,7 @@ COST_TOOLS = {"get_cost_effectiveness", "simulate_budget", "get_downstream_cost"
 
 
 async def _get_summary(ctx: ToolContext, **_: Any) -> Any:
-    return await summary_router.get_summary(scope=ctx.scope)
+    return await summary_router.get_summary(scope=ctx.scope, user=ctx.user)
 
 
 async def _get_segments(ctx: ToolContext, **_: Any) -> Any:
@@ -99,6 +99,7 @@ async def _search_patients(
         doctor=None,
         nurse=None,
         unassigned=None,
+        case_manager=None,
         user=ctx.user,
         scope=ctx.scope,
     )
@@ -308,7 +309,7 @@ async def dispatch_tool(name: str, args: dict, ctx: ToolContext) -> tuple[Any, s
     if handler is None:
         return {"error": f"Unknown tool '{name}'"}, f"Unknown tool '{name}'"
     if name in COST_TOOLS and ctx.user["role"] not in COST_VIEW_ROLES:
-        msg = "Cost and ROI figures are available to hospital administrators and insurers only."
+        msg = "Cost and ROI figures are available to insurers only."
         return {"error": msg}, msg
     try:
         result = await handler(ctx, **(args or {}))
@@ -346,7 +347,7 @@ async def build_snapshot(ctx: ToolContext) -> str:
 
     try:
         summary, segments, model_info = await asyncio.gather(
-            summary_router.get_summary(scope=ctx.scope),
+            summary_router.get_summary(scope=ctx.scope, user=ctx.user),
             segments_router.get_segments(),
             _get_model_info(),
         )
@@ -362,8 +363,10 @@ async def build_snapshot(ctx: ToolContext) -> str:
     lines.append(f"- Total patients: **{kpis.get('total_patients', '?'):,}**")
     lines.append(f"- Overall adherence: **{kpis.get('adherence_rate', 0) * 100:.1f}%**")
     lines.append(f"- Overall dropout: **{kpis.get('dropout_rate', 0) * 100:.1f}%**")
-    lines.append(f"- Avg annual cost / patient: **${kpis.get('avg_annual_cost', 0):,}**")
-    lines.append(f"- Annual wasted spend: **${kpis.get('wasted_spend_annual', 0):,}**")
+    # Only the cost roles get spend in the summary (None for everyone else).
+    if kpis.get("avg_annual_cost") is not None:
+        lines.append(f"- Avg annual cost / patient: **${kpis['avg_annual_cost']:,}**")
+        lines.append(f"- Annual wasted spend: **${kpis['wasted_spend_annual']:,}**")
     lines.append("")
     lines.append("### Segments (adherence, n, profile)")
     for row in seg_rows:

@@ -145,5 +145,5 @@ def test_counts_and_order(world):
     client(world, "admin@a.test").post("/api/care-team", json={"patient_ids": [3], "add_doctor_ids": [doc]})
     body = client(world, "doc@a.test").get("/api/notifications").json()
     assert [i["patient_idx"] for i in body["items"]] == [1, 3, 0]       # risen, new, unreviewed
-    assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0}
+    assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0, "followup_handed": 0}
     assert not {"name", "email", "BMXBMI"} & set().union(*body["items"])

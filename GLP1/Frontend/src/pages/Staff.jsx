@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Stethoscope, HeartPulse, ChevronRight, Search, X } from 'lucide-react';
+import { Stethoscope, HeartPulse, ClipboardList, ChevronRight, Search, X } from 'lucide-react';
 import { api } from '../data/api';
 import { useRole } from '../context/RoleContext';
 import PageState from '../components/shared/PageState';
@@ -39,7 +39,8 @@ export default function Staff() {
   const showHospital = !data.hospital;
   const doctors = data.doctors.filter(matches);
   const nurses = data.nurses.filter(matches);
-  const total = data.doctors.length + data.nurses.length;
+  const caseManagers = (data.case_managers || []).filter(matches);
+  const total = data.doctors.length + data.nurses.length + (data.case_managers || []).length;
   const table = (title, Icon, people, param) => (
     <div className="card overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
@@ -99,6 +100,13 @@ export default function Staff() {
         ) : (
           <span className="px-3 py-1.5 rounded-full" style={{ background: '#E8F5E9', color: '#2E7D32' }}>Every patient has a doctor</span>
         )}
+        {(data.case_managers || []).length > 0 && (data.no_case_manager > 0 ? (
+          <Link to="/patients?unassigned=case_manager" className="px-3 py-1.5 rounded-full" style={{ background: '#FFF3E0', color: '#EF6C00' }}>
+            {data.no_case_manager.toLocaleString()} patients without a case manager
+          </Link>
+        ) : (
+          <span className="px-3 py-1.5 rounded-full" style={{ background: '#E8F5E9', color: '#2E7D32' }}>Every patient has a case manager</span>
+        ))}
         {data.no_nurse > 0 ? (
           <Link to="/patients?unassigned=nurse" className="px-3 py-1.5 rounded-full" style={{ background: '#FFF3E0', color: '#EF6C00' }}>
             {data.no_nurse.toLocaleString()} patients without a hospital nurse
@@ -125,13 +133,15 @@ export default function Staff() {
         </label>
         {query.trim() && (
           <span className="text-xs text-gray-500">
-            {(doctors.length + nurses.length).toLocaleString()} of {total.toLocaleString()} staff
+            {(doctors.length + nurses.length + caseManagers.length).toLocaleString()} of {total.toLocaleString()} staff
           </span>
         )}
       </div>
 
       {table('Doctors', Stethoscope, doctors, 'doctor')}
       {table('Hospital nurses', HeartPulse, nurses, 'nurse')}
+      {/* Each patient's one main case manager - their caseload. */}
+      {table('Case managers', ClipboardList, caseManagers, 'case_manager')}
 
       <p className="text-xs text-gray-500">
         Assign patients from the <Link to="/patients" className="font-semibold" style={{ color: 'var(--color-primary)' }}>Patients</Link> page:

@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, Search } from 'lucide-react';
 import { api } from '../../data/api';
 
+const KEEP = '__keep__';
+
 /**
- * Change the doctors and nurses of one patient, or of several at once.
+ * Change the doctors, nurses and case manager of one patient, or of several
+ * at once. A patient has one main case manager (or none): their point of
+ * contact, so it is a single choice rather than a list.
  *
  * One patient: tick everyone who should look after them; the lists are saved
  *   as shown, so unticking someone takes them off.
@@ -23,6 +27,8 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
   const [picked, setPicked] = useState(() => (single
     ? { doctor: new Set(current?.doctorIds ?? []), nurse: new Set(current?.nurseIds ?? []) }
     : { doctor: {}, nurse: {} }));
+  // The case manager: an id, '' for none, or KEEP (several patients: leave as is).
+  const [caseManager, setCaseManager] = useState(single ? (current?.caseManagerId ?? '') : KEEP);
 
   useEffect(() => {
     let live = true;
@@ -44,6 +50,7 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
   const people = useMemo(() => ({
     doctor: (staff?.doctors || []).filter(sameHospital),
     nurse: (staff?.nurses || []).filter(sameHospital),
+    case_manager: (staff?.case_managers || []).filter(sameHospital),
   }), [staff, hospitalId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (kind, id) => setPicked((p) => {
@@ -60,6 +67,7 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
   const save = async (e) => {
     e.preventDefault();
     const body = { patient_ids: patientIdxs };
+    if (caseManager !== KEEP) body.case_manager_id = caseManager;
     if (single) {
       body.doctor_ids = [...picked.doctor];
       body.nurse_ids = [...picked.nurse];
@@ -88,7 +96,7 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
   };
 
   const changes = single ? null
-    : Object.keys(picked.doctor).length + Object.keys(picked.nurse).length;
+    : Object.keys(picked.doctor).length + Object.keys(picked.nurse).length + (caseManager !== KEEP ? 1 : 0);
 
   const section = (kind, title) => {
     const everyone = people[kind];
@@ -165,6 +173,22 @@ export default function CareTeamDialog({ patientIdxs, hospitalId, current, onClo
             </label>
             {section('doctor', 'Doctors')}
             {section('nurse', 'Hospital nurses')}
+            {people.case_manager.length > 0 && (
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Case manager</span>
+                <select value={caseManager} onChange={(e) => setCaseManager(e.target.value)}
+                  className="mt-1.5 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+                  {!single && <option value={KEEP}>Leave as it is</option>}
+                  <option value="">{single ? 'None' : 'Remove the case manager'}</option>
+                  {people.case_manager.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} · {p.patients} patients</option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[11px] text-gray-400">
+                  One per patient: their point of contact. New follow-up requests go to this person first.
+                </span>
+              </label>
+            )}
           </>)}
           {error && <p className="rounded-md px-3 py-2 text-sm" style={{ background: '#FFEBEE', color: '#C62828' }}>{error}</p>}
         </div>

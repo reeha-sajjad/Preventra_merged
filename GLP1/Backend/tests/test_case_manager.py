@@ -130,3 +130,52 @@ def test_a_case_manager_takes_before_handing_over(world, second_cm):
     other = next(h for h in second_cm.get("/api/followups/handlers").json()["handlers"] if h["email"] == "cm2@a.test")
     assert client(world, "cm@a.test").post(f"/api/followups/{f['id']}/hand-over",
                                            json={"to_user_id": other["id"]}).status_code == 409
+
+# ------------------------------------------------- the bell after a hand-over
+def bell(c):
+    return c.get("/api/notifications").json()
+
+
+def test_the_colleague_is_told_in_the_bell(world, second_cm):
+    f = ask(world).json()
+    cm = client(world, "cm@a.test")
+    cm.post(f"/api/followups/{f['id']}/take")
+    other = next(h for h in cm.get("/api/followups/handlers").json()["handlers"] if h["email"] == "cm2@a.test")
+    cm.post(f"/api/followups/{f['id']}/hand-over", json={"to_user_id": other["id"]})
+
+    b = bell(second_cm)
+    handed = [i for i in b["items"] if "followup_handed" in i["kinds"]]
+    assert b["counts"]["followup_handed"] == 1 and len(handed) == 1
+    assert handed[0]["followup_id"] == f["id"] and handed[0]["handed_by"]
+    assert bell(cm)["counts"]["followup_handed"] == 0                 # not the one who gave it away
+    # Loading the list is not enough (the menu badge does that on every page);
+    # the Follow-ups page says it has been seen.
+    second_cm.get("/api/followups")
+    assert bell(second_cm)["counts"]["followup_handed"] == 1
+    assert second_cm.post("/api/followups/handed-seen").json() == {"seen": 1}
+    assert bell(second_cm)["counts"]["followup_handed"] == 0
+    assert client(world, "doc@a.test").post("/api/followups/handed-seen").status_code == 403
+
+
+def test_the_alert_goes_when_the_request_is_finished_or_put_back(world, second_cm):
+    cm = client(world, "cm@a.test")
+    other = next(h for h in cm.get("/api/followups/handlers").json()["handlers"] if h["email"] == "cm2@a.test")
+    for end in ("done", "release"):
+        world["db"][COLLECTION].delete_many({})
+        f = ask(world).json()
+        cm.post(f"/api/followups/{f['id']}/take")
+        cm.post(f"/api/followups/{f['id']}/hand-over", json={"to_user_id": other["id"]})
+        body = {"outcome": "booked"} if end == "done" else None
+        assert second_cm.post(f"/api/followups/{f['id']}/{end}", json=body).status_code == 200
+        assert bell(second_cm)["counts"]["followup_handed"] == 0, end
+        assert "handover_alert" not in world["db"][COLLECTION].find_one({})
+
+
+def test_an_admin_sharing_out_work_alerts_the_case_manager(world):
+    f = ask(world).json()
+    me = next(h for h in client(world, "admin@a.test").get("/api/followups/handlers").json()["handlers"]
+              if h["email"] == "cm@a.test")
+    assert client(world, "admin@a.test").post(f"/api/followups/{f['id']}/hand-over",
+                                              json={"to_user_id": me["id"]}).status_code == 200
+    item = next(i for i in bell(client(world, "cm@a.test"))["items"] if i["followup_id"] == f["id"])
+    assert item["kinds"] == ["followup_handed"]          # not also "new": it is taken now

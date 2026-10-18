@@ -15,9 +15,11 @@ router = APIRouter()
 
 
 @router.get("/case-manager/today")
-async def case_manager_today(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
-    """A case manager's home page: their hospital, and what needs doing."""
-    return await casemanager.today(user, scope)
+async def case_manager_today(mine: bool = False, user: dict = Depends(actor),
+                             scope: Optional[list] = Depends(scope_of)):
+    """A case manager's home page: their hospital (or, with mine=1, their own
+    caseload), and what needs doing."""
+    return await casemanager.today(user, scope, mine)
 
 
 @router.get("/me")
@@ -51,13 +53,16 @@ class CareTeamRequest(BaseModel):
     add_nurse_ids: Optional[List[str]] = None
     remove_nurse_ids: Optional[List[str]] = None
     doctor_id: Optional[str] = None          # older one-doctor form
+    case_manager_id: Optional[str] = None    # the main case manager; "" clears
 
 
 @router.post("/care-team")
 async def set_care_team(req: CareTeamRequest, user: dict = Depends(require_role(*ASSIGN_ROLES)),
                         scope: Optional[list] = Depends(scope_of)):
-    """Change the doctors and nurses of one or more patients, effective at once."""
+    """Change the doctors, nurses and case manager of one or more patients,
+    effective at once."""
     return await hospital.assign(user, scope, req.patient_ids, doctor_id=req.doctor_id,
                                  doctor_ids_=req.doctor_ids, add_doctor_ids=req.add_doctor_ids,
                                  remove_doctor_ids=req.remove_doctor_ids, nurse_ids=req.nurse_ids,
-                                 add_nurse_ids=req.add_nurse_ids, remove_nurse_ids=req.remove_nurse_ids)
+                                 add_nurse_ids=req.add_nurse_ids, remove_nurse_ids=req.remove_nurse_ids,
+                                 case_manager_id=req.case_manager_id)

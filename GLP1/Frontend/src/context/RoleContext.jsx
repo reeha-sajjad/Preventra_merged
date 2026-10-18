@@ -14,8 +14,10 @@ const ROLE_LABELS = {
   patient:        'Patient',
 };
 
-// Roles whose main view is cost and ROI rather than individual patients.
-const COST_VIEW_ROLES = ['superadmin', 'hospital_admin', 'insurer'];
+// Roles whose main view is cost and ROI rather than individual patients - the
+// payer's screens, since the payer pays for the drug, not the hospital
+// (Backend/core/access.py COST_VIEW_ROLES).
+const COST_VIEW_ROLES = ['superadmin', 'insurer'];
 
 // The hospital pages, mirroring Backend/core/access.py. Doctors and nurses have
 // no Overview or Staff page: their Patients list is their home.

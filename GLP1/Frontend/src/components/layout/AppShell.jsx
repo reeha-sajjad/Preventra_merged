@@ -151,7 +151,7 @@ export default function AppShell({ children }) {
                style={{ background: 'rgba(255,255,255,0.06)' }}>
             <div className="text-[10px] text-white/30 uppercase tracking-widest">Role</div>
             <div className="flex items-center gap-1.5 text-[12px] font-medium text-white/80 mt-0.5">
-              {isCostView ? <Building2 size={12} /> : <Stethoscope size={12} />}
+              {isCostView || role === 'hospital_admin' ? <Building2 size={12} /> : <Stethoscope size={12} />}
               {roleLabel}
             </div>
           </div>
@@ -269,8 +269,9 @@ export default function AppShell({ children }) {
             {(isCareTeam || role === 'case_manager' || role === 'hospital_admin') && <NotificationBell />}
             {/* Role indicator pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
-                 style={{ background: isCostView ? '#E3F2FD' : '#E8F5E9', color: isCostView ? '#1B4F8A' : '#2E7D32' }}>
-              {isCostView ? <Building2 size={12} /> : <Stethoscope size={12} />}
+                 style={{ background: isCostView || role === 'hospital_admin' ? '#E3F2FD' : '#E8F5E9',
+                          color: isCostView || role === 'hospital_admin' ? '#1B4F8A' : '#2E7D32' }}>
+              {isCostView || role === 'hospital_admin' ? <Building2 size={12} /> : <Stethoscope size={12} />}
               <span className="hidden sm:inline">{roleLabel}</span>
             </div>
             {/* Data freshness */}

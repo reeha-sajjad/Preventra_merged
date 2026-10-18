@@ -16,7 +16,9 @@ Who does what (core/access.py has the role lists):
     doctor, nurse          request one for their own patients, add a note,
                            see its status and the outcome
     case_manager           sees every request in their hospital, takes it,
-                           marks it done - the person a request is for
+                           marks it done - the person a request is for; a new
+                           request rings the bell of the patient's main case
+                           manager (core/hospital.py), or everyone's if none
     hospital_admin         sees the same list and can step in (take, mark done);
                            notified only if the hospital has no case manager
     superadmin             sees every hospital's, or the picked one's
@@ -258,7 +260,7 @@ async def complete(user: dict, scope: Optional[list], followup_id: str,
     result = await _collection().update_one({"_id": doc["_id"], "status": doc["status"]}, {
         "$set": {"status": "done", "outcome": outcome, "outcome_note": _clean_note(note),
                  "done_by": who, "done_at": now, **taken},
-        "$unset": {"active_patient": ""},
+        "$unset": {"active_patient": "", "handover_alert": ""},
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
@@ -298,7 +300,7 @@ async def release(user: dict, scope: Optional[list], followup_id: str) -> dict:
     _may_reassign(user, doc)
     who, now = await _who(user), _now()
     result = await _collection().update_one({"_id": doc["_id"], "status": "in_progress"}, {
-        "$set": {"status": "open"}, "$unset": {"taken_by": "", "taken_at": ""},
+        "$set": {"status": "open"}, "$unset": {"taken_by": "", "taken_at": "", "handover_alert": ""},
         "$push": {"history": {"action": "released", "by": who, "at": now,
                               "from": doc.get("taken_by")}}})
     if result.modified_count == 0:
@@ -325,7 +327,10 @@ async def hand_over(user: dict, scope: Optional[list], followup_id: str, to_user
     who, now = await _who(user), _now()
     to = {"id": target["id"], "name": target["name"], "email": target["email"], "role": "case_manager"}
     result = await _collection().update_one({"_id": doc["_id"], "status": doc["status"]}, {
-        "$set": {"status": "in_progress", "taken_by": to, "taken_at": now},
+        "$set": {"status": "in_progress", "taken_by": to, "taken_at": now,
+                 # The bell of the person it was given to, until they open
+                 # Follow-ups or act on it (see handed_for_bell).
+                 "handover_alert": {"for": to["id"], "by": who["name"], "at": now}},
         "$push": {"history": {"action": "handed_over", "by": who, "at": now,
                               "from": doc.get("taken_by"), "to": to}}})
     if result.modified_count == 0:
@@ -360,6 +365,9 @@ async def listing(user: dict, status: str = "active") -> dict:
         item["doctors"] = [p["name"] for p in team.get("doctors", [])]
         item["nurses"] = [p["name"] for p in team.get("nurses", [])]
         item["mine"] = (d.get("taken_by") or {}).get("id") == user["id"]
+        # The patient's main case manager, so the team sees whose patient it is.
+        item["case_manager"] = team.get("case_manager")
+        item["my_patient"] = (team.get("case_manager") or {}).get("id") == user["id"]
         items.append(item)
     active = [i for i in items if i["status"] != "done"]
     return {"items": items, "counts": {
@@ -369,6 +377,13 @@ async def listing(user: dict, status: str = "active") -> dict:
 
 
 # ------------------------------------------------------------- for the bell
+async def case_managers_of(idxs) -> dict:
+    """patient_idx -> the account id of their main case manager (or None)."""
+    docs = await get_db().patient_access.find({"patient_idx": {"$in": [int(i) for i in idxs]}},
+                                              {"_id": 0, "patient_idx": 1, "case_manager_id": 1}).to_list(length=None)
+    return {int(d["patient_idx"]): d.get("case_manager_id") or None for d in docs}
+
+
 async def has_case_manager(hospital_id: Optional[str]) -> bool:
     if not hospital_id:
         return False
@@ -387,10 +402,43 @@ async def notifies(user: dict) -> bool:
 
 
 async def open_for_bell(user: dict) -> list:
-    """New requests nobody has taken yet, in the caller's hospital."""
+    """New requests nobody has taken yet, in the caller's hospital.
+
+    A patient with a main case manager rings only that person's bell, so two
+    case managers don't both act on it; the rest of the team still sees it in
+    the Follow-ups list, and can take it if that person is away. A patient
+    with none (or whose case manager has left) rings everyone's, as before."""
     docs = await _collection().find({"hospital_id": user.get("hospital_id"), "status": "open"}).to_list(length=None)
+    if user["role"] == "case_manager" and docs:
+        owner = await case_managers_of([d["patient_idx"] for d in docs])
+        team = {str(u["_id"]) for u in await get_shared_identity_db().users.find(
+            {"role": "case_manager", "status": "active", "hospital_id": user.get("hospital_id")},
+            {"_id": 1}).to_list(length=None)}
+        docs = [d for d in docs
+                if owner.get(int(d["patient_idx"])) == user["id"] or owner.get(int(d["patient_idx"])) not in team]
     risk = await _risk([d["patient_idx"] for d in docs])
     return [public(d, risk.get(d["patient_idx"])) for d in docs]
+
+
+async def handed_for_bell(user: dict) -> list:
+    """Requests a colleague (or the admin) handed to the caller that they have
+    not seen yet: they leave the bell when the caller opens Follow-ups, or the
+    request is finished or put back."""
+    docs = await _collection().find({"hospital_id": user.get("hospital_id"), "status": "in_progress",
+                                     "handover_alert.for": user["id"]}).to_list(length=None)
+    risk = await _risk([d["patient_idx"] for d in docs])
+    return [{**public(d, risk.get(d["patient_idx"])),
+             "handed_by": d["handover_alert"]["by"],
+             "handed_at": _aware(d["handover_alert"]["at"]).isoformat()} for d in docs]
+
+
+async def seen_handed(user: dict) -> int:
+    """The caller has opened Follow-ups: what was handed to them leaves their
+    bell. (Not done by the list itself - the menu badge loads that too.)"""
+    _require_handler(user)
+    result = await _collection().update_many({"handover_alert.for": user["id"]},
+                                             {"$unset": {"handover_alert": ""}})
+    return result.modified_count
 
 
 async def done_since(scope: Optional[list]) -> dict:

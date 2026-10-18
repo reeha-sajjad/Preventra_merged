@@ -45,7 +45,10 @@ from core import access_log
 from core.mongo import get_db, get_shared_identity_db
 from core.security import current_user
 
-COST_VIEW_ROLES = ("superadmin", "hospital_admin", "insurer")
+# The GLP-1 cost and ROI screens. GLP-1 drug spend is paid by the payer, not the
+# hospital, so these are the insurer's screens (and the superadmin's). Hospital
+# staff, admins included, see patients, adherence and risk - not the money.
+COST_VIEW_ROLES = ("superadmin", "insurer")
 
 # The hospital pages. Doctors and nurses work from their own patient list.
 OVERVIEW_ROLES = ("superadmin", "hospital_admin", "case_manager", "insurer")
@@ -254,7 +257,7 @@ def require_cost_view(user: dict = Depends(current_user)) -> dict:
     """FastAPI dependency for the cost and ROI screens."""
     if user["role"] not in COST_VIEW_ROLES:
         raise HTTPException(status_code=403,
-                            detail="Cost and ROI views are for hospital administrators and insurers")
+                            detail="Cost and ROI views are for insurers")
     return user
 
 

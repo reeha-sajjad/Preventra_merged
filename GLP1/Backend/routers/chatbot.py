@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from core import chatbot_tools, llm
 from core.config import settings
-from core.access import actor, patient_scope
+from core.access import COST_VIEW_ROLES, actor, patient_scope
 from schemas.chatbot import ChatRequest, ChatResponse, ToolCallLog
 
 logger = logging.getLogger("chatbot.router")
@@ -28,8 +28,9 @@ router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 
 # Which framing the assistant leads with, decided by the signed-in account - not
 # by the request, which anyone can edit. Roles that own the budget lead with
-# cost; everyone else leads with the patient.
-_COST_FIRST_ROLES = {"superadmin", "hospital_admin", "insurer"}
+# cost; everyone else leads with the patient. The same roles as the cost
+# screens, so the assistant never leads with figures its cost tools then refuse.
+_COST_FIRST_ROLES = set(COST_VIEW_ROLES)
 
 
 def _audience(user: dict) -> str:

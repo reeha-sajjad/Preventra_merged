@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users, Stethoscope, HeartPulse, Building, PencilLine, Store } from 'lucide-react';
+import { Users, Stethoscope, HeartPulse, Building, PencilLine, Store, ClipboardList } from 'lucide-react';
 import CareTeamDialog from './CareTeamDialog';
 
 /**
@@ -41,6 +41,7 @@ export default function CareTeamCard({ team, patientIdx, canAssign, onChanged })
       <div className="grid gap-4 sm:grid-cols-2">
         {item(Stethoscope, doctors.length > 1 ? 'Doctors' : 'Doctor', doctors.map((d) => d.name).join(', '), true)}
         {item(HeartPulse, nurses.length > 1 ? 'Hospital nurses' : 'Hospital nurse', nurses.map((n) => n.name).join(', '), true)}
+        {item(ClipboardList, 'Case manager', team.case_manager?.name, true)}
         {item(Building, 'Insurer', insurer?.name, false)}
         {pharmacy !== undefined && item(Store, 'Pharmacy', pharmacy, false)}
       </div>
@@ -48,7 +49,8 @@ export default function CareTeamCard({ team, patientIdx, canAssign, onChanged })
         <CareTeamDialog
           patientIdxs={[patientIdx]}
           hospitalId={team.hospital_id}
-          current={{ doctorIds: doctors.map((d) => d.id), nurseIds: nurses.map((n) => n.id) }}
+          current={{ doctorIds: doctors.map((d) => d.id), nurseIds: nurses.map((n) => n.id),
+                     caseManagerId: team.case_manager?.id || '' }}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); onChanged?.(); }}
         />

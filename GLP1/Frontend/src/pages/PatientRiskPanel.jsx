@@ -1,12 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Search, Filter, ChevronLeft, ChevronRight, DollarSign, ChevronUp, ChevronDown, Settings2, X, Building2, Users } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, DollarSign, ChevronUp, ChevronDown, Settings2, X, Building2, Users, UserCheck } from 'lucide-react';
 import CareTeamDialog from '../components/hospital/CareTeamDialog';
 import { SegmentDot } from '../components/shared';
 import { SkeletonTable } from '../components/shared/LoadingSkeleton';
 import { SEGMENT_SHORT, SEGMENT_COLORS } from '../data/mockData';
 import { usePatients } from '../hooks/usePatients';
 import { useRole } from '../context/RoleContext';
+import { useAuth } from '../context/AuthContext';
 import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 // A patient's doctors. Rows from before a patient could have several carry
@@ -194,12 +195,16 @@ function SortHeader({ label, sortKey: sk, currentSort, currentDir, onSort }) {
 /* ── Main Component ───────────────────────────────────────────────── */
 export default function PatientRiskPanel() {
   const navigate = useNavigate();
-  const { isCostView, needsReason, canAssign, isCareTeam } = useRole();
+  const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager } = useRole();
+  const { user } = useAuth();
   const { patients, loading, redacted, reload } = usePatients();
   // Filters the Overview and the Staff page link in with.
   const [searchParams, setSearchParams] = useSearchParams();
   const care = { doctor: searchParams.get('doctor'), nurse: searchParams.get('nurse'),
-                 unassigned: searchParams.get('unassigned') };
+                 unassigned: searchParams.get('unassigned'),
+                 // A case manager's id, or 'me' ("My caseload").
+                 caseManager: searchParams.get('case_manager') === 'me' ? user?.id : searchParams.get('case_manager') };
+  const myCaseload = searchParams.get('case_manager') === 'me';
   const [search, setSearch]           = useState('');
   const [segFilter, setSegFilter]     = useState('All');
   const [molFilter, setMolFilter]     = useState('All');
@@ -226,6 +231,8 @@ export default function PatientRiskPanel() {
     if (care.nurse)        d = d.filter(p => (p.nurses || []).some(n => n.id === care.nurse));
     if (care.unassigned === 'doctor') d = d.filter(p => !doctorsOf(p).length);
     if (care.unassigned === 'nurse')  d = d.filter(p => !(p.nurses || []).length);
+    if (care.unassigned === 'case_manager') d = d.filter(p => !p.case_manager);
+    if (care.caseManager)  d = d.filter(p => p.case_manager?.id === care.caseManager);
     d = d.filter(p => p.dropout_prob * 100 >= minRisk);
     d.sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
@@ -233,7 +240,7 @@ export default function PatientRiskPanel() {
     });
     return d;
   }, [patients, search, segFilter, molFilter, predFilter, financialOnly, minRisk, sortKey, sortDir,
-      care.doctor, care.nurse, care.unassigned]);
+      care.doctor, care.nurse, care.unassigned, care.caseManager]);
 
   const pages     = Math.ceil(filtered.length / PAGE_SIZE);
   const visible   = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -244,11 +251,24 @@ export default function PatientRiskPanel() {
   const careLabel = care.doctor ? `Doctor: ${patients.flatMap(doctorsOf).find(x => x.id === care.doctor)?.name || 'selected'}`
     : care.nurse ? `Hospital nurse: ${patients.flatMap(p => p.nurses || []).find(n => n.id === care.nurse)?.name || 'selected'}`
     : care.unassigned === 'doctor' ? 'No doctor assigned'
-    : care.unassigned === 'nurse' ? 'No hospital nurse assigned' : null;
+    : care.unassigned === 'nurse' ? 'No hospital nurse assigned'
+    : care.unassigned === 'case_manager' ? 'No case manager assigned'
+    : myCaseload ? 'My caseload'
+    : care.caseManager ? `Case manager: ${patients.find(p => p.case_manager?.id === care.caseManager)?.case_manager.name || 'selected'}`
+    : null;
   const clearCare = () => {
     const next = new URLSearchParams(searchParams);
-    ['doctor', 'nurse', 'unassigned'].forEach(k => next.delete(k));
+    ['doctor', 'nurse', 'unassigned', 'case_manager'].forEach(k => next.delete(k));
     setSearchParams(next);
+  };
+  // "My caseload": the patients the case manager is the main case manager of.
+  // Everyone else's stay one click away, to cover for a colleague.
+  const toggleCaseload = () => {
+    const next = new URLSearchParams(searchParams);
+    ['doctor', 'nurse', 'unassigned', 'case_manager'].forEach(k => next.delete(k));
+    if (!myCaseload) next.set('case_manager', 'me');
+    setSearchParams(next);
+    setPage(0);
   };
 
   const pageIdxs = visible.map(p => p.patient_idx);
@@ -317,6 +337,11 @@ export default function PatientRiskPanel() {
             <div className="text-[10px] text-gray-400 truncate mt-0.5">
               {(p.nurses || []).length ? p.nurses.map(n => n.name).join(', ') : 'No hospital nurse'}
             </div>
+            {p.case_manager && (
+              <div className="text-[10px] truncate mt-0.5" style={{ color: '#1B4F8A' }} title="Case manager">
+                CM · {p.case_manager.name}
+              </div>
+            )}
           </div>
         );
       case 'insurer':
@@ -405,6 +430,14 @@ export default function PatientRiskPanel() {
         <div className="flex items-center gap-2">
           {/* A patient not on this list: break the glass (doctors and nurses). */}
           {isCareTeam && <EmergencyAccessButton className="whitespace-nowrap" />}
+          {isCaseManager && (
+            <button type="button" onClick={toggleCaseload} aria-pressed={myCaseload}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border whitespace-nowrap"
+              style={myCaseload ? { borderColor: 'var(--color-primary)', color: 'var(--color-primary)', background: '#EBF4FF' }
+                                : { borderColor: '#E2E8F0', color: '#718096', background: 'white' }}>
+              <UserCheck size={13} /> My caseload
+            </button>
+          )}
           <div className="relative flex-1 sm:flex-none">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -668,7 +701,8 @@ export default function PatientRiskPanel() {
           hospitalId={selectionHospital}
           current={assigning.length === 1 ? (() => {
             const row = patients.find(p => p.patient_idx === assigning[0]);
-            return { doctorIds: doctorsOf(row || {}).map(x => x.id), nurseIds: (row?.nurses || []).map(n => n.id) };
+            return { doctorIds: doctorsOf(row || {}).map(x => x.id), nurseIds: (row?.nurses || []).map(n => n.id),
+                     caseManagerId: row?.case_manager?.id || '' };
           })() : undefined}
           onClose={() => setAssigning(null)}
           onSaved={() => { setAssigning(null); setSelected([]); reload(); }}

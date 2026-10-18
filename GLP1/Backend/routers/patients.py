@@ -99,7 +99,8 @@ async def get_patients(
     search:         Optional[str]   = Query(None),
     doctor:         Optional[str]   = Query(None, description="doctor account id"),
     nurse:          Optional[str]   = Query(None, description="nurse account id"),
-    unassigned:     Optional[str]   = Query(None, description="doctor | nurse"),
+    unassigned:     Optional[str]   = Query(None, description="doctor | nurse | case_manager"),
+    case_manager:   Optional[str]   = Query(None, description="case manager account id, or 'me'"),
     user:           dict            = Depends(actor),
     scope:          Optional[list]  = Depends(scope_of),
 ):
@@ -120,7 +121,10 @@ async def get_patients(
     # (which extend `match`) are limited the same way as the page.
     match = {**_build_match(segment, molecule, min_risk, prediction, financial_only, search),
              **scope_query(scope)}
-    care = await hospital.care_filter(scope, doctor=doctor, nurse=nurse, unassigned=unassigned)
+    if case_manager == "me":
+        case_manager = user["id"]               # "My caseload"
+    care = await hospital.care_filter(scope, doctor=doctor, nurse=nurse, unassigned=unassigned,
+                                      case_manager=case_manager)
     if care is not None:
         match["$and"] = match.get("$and", []) + [{"patient_idx": {"$in": care}}]
     direction = -1 if sort_dir.lower() == "desc" else 1

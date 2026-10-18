@@ -37,7 +37,8 @@ SEEN_COLLECTION = "notification_seen"
 CRITICAL = 0.75
 RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
-KIND_ORDER = {"followup_new": 0, "risk_up": 1, "followup_done": 2, "new": 3, "unreviewed": 4}
+KIND_ORDER = {"followup_handed": 0, "followup_new": 1, "risk_up": 2, "followup_done": 3, "new": 4,
+              "unreviewed": 5}
 MAX_ITEMS = 50
 
 
@@ -67,16 +68,23 @@ def _assess(prob: float, seen: Optional[dict], added_at: Optional[datetime]) -> 
     return kinds
 
 
+def _request_item(f: dict, kind: str) -> dict:
+    return {"patient_idx": f["patient_idx"], "dropout_prob": f.get("dropout_prob", 0.0),
+            "kinds": [kind], "followup_id": f["id"], "urgency": f["urgency"],
+            "requested_by": f["requested_by"]["name"], "overdue": f["overdue"],
+            "requested_at": f["requested_at"], "urgent": f["urgency"] == "urgent"}
+
+
 async def _followup_requests(user: dict) -> list:
-    """A case manager's bell: new follow-up requests nobody has taken yet,
-    urgent first, then oldest. They leave the bell when someone takes them."""
-    items = [{"patient_idx": f["patient_idx"], "dropout_prob": f.get("dropout_prob", 0.0),
-              "kinds": ["followup_new"], "followup_id": f["id"], "urgency": f["urgency"],
-              "requested_by": f["requested_by"]["name"], "overdue": f["overdue"],
-              "requested_at": f["requested_at"], "urgent": f["urgency"] == "urgent"}
-             for f in await followups.open_for_bell(user)]
-    items.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
-    return items
+    """A case manager's bell: requests handed to them by a colleague (until they
+    open Follow-ups), then new requests nobody has taken yet, urgent first, then
+    oldest. New ones leave the bell when someone takes them."""
+    handed = [{**_request_item(f, "followup_handed"), "handed_by": f["handed_by"]}
+              for f in await followups.handed_for_bell(user)]
+    waiting = [_request_item(f, "followup_new") for f in await followups.open_for_bell(user)]
+    handed.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
+    waiting.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
+    return handed + waiting
 
 
 async def alerts(user: dict, scope: Optional[list]) -> list:

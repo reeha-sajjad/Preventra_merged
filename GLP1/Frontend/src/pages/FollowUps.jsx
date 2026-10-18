@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { CalendarClock, Inbox, Hourglass, AlertTriangle, ChevronRight, TrendingDown } from 'lucide-react';
 import { api } from '../data/api';
 import { RiskBadge } from '../components/shared';
@@ -32,7 +32,15 @@ export default function FollowUps() {
   const load = useCallback(() => {
     api.getFollowUps(tab).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   }, [tab]);
-  useEffect(() => { load(); }, [load]);
+  // Again on every arrival - from the bell too, even onto this same page.
+  const { key: arrival } = useLocation();
+  useEffect(() => { load(); }, [load, arrival]);
+  // Opening this page is seeing what colleagues handed you: it leaves the bell.
+  useEffect(() => {
+    api.markHandedSeen()
+      .then((r) => r?.seen && window.dispatchEvent(new Event('preventra:bell-refresh')))
+      .catch(() => {});
+  }, [arrival]);
   const switchTab = (k) => { if (k !== tab) { setData(null); setTab(k); } };
 
   const putBack = async (f) => {
@@ -132,6 +140,13 @@ export default function FollowUps() {
                         <div className="text-[11px] text-gray-400 mt-0.5 max-w-[180px] truncate">
                           {[...f.doctors, ...f.nurses].join(', ') || 'No care team'}
                         </div>
+                        {/* Whose patient: their main case manager has first call on it. */}
+                        {f.case_manager && (
+                          <div className="text-[10px] font-semibold mt-0.5 max-w-[180px] truncate"
+                               style={{ color: f.my_patient ? '#2E7D32' : '#1B4F8A' }}>
+                            {f.my_patient ? 'Your patient' : `${f.case_manager.name}'s patient`}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <RiskBadge prob={f.dropout_prob ?? 0} />

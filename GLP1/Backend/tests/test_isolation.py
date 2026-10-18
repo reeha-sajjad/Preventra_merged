@@ -39,7 +39,7 @@ ACCOUNTS = {
     "admin@b.test":     ("hospital_admin", "hosp-b", {}, B),
     "floating@x.test":  ("case_manager", None, {}, set()),
 }
-COST_ROLES = {"superadmin", "hospital_admin", "insurer"}
+COST_ROLES = {"superadmin", "insurer"}
 
 
 @pytest.fixture(scope="module")
@@ -166,6 +166,13 @@ def test_the_superadmin_summary_is_unchanged(world):
     assert kpis["wasted_spend_annual"] == round(expected_waste)
 
 
+def test_only_the_cost_roles_get_drug_spend_in_the_summary(world):
+    for email, (role, *_rest) in ACCOUNTS.items():
+        kpis = client(world, email).get("/api/summary").json()["kpis"]
+        assert (kpis["avg_annual_cost"] is None) == (role not in COST_ROLES), email
+        assert (kpis["wasted_spend_annual"] is None) == (role not in COST_ROLES), email
+
+
 # --------------------------------------------------------- cost and ROI
 COST_ROUTES = ["/api/cost-effectiveness", "/api/consequence/downstream-cost",
                "/api/consequence/rebound-risk", "/api/consequence/payer-scenarios",
@@ -207,7 +214,7 @@ def test_chatbot_tools_only_reach_the_accounts_patients(world, email):
 
 def test_chatbot_refuses_cost_tools_to_care_roles(world):
     result, err = asyncio.run(chatbot_tools.dispatch_tool("get_payer_roi", {}, ctx_for(world, "doc@a.test")))
-    assert err and "administrators and insurers" in err
+    assert err and "insurers only" in err
 
 
 def test_the_chatbot_snapshot_is_per_account(world):
@@ -216,6 +223,8 @@ def test_the_chatbot_snapshot_is_per_account(world):
     assert "Total patients: **2**" in doctor and "Total patients: **2**" in admin_b
     everyone = asyncio.run(chatbot_tools.build_snapshot(ctx_for(world, "ops@team.test")))
     assert f"Total patients: **{ALL:,}**" in everyone
+    # Drug spend only for the cost roles.
+    assert "wasted spend" not in doctor and "wasted spend" not in admin_b and "wasted spend" in everyone
 
 
 def test_a_chatbot_conversation_belongs_to_its_account(world):

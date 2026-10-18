@@ -13,13 +13,13 @@ from fastapi import APIRouter, Depends
 
 import core.model as model
 from core.mongo import get_db
-from core.access import scope_of, scope_query
+from core.access import COST_VIEW_ROLES, actor, scope_of, scope_query
 
 router = APIRouter()
 
 
 @router.get("/summary")
-async def get_summary(scope: Optional[list] = Depends(scope_of)):
+async def get_summary(scope: Optional[list] = Depends(scope_of), user: dict = Depends(actor)):
     db = get_db()
     mine = scope_query(scope)          # {} for the superadmin: every patient
 
@@ -81,14 +81,17 @@ async def get_summary(scope: Optional[list] = Depends(scope_of)):
             "seg3":   counts.get(3, 0),
         })
 
+    costs = user["role"] in COST_VIEW_ROLES
     return {
         "kpis": {
             "total_patients":      total_patients,
             "adherence_rate":      round(overall_adherence, 4),
             # With no patients there is no dropout; 1 - 0 would report 100%.
             "dropout_rate":        round(1 - overall_adherence, 4) if total_patients else 0.0,
-            "avg_annual_cost":     round(avg_annual_cost),
-            "wasted_spend_annual": round(wasted_spend),
+            # Drug spend is the payer's: only the cost roles get it (the
+            # screens hide it too, but the server is the control).
+            "avg_annual_cost":     round(avg_annual_cost) if costs else None,
+            "wasted_spend_annual": round(wasted_spend) if costs else None,
         },
         "adherence_by_segment": adherence_by_segment,
         "dropout_by_window":    dropout_by_window,

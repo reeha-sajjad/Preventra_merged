@@ -167,7 +167,7 @@ def test_health_stays_open():
 
 # ---------------------------------------------------------------- chatbot
 @pytest.mark.parametrize("role, audience", [
-    ("superadmin", "insurer"), ("hospital_admin", "insurer"), ("insurer", "insurer"),
+    ("superadmin", "insurer"), ("hospital_admin", "case_manager"), ("insurer", "insurer"),
     ("doctor", "case_manager"), ("nurse", "case_manager"),
     ("case_manager", "case_manager"), ("patient", "case_manager"),
 ])

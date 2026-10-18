@@ -185,12 +185,13 @@ def test_the_overview_counts_the_accounts_own_patients(world):
     assert body["no_doctor"] == 2 and body["no_nurse"] == 1         # 2, 3 / 3
     assert {m["name"]: m["count"] for m in body["insurer_mix"]} == {"No insurer on file": 3, "acme": 1}
     assert sum(d["count"] for d in body["drug_mix"]) == 4
-    assert body["drug_spend"]["annual"] > 0
     assert body["staff"] == {"doctors": 1, "nurses": 1}
-    # Case managers have no cost screens, so no drug spend either.
+    # Drug spend is the payer's: hospital staff, the admin included, get none.
+    assert body["drug_spend"] is None
     assert client(world, "cm@a.test").get("/api/overview").json()["drug_spend"] is None
     insurer = client(world, "claims@acme.test").get("/api/overview").json()
     assert insurer["total_patients"] == 2 and insurer["staff"] is None
+    assert insurer["drug_spend"]["annual"] > 0
 
 
 @pytest.mark.parametrize("email", ["doc@a.test", "nurse@a.test", "me@patient.test"])

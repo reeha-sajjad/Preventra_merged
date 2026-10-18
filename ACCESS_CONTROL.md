@@ -84,12 +84,25 @@ in *what kind of work* each one does.
 | **Opening one patient's clinical details** | **Must give a reason** (care coordination, incident review, audit, billing). It is written to the access log | Opens directly, no reason asked |
 | **Adding and approving people** (User Management) | **Yes** — doctors, nurses, case managers, patients | No |
 | **Access log** | **Can read** their hospital's log | No |
-| **Cost and ROI screens** (GLP-1 Budget Simulator, Cost of Inaction, drug spend) | **Yes** | No |
+| **Cost and ROI screens** (GLP-1 Budget Simulator, Cost of Inaction, drug spend) | No — insurers and superadmin only (the payer pays for the drug) | No |
 | **Registering doctors for alerts** (Readmissions) | **Yes** | No |
 | **Uploading or adding patients** | **Yes** | No |
 | **Assigning doctors and nurses to patients** | Yes | Yes |
+| **Setting a patient's main case manager** (GLP-1: one per patient, their point of contact) | Yes | Yes |
 | **Adding care notes, answering clinical alerts** | No | **Yes** |
 | **Clinician Console** (doctors' alert inboxes) | No | **Yes** |
+
+**Main case manager (GLP-1).** Each patient can have one main case manager —
+the person who calls them. It is set like a doctor or nurse (Care team, on the
+patient's page or for many patients from the Patients list); how a hospital
+divides patients (by doctor team, by problem, by ward) is its own choice, and
+the app has no rule for it. Every case manager still sees the whole hospital,
+so colleagues can cover. A new follow-up request rings only the bell of the
+patient's main case manager (everyone's, if the patient has none or theirs has
+left); the rest of the team still sees it in Follow-ups. A case manager's
+"My caseload" (Today, Patients) shows just their own patients. A colleague
+with a different skill is brought in by handing over the follow-up, with a
+note, not by sharing the patient. Readmissions does not have this yet.
 
 So they overlap on *seeing the whole hospital* and *assigning*, and are
 opposites on everything else: the admin has management and money but only the
@@ -152,7 +165,7 @@ hospital picker.
 | Clinician Console | Yes | — | Yes | Own inbox | — | — | — |
 | Add / upload patients | Yes | Yes | — | — | — | — | — |
 | Register doctors for alerts | Yes | Yes | — | — | — | — | — |
-| GLP-1 cost and ROI screens | Yes | Yes | — | — | — | Yes (members) | — |
+| GLP-1 cost and ROI screens | Yes | — | — | — | — | Yes (members) | — |
 | User Management | Everyone | Own hospital's staff and patients | — | — | — | — | — |
 | Create hospitals and insurers | Yes | — | — | — | — | — | — |
 | Access log | All hospitals | Own hospital | — | — | — | — | — |
@@ -235,8 +248,9 @@ routes checked nothing at all. GLP-1 had a role toggle anyone could flip.
    are worked out from the caller's patients, not the whole population.
 4. **Both chatbots are scoped the same way**, and a chatbot conversation belongs
    to the account that started it.
-5. **GLP-1 cost and ROI screens** are for the superadmin, hospital admins and
-   insurers only.
+5. **GLP-1 cost and ROI screens** are for the superadmin and insurers only. The
+   payer pays for the GLP-1 drug, not the hospital, so a hospital admin sees
+   patients, adherence and risk but no drug spend, budget or ROI.
 6. **The seed script** `Readmissions/scripts/seed_hospital.py` puts the demo data
    into one hospital, sets insurers from the data, and can create demo accounts
    with assignments (section 11).

@@ -17,21 +17,36 @@ import PageState from '../components/shared/PageState';
  * nobody is following up. Each block links to the page where it gets done.
  * Laid out like the Overview and My patients, so the three home pages read as
  * one product.
+ *
+ * "My caseload" shows the same page for the patients the case manager is the
+ * main case manager of; "Whole hospital" for everyone, to cover a colleague.
+ * It opens on My caseload when they have one.
  */
 export default function CaseManagerHome() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  // null until the first answer says whether there is a caseload to open on.
+  const [mine, setMine] = useState(null);
 
   useEffect(() => {
     let live = true;
-    api.getCaseManagerToday().then((d) => { if (live) setData(d); }).catch((e) => { if (live) setError(e.message); });
+    api.getCaseManagerToday(!!mine).then((d) => {
+      if (!live) return;
+      if (mine === null && d.caseload?.patients > 0) { setMine(true); return; }   // reloads, mine
+      setData(d);
+    }).catch((e) => { if (live) setError(e.message); });
     return () => { live = false; };
-  }, []);
+  }, [mine]);
 
   if (!data) return <PageState error={error} label="today's work" />;
 
   const { stats, followups: f, gaps, unattended } = data;
+  const caseload = data.caseload?.patients ?? 0;
+  const showingMine = !!data.caseload?.mine;
+  // Links into the patient list keep to the same patients as the page.
+  const list = (q = '') => `/patients${showingMine ? `?case_manager=me${q ? `&${q}` : ''}` : (q ? `?${q}` : '')}`;
+  const choose = (m) => { if (m !== showingMine) { setData(null); setMine(m); } };
   const total = stats.patients;
   const pct = (n) => (total ? Math.round((n / total) * 100) : 0);
   const open = (idx) => navigate(`/patients/${idx}`);
@@ -47,19 +62,36 @@ export default function CaseManagerHome() {
               <Building2 size={17} className="text-gray-400" />
               {data.hospital?.name || 'Your hospital'}
             </h2>
-            <p className="text-xs text-gray-400 mt-0.5">GLP-1 therapy across your hospital, and what needs doing today</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {showingMine
+                ? `Your caseload: the ${caseload.toLocaleString()} patients you are the case manager of, and what needs doing today`
+                : 'GLP-1 therapy across your hospital, and what needs doing today'}
+            </p>
           </div>
-          <Link to="/overview" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
-                style={{ color: 'var(--color-primary)' }}>
-            Hospital overview <ArrowRight size={13} />
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {caseload > 0 && (
+              <div role="group" aria-label="Whose patients" className="inline-flex rounded-lg border border-gray-200 p-0.5 text-xs font-semibold">
+                {[[true, 'My caseload'], [false, 'Whole hospital']].map(([m, label]) => (
+                  <button key={label} type="button" onClick={() => choose(m)} aria-pressed={showingMine === m}
+                    className="px-3 py-1.5 rounded-md transition-colors"
+                    style={showingMine === m ? { background: 'var(--color-primary)', color: 'white' } : { color: '#718096' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Link to="/overview" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
+                  style={{ color: 'var(--color-primary)' }}>
+              Hospital overview <ArrowRight size={13} />
+            </Link>
+          </div>
         </div>
         <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-          <Tile icon={Users} label="Patients" value={total} sub="on GLP-1 therapy" color="#1B4F8A" to="/patients" />
+          <Tile icon={Users} label="Patients" value={total} sub={showingMine ? 'in your caseload' : 'on GLP-1 therapy'} color="#1B4F8A" to={list()} />
           <Tile icon={AlertTriangle} label="Critical risk" value={stats.critical}
-                sub={`75% or more · ${pct(stats.critical)}% of patients`} color="#C62828" to="/patients?min_risk=75" />
+                sub={`75% or more · ${pct(stats.critical)}% of patients`} color="#C62828" to={list('min_risk=75')} />
           <Tile icon={TrendingDown} label="Predicted to stop" value={stats.predicted_dropout}
-                sub={`${pct(stats.predicted_dropout)}% of patients`} color="#EF6C00" to="/patients?prediction=Dropout%20Risk" />
+                sub={`${pct(stats.predicted_dropout)}% of patients`} color="#EF6C00" to={list('prediction=Dropout%20Risk')} />
           <Tile icon={HeartHandshake} label="Adherent" value={stats.adherent}
                 sub={`${pct(stats.adherent)}% staying on therapy`} color="#2E7D32" />
         </div>
@@ -69,7 +101,8 @@ export default function CaseManagerHome() {
       <div className="grid gap-5 lg:grid-cols-2 [&>*]:min-w-0">
         <div className="card p-5 md:p-6 animate-fade-up stagger-2 min-w-0">
           <Heading icon={CalendarClock} title="Follow-ups"
-                   sub="Requests from doctors and nurses to contact and book a patient"
+                   sub={showingMine ? "Your patients' requests, and those of patients with no case manager yet"
+                                    : 'Requests from doctors and nurses to contact and book a patient'}
                    action={<Link to="/follow-ups" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap"
                                  style={{ color: 'var(--color-primary)' }}>Open follow-ups <ArrowRight size={13} /></Link>} />
           <div className="grid gap-2 sm:gap-3 grid-cols-3">
@@ -113,10 +146,15 @@ export default function CaseManagerHome() {
                                  style={{ color: 'var(--color-primary)' }}>Staff <ArrowRight size={13} /></Link>} />
           <div className="grid gap-3 grid-cols-2 mb-3">
             <Tile icon={Stethoscope} label="No doctor" value={gaps.no_doctor} color={gaps.no_doctor ? '#EF6C00' : '#2E7D32'}
-                  to={gaps.no_doctor ? '/patients?unassigned=doctor' : undefined} sub={gaps.no_doctor ? 'assign one' : 'all covered'} />
+                  to={gaps.no_doctor ? list('unassigned=doctor') : undefined} sub={gaps.no_doctor ? 'assign one' : 'all covered'} />
             <Tile icon={HeartPulse} label="No nurse" value={gaps.no_nurse} color={gaps.no_nurse ? '#EF6C00' : '#2E7D32'}
-                  to={gaps.no_nurse ? '/patients?unassigned=nurse' : undefined} sub={gaps.no_nurse ? 'assign one' : 'all covered'} />
+                  to={gaps.no_nurse ? list('unassigned=nurse') : undefined} sub={gaps.no_nurse ? 'assign one' : 'all covered'} />
           </div>
+          {!showingMine && gaps.no_case_manager > 0 && caseload >= 0 && (
+            <Link to="/patients?unassigned=case_manager" className="block text-xs font-semibold mb-3" style={{ color: '#B45309' }}>
+              {gaps.no_case_manager.toLocaleString()} patients have no case manager yet - assign one
+            </Link>
+          )}
           {gaps.patients.length > 0 && (
             <ul className="divide-y divide-gray-100 -mx-1">
               {gaps.patients.map((p) => (
@@ -155,7 +193,7 @@ export default function CaseManagerHome() {
             </div>
           </div>
           {unattended.total > unattended.patients.length && (
-            <Link to="/patients?min_risk=75" className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap sm:mt-1"
+            <Link to={list('min_risk=75')} className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap sm:mt-1"
                   style={{ color: 'var(--color-primary)' }}>
               See all critical <ArrowRight size={13} />
             </Link>

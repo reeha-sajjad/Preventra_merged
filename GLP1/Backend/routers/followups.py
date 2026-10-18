@@ -75,6 +75,12 @@ async def followup_handlers(user: dict = Depends(actor)):
     return {"handlers": await followups.handlers(user)}
 
 
+@router.post("/followups/handed-seen")
+async def followups_handed_seen(user: dict = Depends(actor)):
+    """The Follow-ups page is open: requests handed to the caller leave their bell."""
+    return {"seen": await followups.seen_handed(user)}
+
+
 @router.post("/followups/{followup_id}/release")
 async def release_followup(followup_id: str, user: dict = Depends(actor),
                            scope: Optional[list] = Depends(scope_of)):

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck } from 'lucide-react';
+import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward } from 'lucide-react';
 import { api } from '../../data/api';
 import { RiskBadge } from '../shared';
 
@@ -8,6 +8,8 @@ const REFRESH_MS = 60_000;
 
 // One line per reason a patient is in the bell (Backend/core/notifications.py).
 const KINDS = {
+  followup_handed: { icon: Forward, color: '#1B4F8A', label: () => 'handed to you', text: (i) =>
+    `${i.handed_by} handed you ${i.urgency === 'urgent' ? 'an urgent' : 'a'} follow-up${i.overdue ? ' · overdue' : ''}` },
   followup_new: { icon: CalendarClock, color: '#C62828', label: (n) => `follow-up request${n === 1 ? '' : 's'}`, text: (i) =>
     `${i.urgency === 'urgent' ? 'Urgent f' : 'F'}ollow-up requested by ${i.requested_by}${i.overdue ? ' · overdue' : ''}` },
   followup_done: { icon: CalendarCheck, color: '#2E7D32', label: (n) => `follow-up${n === 1 ? '' : 's'} done`, text: (i) =>
@@ -39,7 +41,9 @@ export default function NotificationBell() {
   useEffect(() => { load(); }, [load, pathname]);
   useEffect(() => {
     const t = setInterval(load, REFRESH_MS);
-    return () => clearInterval(t);
+    // A page that changed what is in the bell (Follow-ups) asks for a refresh.
+    window.addEventListener('preventra:bell-refresh', load);
+    return () => { clearInterval(t); window.removeEventListener('preventra:bell-refresh', load); };
   }, [load]);
 
   useEffect(() => {
@@ -53,8 +57,10 @@ export default function NotificationBell() {
 
   const total = data?.total ?? 0;
   const items = data?.items ?? [];
-  // Follow-up requests leave the bell when someone takes them, not when read.
-  const requestsOnly = items.length > 0 && items.every((i) => i.kinds.includes('followup_new'));
+  // Follow-up requests leave the bell when someone takes them (or, handed to
+  // you, when you open Follow-ups), not when read.
+  const isRequest = (i) => i.kinds.includes('followup_new') || i.kinds.includes('followup_handed');
+  const requestsOnly = items.length > 0 && items.every(isRequest);
 
   const markAll = async () => {
     setBusy(true);
@@ -68,7 +74,17 @@ export default function NotificationBell() {
 
   const go = (item) => {
     setOpen(false);
-    navigate(item.kinds.includes('followup_new') ? '/follow-ups' : `/patients/${item.patient_idx}`);
+    // Opening Follow-ups clears what was handed to you (the page tells the
+    // backend); drop them here at once rather than wait for that.
+    if (item.kinds.includes('followup_handed')) {
+      setData((d) => {
+        const left = d.items.filter((i) => !i.kinds.includes('followup_handed'));
+        const gone = d.counts.followup_handed ?? 0;
+        return { ...d, items: left, total: Math.max(0, d.total - gone), counts: { ...d.counts, followup_handed: 0 } };
+      });
+    }
+    navigate(item.kinds.includes('followup_handed') ? '/follow-ups?mine=1'
+      : item.kinds.includes('followup_new') ? '/follow-ups' : `/patients/${item.patient_idx}`);
   };
 
   // Hospital admins only get a bell when their hospital has no case manager.
@@ -97,7 +113,7 @@ export default function NotificationBell() {
               <div className="font-semibold text-gray-800 text-sm">Notifications</div>
               <div className="text-xs text-gray-400 mt-0.5">
                 {!total ? 'Your patients' : requestsOnly
-                  ? `${total.toLocaleString()} follow-up request${total === 1 ? '' : 's'} waiting`
+                  ? `${total.toLocaleString()} follow-up request${total === 1 ? '' : 's'} for you`
                   : `${total.toLocaleString()} of your patients need a look`}
               </div>
             </div>
@@ -137,7 +153,7 @@ export default function NotificationBell() {
           ) : (
             <ul className="max-h-[420px] overflow-y-auto divide-y divide-gray-100">
               {items.map((i) => (
-                <li key={i.patient_idx}>
+                <li key={i.followup_id || i.patient_idx}>
                   <button type="button" onClick={() => go(i)}
                     className="group w-full text-left flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
                     <div className="pt-0.5"><RiskBadge prob={i.dropout_prob} /></div>
