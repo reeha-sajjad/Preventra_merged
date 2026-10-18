@@ -83,7 +83,7 @@ async def today(user: dict, scope: Optional[list], mine: bool = False) -> dict:
         risk.update(await followups._risk(missing))
     out["followups"]["next"] = [
         {"id": str(f["_id"]), "patient_idx": f["patient_idx"], "urgency": f["urgency"],
-         "requested_by": f["requested_by"]["name"], "requested_at": _aware(f["requested_at"]).isoformat(),
+         "requested_by": f["requested_by"].get("pharmacy") or f["requested_by"]["name"], "requested_at": _aware(f["requested_at"]).isoformat(),
          "note": f.get("note", ""), "dropout_prob": risk.get(int(f["patient_idx"])),
          "overdue": now - _aware(f["requested_at"]) > timedelta(days=followups.OVERDUE_DAYS)}
         for f in waiting[:5]]

@@ -38,6 +38,7 @@ export function AccountCard() {
     ['Role', roleLabel],
     me.hospital && ['Hospital', me.hospital.name],
     me.insurer && ['Organisation', me.insurer.name],
+    me.pharmacy && ['Pharmacy', me.pharmacy.name],
     // A patient sees their own record; "1 patient" would only confuse.
     me.role !== 'patient' && ['Patients you can see', me.patients === null ? 'Every patient' : me.patients.toLocaleString()],
   ].filter(Boolean) : [];

@@ -248,10 +248,14 @@ async def me(user: dict, scope: Optional[list]) -> dict:
     if user.get("insurer_id"):
         doc = await ident.insurers.find_one({"_id": user["insurer_id"]})
         insurer = {"id": user["insurer_id"], "name": (doc or {}).get("name", user["insurer_id"])}
+    pharmacy = None
+    if user.get("pharmacy_id"):
+        doc = await ident.pharmacies.find_one({"_id": user["pharmacy_id"]})
+        pharmacy = {"id": user["pharmacy_id"], "name": (doc or {}).get("name", user["pharmacy_id"])}
     created = account.get("created_at")
     return {"id": user["id"], "name": account.get("name") or "", "email": user.get("email", ""),
             "role": user["role"], "hospital": await _hospital_name(user.get("hospital_id")),
-            "insurer": insurer, "patients": None if scope is None else len(scope),
+            "insurer": insurer, "pharmacy": pharmacy, "patients": None if scope is None else len(scope),
             "member_since": created.isoformat() if hasattr(created, "isoformat") else None}
 
 

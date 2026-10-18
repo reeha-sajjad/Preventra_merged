@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, UserCircle, PieChart, TrendingDown, UsersRound,
   Calculator, Settings, ChevronLeft, ChevronRight,
-  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock, ListChecks,
+  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock, ListChecks, Pill,
 } from 'lucide-react';
 import { api } from '../../data/api';
 import HospitalPicker from '../hospital/HospitalPicker';
@@ -18,7 +18,8 @@ const NAV_ITEMS = [
   { section: 'overview', to: '/',         icon: ListChecks,      label: 'Today',                primary: null, only: 'isCaseManager' },
   { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Hospital overview',    primary: null, only: 'isCaseManager' },
   { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
-  { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null },
+  { section: 'overview', to: '/',         icon: Pill,            label: 'Pharmacy',             primary: null, only: 'isPharmacy' },
+  { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null, only: 'notPharmacy' },
   { section: 'overview', to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
   { section: 'overview', to: '/follow-ups', icon: CalendarClock, label: 'Follow-ups',           primary: null, only: 'handlesFollowUps', badge: 'followups' },
   { section: 'analytics', to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },

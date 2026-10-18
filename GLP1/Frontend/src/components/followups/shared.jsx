@@ -62,7 +62,7 @@ export function DoneDialog({ followup, onClose, onDone }) {
           <div>
             <h2 className="text-base font-semibold text-gray-800">Mark follow-up done</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              Patient #{followup.patient_idx} · asked by {followup.requested_by?.name}
+              Patient #{followup.patient_idx} · asked by {followup.requested_by?.pharmacy || followup.requested_by?.name}
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600"><X size={18} /></button>

@@ -77,7 +77,7 @@ export default function FollowUps() {
               <CalendarClock size={17} className="text-gray-400" /> Follow-up requests
             </h2>
             <p className="text-xs text-gray-400 mt-0.5 max-w-xl">
-              Doctors and nurses ask for a patient to be followed up. Take a request, contact the patient,
+              Doctors and nurses ask for a patient to be followed up, and pharmacies report refill problems. Take a request, contact the patient,
               book them in the hospital&rsquo;s own system, then mark it done.
             </p>
           </div>
@@ -158,7 +158,18 @@ export default function FollowUps() {
                       </td>
                       <td><UrgencyPill urgency={f.urgency} /></td>
                       <td>
-                        <div className="text-sm text-gray-700">{f.requested_by.name}</div>
+                        <div className="text-sm text-gray-700">{f.requested_by.pharmacy || f.requested_by.name}</div>
+                        {/* Reported by a pharmacy: what it saw at the counter. */}
+                        {f.pharmacy_reports?.length > 0 && (
+                          <div className="mt-0.5 flex flex-wrap gap-1">
+                            {f.pharmacy_reports.map((p, i) => (
+                              <span key={i} className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                    style={{ background: '#F3E8FF', color: '#6B21A8' }}>
+                                Pharmacy · {p.problem_label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div className="text-[11px]" style={{ color: f.overdue ? '#C62828' : '#A0AEC0' }}>
                           {ago(f.requested_at)}{f.overdue ? ' · overdue' : ''}
                         </div>

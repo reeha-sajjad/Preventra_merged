@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import core.model as model
 from core import access_log, hospital
 from core.mongo import get_db
-from core.access import (REASONS, ASSIGN_ROLES, actor, detail_access, needs_reason, overview_only, patient_hospital,
+from core.access import (REASONS, ASSIGN_ROLES, DISPENSING_REASON, actor, detail_access, needs_reason, overview_only, patient_hospital,
                          redact, require_detail, require_patient, scope_of, scope_query)
 from schemas.patient_views import PatientPharmacyView
 
@@ -178,7 +178,17 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
         raise HTTPException(status_code=404, detail=f"Patient {patient_idx} not found")
     team = (await hospital.care_teams([patient_idx]))[patient_idx]
     state = await detail_access(user, patient_idx)
-    return redact({
+    extra = {}
+    if overview_only(user):
+        # A pharmacy: the dispensing facts it already has, and the look is logged.
+        from core import pharmacy                         # avoid an import cycle
+        facts = await get_db().patients.find_one({"patient_idx": patient_idx},
+                                                 {"_id": 0, "assigned_molecule": 1, "system_refill_score": 1})
+        extra = {"drug": pharmacy.drug_label((facts or {}).get("assigned_molecule")),
+                 "refill_band": pharmacy.refill_band((facts or {}).get("system_refill_score"))}
+        if not await access_log.has_opened(user, patient_idx):
+            await access_log.record(user, patient_idx, await patient_hospital(patient_idx), DISPENSING_REASON)
+    return {**extra, **redact({
         "patient_idx": patient_idx,
         "dropout_prob": round(float(doc.get("dropout_prob") or doc.get("dropout_proba") or 0.5), 4),
         "prediction": str(doc.get("prediction") or "Unknown"),
@@ -187,7 +197,7 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
         "reasons": ([{"key": k, "label": v} for k, v in REASONS.items()]
                     if state == "reason_required" else []),
         "can_assign": user["role"] in ASSIGN_ROLES,
-    })
+    })}
 
 
 class OpenPatientRequest(BaseModel):

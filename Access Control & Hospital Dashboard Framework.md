@@ -1,246 +1,429 @@
-# **Access Control & Hospital Dashboard Framework**
+# Access control and hospital dashboards: how it all works
 
-## **The short version**
+This document explains, step by step, what was built on top of the
+*Access Control & Hospital Dashboard Framework*: who can see what, how accounts
+get in, and where each piece lives in the code. It starts with the question
+that comes up most — **what is the difference between a case manager and a
+hospital admin?** — and then walks through each build step in order.
 
-The two tasks become one piece of work built on one rule: **every account belongs to one hospital and has exactly one role.** The one exception is the superadmin, which is us.
+---
 
-* **Superadmin** \= our team. It oversees everything across every hospital and can bypass every restriction.  
-* **Hospital** \= who a user works for. Every hospital only ever sees its own patients, never another hospital's.  
-* **Role** \= what a user does there: hospital admin, doctor, nurse or case manager. An admin assigns it; the user never picks it.  
-* **Two filters decide what hospital users see.** First, only data from their own hospital. Second, doctors and nurses only see the patients assigned to them.  
-* **Hospital admins see the big picture first.** Counts, lists and flags are always visible. Clinical detail (vitals, drugs, notes) opens on click, with a reason, and the access is logged.  
-* **No new app.** GLP-1 and Readmissions each get a hospital dashboard. After signing in on the Portal, you pick an app and see that app's hospital view.
+## Contents
 
-Talha's ticket supplies the plumbing: roles stored on the account, admin-managed, and surviving a refresh. Sir's task supplies the first real use for it, the hospital dashboards. Build the plumbing first, then the dashboards on top.
+1. [The one rule everything follows](#1-the-one-rule-everything-follows)
+2. [The seven roles](#2-the-seven-roles)
+3. [Case manager vs hospital admin](#3-case-manager-vs-hospital-admin)
+4. [Full permissions table](#4-full-permissions-table)
+5. [Step 1 — Roles become real](#5-step-1--roles-become-real)
+6. [Step 2 — Hospitals, insurers and User Management](#6-step-2--hospitals-insurers-and-user-management)
+7. [Step 3 — Every patient belongs to a hospital](#7-step-3--every-patient-belongs-to-a-hospital)
+8. [Step 4 — The hospital dashboards](#8-step-4--the-hospital-dashboards)
+9. [Step 5 — Choosing a role at sign-up](#9-step-5--choosing-a-role-at-sign-up)
+10. [How a new person gets in, end to end](#10-how-a-new-person-gets-in-end-to-end)
+11. [Demo data and demo accounts](#11-demo-data-and-demo-accounts)
+12. [Where things live in the code](#12-where-things-live-in-the-code)
+13. [What is not built yet](#13-what-is-not-built-yet)
 
-## **How the two tasks fit together**
+---
 
-Most of Talha's ticket carries over unchanged. Four points clash with the hospital idea. Each one is settled below so nobody builds the same thing twice.
+## 1. The one rule everything follows
 
-| Topic | GLP-1's ticket  | Hospital task needs | Unified decision |
-| ----- | ----- | ----- | ----- |
-| Roles | admin, insurer, case\_manager | Doctors, nurses and the hospital itself | superadmin, hospital\_admin, doctor, nurse and case\_manager now. Insurer comes back later with its own organisation. |
-| Who is "admin" | One admin who manages every user | Each hospital manages its own people | Split in two. **superadmin** (only our team) oversees and can change everything, everywhere. **hospital\_admin** manages only their own hospital's staff and patients. |
-| New signups | Default to case\_manager | People must not join a hospital by typing its name | Accounts are mainly created by an admin (see Onboarding). If someone does sign up themselves, they get case\_manager with status **pending** and see no patients until an admin approves them. |
-| "clinician" vs "case\_manager" | Pick one name | Doctors and nurses are now separate roles | Use `case_manager` in code everywhere: database, token, role context and nav config. The nav badge "Clinician" is renamed **"Care team"**, so labels match the roles behind them. |
+> **Every account has exactly one role, and belongs to one hospital** (or, for
+> insurers, one insurer). The superadmin — our team — is the only exception.
 
-Kept as-is from Talha's ticket: exactly one role per user, role returned on login and signup, role survives a refresh, the toggle is removed, Settings shows your role read-only, a User Management list for admins, backfilling old accounts, and the first-admin bootstrap (a script that creates the first superadmin).
+Two consequences run through everything below:
 
-## **What the code does today**
+- **The server decides, not the screen.** Hiding a menu item is a courtesy. Every
+  API request re-checks who the person is and what they may see, so a hidden
+  page cannot be reached by typing its URL, and a refused request never falls
+  back to made-up data.
+- **Changes take effect immediately.** Both backends re-read the account from the
+  database on every request. Approving someone, changing their role or suspending
+  them applies to their very next click — nobody has to sign out and back in.
 
-The pieces for hospitals half exist already, but nothing enforces them. From the Preventra\_merged repo:
+---
 
-| Area | Today | Gap |
-| ----- | ----- | ----- |
-| Hospital on the account | Every account and token already carries `org_id` (for example `city-hospital`). | It comes from whatever hospital name the user types at signup. Anyone can join any hospital. |
-| Role on the account | Stored, but as free text the user types at signup (for example "Doctor"). | Not a fixed list and not admin-controlled. |
-| GLP-1 role toggle | `RoleContext` holds insurer or case\_manager in page memory. | Anyone can switch, it resets on refresh and it gates nothing (Talha's point). |
-| Patient data per hospital | Readmissions `/api/patients` and GLP-1 routes return every patient. | No endpoint filters by `org_id`, so every signed-in user sees every patient. |
-| New patient data | Readmissions has CSV upload and manual entry. | Nothing records which hospital an uploaded or entered patient belongs to. |
-| Doctors | Readmissions has a doctor registry (`doctor_id`, specialty, email), and patients have `assigned_doctor_id`. | Doctors are not linked to login accounts or to a hospital. |
-| Nurses | Not modelled. | Needs a role and a patient assignment, like doctors. |
-| Insurer per patient | Readmissions patients have an `insurance` field. GLP-1 has payer-level ROI tables. | GLP-1 patients have no insurer name. |
-| Drugs and vitals | GLP-1 has drug, drug generation, BMI and HbA1c. Readmissions has clinical features. | No pharmacy name per patient, and no single "latest vitals" view. |
+## 2. The eight roles
 
-## **Organisations and roles**
+| Role | Who it is | Belongs to | In one sentence |
+|---|---|---|---|
+| **Superadmin** | Our team | Nobody (sees every hospital) | Sets up hospitals and insurers, can see and fix anything. |
+| **Hospital admin** | The person who runs the hospital's account | One hospital | Manages the hospital's people and money; sees patients at overview level. |
+| **Case manager** | A care coordinator (often a nurse or social worker) | One hospital | Works on *every* patient in the hospital to keep their care on track. |
+| **Doctor** | A treating clinician | One hospital | Works on the patients assigned to them. |
+| **Nurse** (includes caretakers) | A nurse or caretaker | One hospital | Follows up the patients assigned to them. |
+| **Insurer** | A payer's staff | One insurer | Sees its own members, in any hospital, mainly costs and outcomes. |
+| **Pharmacy** | A pharmacy's staff | One pharmacy | Sees the patients who fill there, in any hospital: risk, care team and case manager — never diagnoses. |
+| **Patient** | A patient | One hospital | Sees their own record only. |
 
-There are five roles, and every account has exactly one. The role name in the code is the same everywhere: database, token, backend and both frontends.
+The role names are identical everywhere — database, sign-in token, both
+backends, both frontends — so there is never a translation between them.
 
-flowchart TD  
-  S\["superadmin\<br/\>(our team, sees everything)"\] \--\> H1\["Hospital A"\]  
-  S \--\> H2\["Hospital B"\]  
-  H1 \--\> HA\["hospital\_admin"\]  
-  H1 \--\> D\["doctor"\]  
-  H1 \--\> N\["nurse"\]  
-  H1 \--\> CM\["case\_manager"\]  
-  D \--\> PT\["their patients"\]  
-  N \--\> PT
+---
 
-| Role | Belongs to | In plain words | Replaces |
-| ----- | ----- | ----- | ----- |
-| superadmin | Our team only | Oversees everything in every hospital and can bypass every restriction. Creates hospitals, hospital admins, staff and patients, and changes anyone's role. | Talha's `admin`, and the "first admin" problem |
-| hospital\_admin | One hospital | Runs that hospital's dashboards. Adds and manages its doctors, nurses, case managers and patients, or sends a list to us to add. Sees counts and lists; opens clinical detail on click, with a reason. | Talha's `admin`, limited to one hospital |
-| doctor | One hospital | Sees and acts on the patients assigned to them. | "Doctor" typed at signup today |
-| nurse | One hospital | Sees and follows up on the patients assigned to them. **Caretakers count as nurses for now**, which may change later. | New |
-| case\_manager | One hospital | Sees all the hospital's patients for risk and follow-up, but cannot manage users. | Talha's `case_manager`. Also the default for self-signups. |
-| insurer *(later)* | An insurer organisation | Sees only its own members, across hospitals, from the cost and ROI side. | Talha's `insurer`, moved to a later phase |
+## 3. Case manager vs hospital admin
 
-Rules that apply to every role:
+This is the part that looks confusing, because on the menu they look similar:
+both see the **whole hospital**, both have an **Overview** page and a **Staff**
+page, and both can **assign patients** to doctors and nurses. The difference is
+in *what kind of work* each one does.
 
-* A patient belongs to exactly one hospital.  
-* A patient can have one doctor and several nurses.  
-* **One role per account.** Someone who is both a doctor and an admin uses two accounts, one per role.  
-* **Superadmin accounts are only for our team.** No hospital admin can create one or promote anyone to it.
+### The short version
 
-## **Who can see what**
+- A **hospital admin** runs the hospital's *account*: people, access and money.
+  They look at patients from a distance.
+- A **case manager** runs patients' *care*: follow-ups and coordination. They
+  work inside individual patient records all day.
 
-The backend enforces every row of this table, not the frontend. Hiding a button is a courtesy. Refusing the API call is the control. Everything except the superadmin column is limited to the user's own hospital.
+### Side by side
 
-| What | superadmin | hospital\_admin | doctor | nurse | case\_manager |
-| ----- | ----- | ----- | ----- | ----- | ----- |
-| Patient list (name/ID, doctor, nurses, insurer, risk level) | All hospitals | Yes | Own patients only | Own patients only | Yes |
-| Counts, trends and flags | All hospitals | Yes | Own patients | Own patients | Yes |
-| Vitals, drugs, pharmacy and notes | All hospitals, no prompt | On click, with a reason (logged) | Own patients | Own patients | Yes |
-| Risk drivers (why a patient is high-risk) | All hospitals, no prompt | On click, with a reason (logged) | Own patients | Own patients | Yes |
-| Staff list with each person's patients | All hospitals | Yes | No | No | Yes |
-| Add doctors, nurses, case managers | Any hospital | Own hospital | No | No | No |
-| Add patients (one by one or CSV) | Any hospital | Own hospital | No | No | No |
-| Assign patients to doctors and nurses | Any hospital | Yes | No | No | Yes |
-| Add notes and care actions | Yes | No | Yes | Yes | Yes |
-| Hospital cost and ROI screens (GLP-1) | All hospitals | Own hospital | No | No | No |
-| User Management (approve, change roles) | Everyone | Own hospital | No | No | No |
-| Create hospitals and hospital admins | Yes | No | No | No | No |
-| View the access log | All hospitals | Own hospital | No | No | No |
+| | Hospital admin | Case manager |
+|---|---|---|
+| **Main job** | Running the account: people, access, money | Coordinating patient care: follow-ups, who looks after whom |
+| **Sees which patients** | All of the hospital's | All of the hospital's |
+| **Patient list** | Overview only: risk, care team, insurer. **No diagnoses, drivers, vitals or drugs** | Everything, including diagnoses and risk drivers |
+| **Opening one patient's clinical details** | **Must give a reason** (care coordination, incident review, audit, billing). It is written to the access log | Opens directly, no reason asked |
+| **Adding and approving people** (User Management) | **Yes** — doctors, nurses, case managers, patients | No |
+| **Access log** | **Can read** their hospital's log | No |
+| **Cost and ROI screens** (GLP-1 Budget Simulator, Cost of Inaction, drug spend) | No — insurers and superadmin only (the payer pays for the drug) | No |
+| **Registering doctors for alerts** (Readmissions) | **Yes** | No |
+| **Uploading or adding patients** | **Yes** | No |
+| **Assigning doctors and nurses to patients** | Yes | Yes |
+| **Setting a patient's main case manager** (GLP-1: one per patient, their point of contact) | Yes | Yes |
+| **Adding care notes, answering clinical alerts** | No | **Yes** |
+| **Clinician Console** (doctors' alert inboxes) | No | **Yes** |
 
-"Own patients" means patients whose assigned doctor or nurse is that user.
+**Main case manager (GLP-1).** Each patient can have one main case manager —
+the person who calls them. It is set like a doctor or nurse (Care team, on the
+patient's page or for many patients from the Patients list); how a hospital
+divides patients (by doctor team, by problem, by ward) is its own choice, and
+the app has no rule for it. Every case manager still sees the whole hospital,
+so colleagues can cover. A new follow-up request rings only the bell of the
+patient's main case manager (everyone's, if the patient has none or theirs has
+left); the rest of the team still sees it in Follow-ups. A case manager's
+"My caseload" (Today, Patients) shows just their own patients. A colleague
+with a different skill is brought in by handing over the follow-up, with a
+note, not by sharing the patient. Readmissions does not have this yet.
 
-### **How hospital admins open clinical detail**
+So they overlap on *seeing the whole hospital* and *assigning*, and are
+opposites on everything else: the admin has management and money but only the
+outside of patient records; the case manager has the inside of patient records
+but no management and no money.
 
-A hospital admin needs to know exactly what is going on, but rarely needs every patient's lab values. So their access works in two layers:
+### Why the admin must give a reason and the case manager doesn't
 
-1. **Overview layer (always on).** Counts, lists, risk levels, staff workload, insurer mix and alerts. No vitals, drugs or notes appear in lists or tables.  
-2. **Detail layer (on click).** On a patient row, "View clinical details" opens a short prompt asking why, with options such as *care coordination*, *complaint / incident review*, *audit* and *billing query*. After they choose, the vitals, drugs, pharmacy, notes and risk drivers open for that patient.
+Health data follows a "minimum necessary" principle: people see clinical detail
+when their job needs it. A case manager's job *is* the clinical detail — they
+cannot arrange a heart-failure follow-up without knowing it is heart failure. A
+hospital admin's job usually isn't, so they see the big picture by default, and
+when they do need one patient's details (a complaint, an audit, a billing
+query) they say why, and it is recorded. That also means misuse is visible in
+the access log.
 
-The rules behind it:
+### An example day
 
-* Each detail view is written to the **access log** with who opened it, which patient, when and the reason given.  
-* The access lasts for that patient for the rest of the session, so admins aren't asked again on every click.  
-* The backend refuses detail calls from a hospital\_admin that don't carry a reason. The prompt is not only in the frontend.  
-* The hospital admin can review their hospital's access log, so misuse is visible.
+- **The hospital admin** adds two new nurses in User Management, approves a
+  doctor who signed up, checks drug spend on the GLP-1 Overview, and sees on the
+  Readmissions Overview that 12 patients have no doctor assigned. A complaint
+  comes in about one patient, so they open that patient with the reason
+  *Complaint / incident review*.
+- **The case manager** opens the "Needs attention" list, reads each patient's
+  diagnoses and risk drivers, assigns the unassigned patients to doctors,
+  adds a note after calling a patient, and answers an alert in the Clinician
+  Console.
 
-### **What "bypass everything" means for the superadmin**
+### If you still want them to be more different
 
-The superadmin skips every filter and prompt: any hospital, any patient, any action, with no reason asked. We recommend one safeguard: **superadmin actions are still written to the access log.** It costs nothing day to day. If a hospital ever asks who looked at their patient's data, we can answer.
+The current split follows the framework document exactly (its table gives case
+managers the whole hospital, clinical detail and assignment, but no user
+management and no costs). If the team wants a sharper difference, the options
+are:
 
-## **Onboarding hospitals, staff and patients**
+| Option | What changes | Effort |
+|---|---|---|
+| **A. Keep as is** | Nothing. The difference is management and money vs clinical work. | None |
+| **B. Give case managers a caseload** | Case managers see only the patients assigned *to them*, like nurses. Admins assign patients to case managers too. | Medium: a case-manager field on each patient, plus assignment UI |
+| **C. Rename the role on screen** | Show "Care coordinator" instead of "Case manager", so the purpose is obvious. The code keeps `case_manager`. | Small |
+| **D. Merge into hospital admin** | One role. Loses the separation between clinical and admin access. Not recommended. | Medium |
 
-Hospitals don't sign themselves up. We create them, and each hospital then fills in its people either directly or through us.
+---
 
-flowchart TD  
-  A\["Hospital agrees to join"\] \--\> B\["Superadmin creates hospital\<br/\>+ its hospital\_admin"\]  
-  B \--\> C{"Who adds staff\<br/\>and patients?"}  
-  C \--\>|"Hospital does it"| D\["hospital\_admin adds them\<br/\>one by one or by CSV"\]  
-  C \--\>|"Hospital sends a list"| E\["Superadmin imports\<br/\>the list for them"\]  
-  D \--\> F\["Staff log in and see\<br/\>only this hospital"\]  
-  E \--\> F
+## 4. Full permissions table
 
-1. **We create the hospital.** The superadmin enters the hospital's name and creates its first hospital\_admin account.  
-2. **Staff get added.** The hospital\_admin adds doctors, nurses and case managers in User Management. Alternatively, the hospital sends us a list (name, email, role) and the superadmin imports it. Each new person gets a login invite or a temporary password.  
-3. **Patients get added.** The hospital\_admin uploads a patient CSV or enters patients manually, or sends the file to us to upload. Every patient added this way is stamped with that hospital automatically. Nobody types a hospital name.  
-4. **Patients get assigned.** The hospital\_admin or a case manager assigns each patient a doctor and nurses.
+"Own" means patients assigned to that person. "Hospital" means every patient of
+their hospital. The superadmin can narrow any view to one hospital with the
+hospital picker.
 
-Self-signup on the Portal can stay, but it only creates a **pending** case\_manager with no patient access until an admin approves it and attaches it to a hospital.
+| What | Superadmin | Hospital admin | Case manager | Doctor | Nurse | Insurer | Patient |
+|---|---|---|---|---|---|---|---|
+| Which patients | All hospitals | Hospital | Hospital | Own | Own | Own members | Own record |
+| Overview page | Yes | Yes | Yes | — | — | Yes (members) | — |
+| Patients list | Yes | Overview layer | Yes | Yes | Yes | Overview layer | — |
+| Clinical details of a patient | Yes (logged) | With reason (logged) | Yes | Yes | Yes | With reason (logged) | Own |
 
-## **The hospital dashboards**
+**Pharmacy** (not a column above, to keep the table readable): sees the patients
+who fill at its pharmacy, in any hospital, in both apps; the patients list at the
+overview layer only, and **never** the clinical layer — no reason opens it
+(`OVERVIEW_ONLY_ROLES` in both `access.py` files; 45 CFR 164.502(b), minimum
+necessary). No hospital pages, costs, notes, assignment or alerts. In GLP-1 a
+pharmacy's home page lists its patients with the drug, refill reliability, hospital
+and case manager, and it can **report a refill problem** (missed pickup, prior
+authorisation, out of stock, side effects, cost): that becomes a follow-up for the
+patient's case manager, or a note on the one already open. The pharmacy sees
+the status of its own reports, never the care team's notes. Opening a patient
+is logged as "Dispensing (pharmacy)". Placed in its
+pharmacy by the superadmin, like insurer staff. Patients are linked to a pharmacy
+by `pharmacy_id` on their ownership record (`Readmissions/scripts/seed_pharmacies.py`
+for the demo data).
+| Staff page | Yes | Yes | Yes | — | — | — | — |
+| Assign doctors / nurses | Yes | Yes | Yes | — | — | — | — |
+| Add notes, answer alerts | Yes | — | Yes | Yes | Yes | — | — |
+| Clinician Console | Yes | — | Yes | Own inbox | — | — | — |
+| Add / upload patients | Yes | Yes | — | — | — | — | — |
+| Register doctors for alerts | Yes | Yes | — | — | — | — | — |
+| GLP-1 cost and ROI screens | Yes | — | — | — | — | Yes (members) | — |
+| User Management | Everyone | Own hospital's staff and patients | — | — | — | — | — |
+| Create hospitals and insurers | Yes | — | — | — | — | — | — |
+| Access log | All hospitals | Own hospital | — | — | — | — | — |
+| Forecast sweep | Yes | — | — | — | — | — | — |
 
-There is no new app. GLP-1 and Readmissions each get a hospital view in their own app, built from the same four page types. You sign in on the Portal, pick an app and land on that app's hospital view. The superadmin sees the same pages with a hospital picker at the top, including an "All hospitals" option.
+"Overview layer" = patient number, risk score and band, trend, discharge date,
+care team and insurer. The clinical layer = diagnoses, risk drivers, vitals
+(BMI, HbA1c, age), drug, pharmacy, notes and alerts.
 
-| Page | Question it answers | In GLP-1 | In Readmissions |
-| ----- | ----- | ----- | ----- |
-| Overview | How is my hospital doing? | Patients on GLP-1 therapy, adherent vs non-adherent, dropout risk, drug spend | Admissions, high readmission risk count, open alerts, patients with no doctor assigned |
-| Patients | Who are my patients? | One row per patient: doctor, nurses, insurer, drug, pharmacy, adherence risk | One row per patient: doctor, nurses, insurer, readmission risk, last discharge |
-| Patient detail *(on click; hospital admins give a reason)* | Everything about one patient | BMI and HbA1c over time, drug and refill history, pharmacy, risk drivers | Vitals, diagnoses, discharge details, risk drivers, care actions and notes |
-| Staff | Who looks after whom? | Doctors and nurses with patient counts and non-adherent counts | Doctors and nurses with patient counts, high-risk counts and open alerts |
+---
 
-GLP-1 also keeps its cost pages (Budget Simulator, Cost of Inaction), which the hospital admin sees for their own hospital.
+## 5. Step 1 — Roles become real
 
-**User Management is built once.** Accounts are shared by both apps, so the API lives once in the shared auth service. Both apps' Settings pages show the same User Management section with email, role, hospital, signup date and status. It has add, approve, change-role and CSV import actions. Hospital admins see only their own hospital there; the superadmin sees every hospital and can also create hospitals.
+**Before:** anyone signing up typed their own role ("Doctor", even "superadmin")
+and their own hospital name, and nothing checked either. The Readmissions API
+only checked a shared key that ships inside the public website, and most GLP-1
+routes checked nothing at all. GLP-1 had a role toggle anyone could flip.
 
-Doctors and nurses see the same Patients and Patient detail pages, filtered to their own patients and without the reason prompt. The Overview, Staff and User Management pages are hidden for them, and their API calls are refused.
+**What changed:**
 
-## **Scope: keep, add, cut**
+1. **A fixed list of seven roles** (section 2). The database rejects any other
+   value once `scripts/migrate_user_roles.py` has run.
+2. **Every account has a status**, `pending` or `active`, and a `hospital_id`.
+   Pending accounts can sign in, but see a "waiting for approval" screen and get
+   no data.
+3. **Every API route requires an active, signed-in user** — all of Readmissions'
+   routes and all of GLP-1's. A route added later is covered automatically: the
+   check is attached to the whole app, not route by route.
+4. **The account is re-read on every request**, so changes apply at once (see
+   section 1). The sign-in token's contents are for display only.
+5. **Old accounts are not trusted.** An account created before this has whatever
+   role its owner typed, so it is treated as an active case manager with no
+   hospital until an admin places it.
+6. **The first superadmin** is created with `scripts/create_superadmin.py`, run
+   by someone with database access. No web page can create or grant superadmin.
+7. **GLP-1's role toggle is gone.** The role shows read-only. The "Clinician"
+   badge became "Care team".
 
-Sir's list is the right core. Two items shrink to data fields, and a few small things are added.
+---
 
-| Item | Decision | Why |
-| ----- | ----- | ----- |
-| Patients | Keep | The centre of both dashboards |
-| Insurers | Keep, as a patient field | The hospital needs to see who pays for each patient. Insurer logins wait for a later phase. |
-| Vitals and drugs | Keep, in the on-click detail layer for hospital admins | Already in the data (BMI, HbA1c, drug, drug generation) |
-| Doctors and their patients | Keep | The doctor registry and `assigned_doctor_id` already exist |
-| Nurses/caretakers and their patients | Keep, with caretakers treated as nurses | Decided for now; may change later |
-| Pharmacy | Cut to a field | Store the pharmacy name and refill dates on the patient. No pharmacy logins or pharmacy pages. |
-| Superadmin role | Add | We oversee and can fix anything, across all hospitals |
-| Hospital admin role | Add | Each hospital manages its own staff and patients |
-| Staff and patient CSV import | Add | Lets hospitals, or we on their behalf, onboard a whole list at once |
-| Access log \+ reason prompt | Add (small) | Records who opened which patient's details and why. Health data normally needs this. |
-| Departments, multi-hospital staff, several roles per person | Cut | One role per account; a doctor-admin uses two accounts |
+## 6. Step 2 — Hospitals, insurers and User Management
 
-## **Demo data split**
+**What changed:**
 
-The current datasets don't belong to any hospital, so for testing we split them across three made-up hospitals:
+1. **Hospitals and insurers are records** (`shared_identity.hospitals` and
+   `shared_identity.insurers`). Only the superadmin creates them. A hospital's id
+   is made from its name, e.g. "Demo Hospital" → `demo-hospital`.
+2. **User Management** — one section, shown in GLP-1's Settings page and on
+   Readmissions' "User Management" page. The same accounts work in both apps.
+   - The **superadmin** creates hospitals, insurers and hospital admins, and can
+     manage every account except other superadmins.
+   - A **hospital admin** adds and manages doctors, nurses, case managers and
+     patients, only in their own hospital. They cannot create another hospital
+     admin, and cannot see other hospitals' accounts at all.
+3. **Temporary passwords.** A person added by an admin gets a 12-character
+   temporary password, shown to the admin once. At first sign-in the Portal makes
+   them choose their own; until they do, both apps refuse them data.
+4. **CSV import.** Many staff at once: a file with the columns `email,name,role`
+   (up to 1,000 rows). Each row succeeds or fails on its own.
+5. **Suspend** puts an account back to pending, which cuts it off immediately.
 
-| Test hospital | GLP-1 patients | Readmissions patients | Staff |
-| ----- | ----- | ----- | ----- |
-| Demo Hospital A | Every third patient, starting with the 1st | Every third patient, starting with the 1st | 1 hospital\_admin, 2–3 doctors, 2 nurses, 1 case\_manager |
-| Demo Hospital B | Every third patient, starting with the 2nd | Every third patient, starting with the 2nd | Same |
-| Demo Hospital C | Every third patient, starting with the 3rd | Every third patient, starting with the 3rd | Same |
+---
 
-* The split goes by patient ID, so it's repeatable: re-running the seed script gives the same result.  
-* Existing doctors in the Readmissions registry are shared out across the three hospitals, and their current patient assignments are kept where the hospital matches.  
-* The test that matters: sign in as Hospital A's admin, doctor and nurse in turn, and confirm that no Hospital B or C patient ever appears, whether through a page, the API or the chatbot.
+## 7. Step 3 — Every patient belongs to a hospital
 
-Real hospitals never use this split. Their data comes in through the onboarding steps above.
+**What changed:**
 
-## **Build order**
+1. **Each patient has an ownership record** saying which hospital they belong
+   to, who their insurer is, their doctor, their nurses, and (for patient
+   accounts) which login is theirs.
+   - Readmissions keeps it on each patient's `care_actions` record.
+   - GLP-1 keeps it in a `patient_access` collection, one per patient (plus the
+     patient's pharmacy).
+   - Both survive the data being reloaded.
+2. **Every patient API is filtered** to the patients the person may see
+   (section 4, first row). Asking for someone else's patient returns
+   **"not found"** — the same answer as for a patient that does not exist, so
+   nobody can find out which patients another hospital has.
+3. **Headline numbers are the caller's own.** Summaries, counts and cost figures
+   are worked out from the caller's patients, not the whole population.
+4. **Both chatbots are scoped the same way**, and a chatbot conversation belongs
+   to the account that started it.
+5. **GLP-1 cost and ROI screens** are for the superadmin and insurers only. The
+   payer pays for the GLP-1 drug, not the hospital, so a hospital admin sees
+   patients, adherence and risk but no drug spend, budget or ROI.
+6. **The seed script** `Readmissions/scripts/seed_hospital.py` puts the demo data
+   into one hospital, sets insurers from the data, and can create demo accounts
+   with assignments (section 11).
 
-There are six steps, and each one is shippable on its own. Steps 1 and 2 are Talha's ticket, widened for hospitals. Everything after them depends on those two.
+---
 
-1. **Roles become real** (Talha's ticket, after FT-4 merges)  
-   * Fixed role list: superadmin, hospital\_admin, doctor, nurse, case\_manager  
-   * A script creates the first superadmin account for our team  
-   * Self-signups get case\_manager with status `pending`. Existing accounts are backfilled to case\_manager with status `active`.  
-   * Role, status and hospital come back on login, signup and `/auth/me`, and in the token  
-   * Remove the GLP-1 role toggle from the sidebar and Settings. Settings shows your role read-only.  
-   * Use `case_manager` in code everywhere in place of `clinician`, and rename the "Clinician" badge to "Care team"  
-2. **Hospitals become real**  
-   * A `hospitals` collection with id and name. Only the superadmin can create a hospital and its first hospital\_admin.  
-   * User Management API in the shared auth service: add a user, approve, change role, and import a CSV of staff  
-   * The User Management section in both apps' Settings, scoped to one hospital for hospital\_admin and to all hospitals for superadmin  
-3. **Data belongs to a hospital**  
-   * Add `hospital_id` to patients, doctors and nurses  
-   * Patient CSV upload and manual entry stamp the uploader's hospital on every new patient; the superadmin picks the hospital when uploading for one  
-   * Seed script: the three demo hospitals and the patient split above  
-   * Link each doctor record to a login account; add patient-to-nurse assignment next to `assigned_doctor_id`  
-   * Every patient API filters by the hospital in the token. The superadmin skips the filter. A pending account gets nothing.  
-4. **Hospital dashboards in GLP-1 and Readmissions**: Overview, Patients, Patient detail and Staff in each app, with the reason prompt and access log for hospital admins and a hospital picker for the superadmin  
-5. **Own-patients rule and role gating** (FT-6)  
-   * Doctors and nurses get only their assigned patients, from every API  
-   * Nav items for other roles are hidden, not dimmed  
-6. **Later**  
-   * Chatbot reads the role and hospital from the token, not from the request (FT-7)  
-   * Insurer organisations and the insurer role  
-   * Deactivate and delete users
+## 8. Step 4 — The hospital dashboards
 
-flowchart LR  
-  A\["FT-4 user record"\] \--\> B\["1 Roles real"\]  
-  B \--\> C\["2 Hospitals real"\]  
-  C \--\> D\["3 Data per hospital"\]  
-  D \--\> E\["4 Dashboards in both apps"\]  
-  D \--\> F\["5 FT-6 own patients"\]  
-  F \--\> G\["6 FT-7, insurers"\]
+**What changed, page by page (both apps):**
 
-Steps 4 and 5 can run in parallel once step 3 lands.
+1. **Overview** — "How is my hospital doing?"
+   - Readmissions: patients, high risk (and the change since last batch), needs
+     attention, open alerts, patients with no doctor or no nurse, recent
+     discharges, insurer mix.
+   - GLP-1: patients on therapy, adherent vs not, high dropout risk, drug mix,
+     insurer mix, and — for cost roles only — drug spend. The segment charts
+     below it are the existing Executive Summary.
+   - Every figure you can act on opens the Patients list already filtered.
+   - Doctors and nurses have no Overview; they start on their Patients list.
+   - **Reeha's change:** in GLP-1 the hospital summary box is hidden for the
+     superadmin, because Talha's dashboard below already covers it. Hospital
+     admins, case managers and insurers still see it.
+2. **Patients** — one row per patient with their doctor, nurses and insurer.
+   Admins and case managers can tick patients and **assign a care team** in one
+   go. The doctor or nurse sees their new patients on their next click.
+3. **Patient detail** — for hospital admins and insurers, the overview first,
+   then the **reason prompt** (section 3). The reason is logged once per patient
+   per sign-in; signing in again asks again.
+4. **Staff** — every doctor and nurse with how many patients they have and how
+   many of those are high risk, plus open alerts (Readmissions) or non-adherent
+   patients (GLP-1). Click a person to see
+   their patients. In Readmissions, a doctor must be registered for alerts (with
+   a specialty) before patients can be assigned to them; admins do that with a
+   button on this page.
+5. **Access log** — a section at the bottom of User Management: who opened which
+   patient, in which app, when, and why. A hospital admin sees their hospital's
+   log (including our team's and insurers' views of their patients); the
+   superadmin sees everything.
+6. **Hospital picker** — the superadmin can switch to one hospital and see
+   exactly what its admin sees, or "All hospitals". Nobody else can use it.
+7. **No more made-up numbers in GLP-1.** Pages used to show sample data while
+   loading or after an error; now they show a loading state or the real error.
 
-## **Decisions and open questions**
+---
 
-**Decided (25 Sep):**
+## 9. Step 5 — Choosing a role at sign-up
 
-* \[x\] Hospital dashboards live inside GLP-1 and Readmissions, not as a third app  
-* \[x\] A superadmin role for our team only, which oversees everything and can bypass every restriction  
-* \[x\] hospital\_admin manages its own hospital's staff and patients, or sends lists to the superadmin to add  
-* \[x\] We create hospitals. Staff and patients come in manually, by CSV, or by a list sent to us.  
-* \[x\] Hospital admins get counts and lists by default, with clinical detail on click (reason prompt \+ access log)  
-* \[x\] Caretakers are treated as nurses for now  
-* \[x\] Self-signups wait as pending until approved  
-* \[x\] `case_manager` in code everywhere; the badge reads "Care team"  
-* \[x\] One role per account; a doctor who is also an admin uses two accounts  
-* \[x\] Each hospital sees only its own patients; demo data is split across three test hospitals
+**Why:** Reeha suggested it: when people pick their role at sign-up, the admin
+can see at a glance who is waiting to join as what, which makes approving them
+easier. It is safe because choosing a role is only a **request**.
 
-**Still open:**
+**What changed:**
 
-* \[ \] **Team:** Confirm the role list and the superadmin / hospital\_admin split replace the `admin` in his ticket  
-* \[ \] **Team:** Is the reason list right (care coordination, complaint / incident review, audit, billing query)?  
-* \[ \] **Team:** Do superadmin actions get logged? (Recommended: yes.)  
-* \[ \] **Team:** New staff logins: email invite link, or a temporary password the admin hands over?
+1. **The Portal's "Create account" form has an "I am joining as" dropdown**:
+   Doctor, Nurse or caretaker, Case manager, Hospital administrator, Insurer,
+   Patient. Picking one shows a one-line explanation of that role underneath, so
+   people choose correctly. Superadmin is never offered, and the server refuses
+   it even if someone sends it directly.
+2. **The account is still pending**, with no hospital, and sees nothing until an
+   admin approves it. Asking to be a hospital admin grants nothing.
+3. **The waiting screen** now says "You asked to join as: Doctor", for example.
+4. **User Management can filter accounts by role.** A pending sign-up shows
+   "Signed up as Doctor" under its email, and its role picker already shows the
+   role they asked for.
+5. **The admin still decides.** When approving, they can keep the requested role
+   or change it (for example someone who picked "Hospital administrator" but is
+   really a case manager). What they originally asked for is kept on the account.
+6. **The sign-up never asks for a hospital.** The admin assigns it on approval,
+   so typing a hospital's name is never enough to see its patients.
 
+---
+
+## 10. How a new person gets in, end to end
+
+### A. An admin adds them (recommended for staff)
+
+1. The hospital admin (or superadmin) opens User Management → **Add a person**,
+   enters the email, name and role.
+2. The screen shows a **temporary password** once. The admin passes it on
+   privately.
+3. The person signs in on the Portal, is asked to **set their own password**,
+   and then sees their apps.
+
+### B. They sign up themselves
+
+1. On the Portal they choose **Create one**, enter email and password, and pick
+   **I am joining as**.
+2. They land on **"Your account is waiting for approval"**.
+3. Approval:
+   - **Superadmin:** User Management → filter **Pending** (and a role if useful)
+     → choose the hospital (or insurer) → **Approve**. The role can be changed
+     first.
+   - **Hospital admin:** User Management → **Add a person** with the same email
+     and the role they should have. Because the email belongs to a pending
+     sign-up, this approves it into the admin's hospital instead of creating a
+     second account. (Hospital admins do not see a list of all sign-ups: that
+     would show them people who signed up for other hospitals.)
+4. The person clicks **Check again** (or signs in again) and sees their apps. They
+   keep the password they chose.
+
+---
+
+## 11. Demo data and demo accounts
+
+- Readmissions uses MIMIC patients; GLP-1 uses its existing dataset. Both are
+  placed in one demo hospital by `seed_hospital.py`.
+- Running the seed with `--with-demo-accounts` creates these logins, all with the
+  password typed when the seed was run:
+
+| Account | Role |
+|---|---|
+| `admin@<hospital-id>.test` | Hospital admin |
+| `casemanager@<hospital-id>.test` | Case manager |
+| `nurse1@…`, `nurse2@…` | Nurses (patients split between them) |
+| `cardiology@…`, `pulmonology@…`, `endocrinology@…`, `medicine@…` | Doctors (patients assigned by condition) |
+| `claims@medicare.test`, `claims@medicaid.test`, `claims@private.test`, `claims@other.test` | Insurers |
+| `patient1@…`, `patient2@…` | Patients, each linked to one record |
+
+Demo accounts share one known password. Change it, or remove them, before anyone
+outside the team gets a link — real MIMIC data sits behind them.
+
+---
+
+## 12. Where things live in the code
+
+| Piece | File |
+|---|---|
+| Roles, statuses, sign-up, sign-in, tokens | `Readmissions/api/auth.py` |
+| User Management rules | `Readmissions/api/user_admin.py` |
+| Who sees which patients (Readmissions) | `Readmissions/api/access.py` |
+| Who sees which patients (GLP-1) | `GLP1/Backend/core/access.py` |
+| Overview, Staff, care-team assignment | `Readmissions/api/hospital.py`, `GLP1/Backend/core/hospital.py` |
+| Access log | `Readmissions/api/access_log.py`, `GLP1/Backend/core/access_log.py` |
+| GLP-1's check of the signed-in user | `GLP1/Backend/core/security.py` |
+| Portal (sign-in, sign-up, waiting screen) | `Portal/index.html` |
+| User Management screen (identical copy in both apps) | `*/src/components/shared/UserManagement.jsx` |
+| Readmissions pages | `Readmissions/frontend/src/pages/Overview.jsx`, `Patients.jsx`, `Staff.jsx`, `PatientDetail.jsx` |
+| GLP-1 pages | `GLP1/Frontend/src/pages/ExecutiveSummary.jsx` (Overview), `PatientRiskPanel.jsx` (Patients), `Staff.jsx`, `PatientDetail.jsx` |
+| Which menu items each role gets | `Readmissions/frontend/src/roles.js`, `GLP1/Frontend/src/context/RoleContext.jsx` |
+| Operator scripts | `Readmissions/scripts/create_superadmin.py`, `migrate_user_roles.py`, `seed_hospital.py` |
+| Tests for all of the above | `Readmissions/tests/units/test_auth.py`, `test_user_admin.py`, `test_isolation.py`, `test_hospital_pages.py`; `GLP1/Backend/tests/test_isolation.py`, `test_hospital_pages.py` |
+
+---
+
+## 13. What is not built yet
+
+| Item | Status |
+|---|---|
+| Deactivate and delete accounts | "Suspend" (back to pending) exists; a proper deactivate and a superadmin-only delete do not. |
+| Email invites | Admins hand over temporary passwords for now; invites need an email service. |
+| Hospital admins seeing sign-ups for their hospital | Would need the sign-up to name a hospital, which also means showing the list of hospitals publicly. |
+| Forecast sweep per hospital | Superadmin only, because it currently scans every hospital at once. |
+| BMI and HbA1c over time (GLP-1) | Needs repeated measurements; the data has one snapshot per patient. |
+
+Open questions for the team:
+
+- Is the reason list right (care coordination, complaint / incident review,
+  audit, billing query)?
+- Should case managers stay as they are, or change (section 3, options A–D)?
+- Email invites instead of temporary passwords, once there is an email service?

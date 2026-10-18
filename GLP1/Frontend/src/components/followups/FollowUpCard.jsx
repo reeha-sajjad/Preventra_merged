@@ -89,7 +89,9 @@ export default function FollowUpCard({ patientIdx }) {
             {active.overdue && <span className="text-[11px] font-semibold" style={{ color: '#C62828' }}>Open {active.days_open} days</span>}
           </div>
           <p className="text-sm text-gray-700 mt-2">
-            <b>{active.requested_by.name}</b> asked for a follow-up {ago(active.requested_at)}.
+            <b>{active.requested_by.pharmacy || active.requested_by.name}</b>
+            {active.requested_by.role === 'pharmacy' ? ' reported a refill problem ' : ' asked for a follow-up '}
+            {ago(active.requested_at)}.
           </p>
           {active.note && <p className="text-sm text-gray-600 mt-1">&ldquo;{active.note}&rdquo;</p>}
           {active.notes.length > 0 && (

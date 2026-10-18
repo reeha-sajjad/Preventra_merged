@@ -11,7 +11,8 @@ const KINDS = {
   followup_handed: { icon: Forward, color: '#1B4F8A', label: () => 'handed to you', text: (i) =>
     `${i.handed_by} handed you ${i.urgency === 'urgent' ? 'an urgent' : 'a'} follow-up${i.overdue ? ' · overdue' : ''}` },
   followup_new: { icon: CalendarClock, color: '#C62828', label: (n) => `follow-up request${n === 1 ? '' : 's'}`, text: (i) =>
-    `${i.urgency === 'urgent' ? 'Urgent f' : 'F'}ollow-up requested by ${i.requested_by}${i.overdue ? ' · overdue' : ''}` },
+    (i.problem_label ? `${i.requested_by}: ${i.problem_label}` :
+      `${i.urgency === 'urgent' ? 'Urgent f' : 'F'}ollow-up requested by ${i.requested_by}`) + (i.overdue ? ' · overdue' : '') },
   followup_done: { icon: CalendarCheck, color: '#2E7D32', label: (n) => `follow-up${n === 1 ? '' : 's'} done`, text: (i) =>
     `Follow-up done · ${i.followup?.outcome_label} (${i.followup?.done_by})` },
   risk_up:    { icon: TrendingUp,    color: '#C62828', text: (i) =>

@@ -165,6 +165,8 @@ export const api = {
   getFollowUpHandlers:  ()       => get("/api/followups/handlers"),
   releaseFollowUp:      (fid)    => post(`/api/followups/${fid}/release`, {}),
   handOverFollowUp:     (fid, toUserId) => post(`/api/followups/${fid}/hand-over`, { to_user_id: toUserId }),
+  getPharmacyHome:      () => get('/api/pharmacy/home'),
+  reportPharmacyProblem: (idx, body) => post(`/api/patients/${idx}/pharmacy-report`, body),
   getCaseManagerToday:  (mine = false) => get(`/api/case-manager/today${mine ? "?mine=1" : ""}`),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 

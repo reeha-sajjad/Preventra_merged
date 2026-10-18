@@ -10,6 +10,7 @@ import { useAppLoader } from './hooks/useAppLoader';
 import ExecutiveSummary from './pages/ExecutiveSummary';
 import CareHome from './pages/CareHome';
 import CaseManagerHome from './pages/CaseManagerHome';
+import PharmacyHome from './pages/PharmacyHome';
 import PatientRiskPanel from './pages/PatientRiskPanel';
 import PatientDetail from './pages/PatientDetail';
 import SegmentExplorer from './pages/SegmentExplorer';
@@ -46,7 +47,7 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager } = useRole();
+  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy } = useRole();
 
   if (isPatient) {
     return (
@@ -62,13 +63,15 @@ function RoleRoutes() {
   return (
     <>
       <Routes>
-        <Route path="/"             element={isCaseManager ? <CaseManagerHome />
+        <Route path="/"             element={isPharmacy ? <PharmacyHome />
+                                             : isCaseManager ? <CaseManagerHome />
                                              : hasOverview ? <ExecutiveSummary />
                                              : isCareTeam ? <CareHome />
                                              : <Navigate to="/patients" replace />} />
         {/* Case managers' home is "Today"; their hospital Overview lives here. */}
         {isCaseManager && <Route path="/overview" element={<ExecutiveSummary />} />}
-        <Route path="/patients"     element={<PatientRiskPanel />} />
+        {/* A pharmacy's patient list is its home page. */}
+        <Route path="/patients"     element={isPharmacy ? <Navigate to="/" replace /> : <PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}
         {handlesFollowUps && <Route path="/follow-ups" element={<FollowUps />} />}
         <Route path="/patients/:id" element={<PatientDetail />} />

@@ -56,6 +56,9 @@ export function RoleProvider({ children }) {
       isCareTeam:   CARE_TEAM_ROLES.includes(role),
       handlesFollowUps: FOLLOW_UP_ROLES.includes(role),
       isCaseManager: role === 'case_manager',
+      // A pharmacy's staff: their home is the pharmacy page (pages/PharmacyHome.jsx).
+      isPharmacy: role === 'pharmacy',
+      notPharmacy: role !== 'pharmacy',
       // The hospital Overview as the home page: everyone with an Overview except
       // case managers, whose home is "Today" (the Overview moves to /overview).
       hasOverviewHome: OVERVIEW_ROLES.includes(role) && role !== 'case_manager',

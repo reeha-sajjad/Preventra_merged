@@ -90,11 +90,14 @@ AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON
 # reason and a note, for EMERGENCY_HOURS. Logged under its own reason, and
 # reviewed afterwards by the hospital admin (45 CFR 164.312(a)(2)(ii)).
 EMERGENCY_REASON = "emergency_access"
+# A pharmacy opening one of its patients (core/pharmacy.py): logged, never asked.
+DISPENSING_REASON = "dispensing"
 EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
                   COORDINATION_REASON: "Care coordination (case manager)",
-                  EMERGENCY_REASON: "Emergency access (break the glass)"}
+                  EMERGENCY_REASON: "Emergency access (break the glass)",
+                  DISPENSING_REASON: "Dispensing (pharmacy)"}
 
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}

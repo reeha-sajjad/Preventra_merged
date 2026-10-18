@@ -20,7 +20,7 @@ export function usePatientRecord(id) {
     api.getPatientSummary(Number(id))
       .then((summary) => {
         if (!live) return null;
-        if (summary.detail_access === "reason_required") {
+        if (summary.detail_access === "reason_required" || summary.detail_access === "overview_only") {
           setState({ summary, data: null, loading: false, error: null });
           return null;
         }
