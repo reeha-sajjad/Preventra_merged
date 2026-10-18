@@ -129,11 +129,14 @@ AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON
 # reason and a note, for 24 hours. Logged under its own reason and reviewed by
 # the hospital admin (45 CFR 164.312(a)(2)(ii)). Same as GLP-1's.
 EMERGENCY_REASON = "emergency_access"
+# A pharmacy opening one of its patients (api/pharmacy.py): logged, never asked.
+DISPENSING_REASON = "dispensing"
 EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
                   COORDINATION_REASON: "Care coordination (case manager)",
-                  EMERGENCY_REASON: "Emergency access (break the glass)"}
+                  EMERGENCY_REASON: "Emergency access (break the glass)",
+                  DISPENSING_REASON: "Dispensing (pharmacy)"}
 
 # The 403 a reason-role gets for the clinical layer of a patient it has not
 # opened this session. A structured detail so the frontends can tell it from

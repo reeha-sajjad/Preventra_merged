@@ -266,9 +266,13 @@ def me(db, user: dict, scope: Optional[list]) -> dict:
     if user.get("insurer_id"):
         doc = _identity(db)["insurers"].find_one({"_id": user["insurer_id"]})
         insurer = {"id": user["insurer_id"], "name": (doc or {}).get("name", user["insurer_id"])}
+    pharmacy = None
+    if user.get("pharmacy_id"):
+        doc = _identity(db)["pharmacies"].find_one({"_id": user["pharmacy_id"]})
+        pharmacy = {"id": user["pharmacy_id"], "name": (doc or {}).get("name", user["pharmacy_id"])}
     return {"id": str(user["_id"]), "name": user.get("name") or "", "email": user.get("email", ""),
             "role": user["role"], "hospital": _hospital_name(db, user.get("hospital_id")),
-            "insurer": insurer,
+            "insurer": insurer, "pharmacy": pharmacy,
             "patients": None if scope is None else len({str(p) for p in scope})}
 
 

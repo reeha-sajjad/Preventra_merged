@@ -32,6 +32,9 @@ export const COST_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'i
 // Doctors and nurses: their own patients are their home page (GLP-1's
 // CARE_TEAM_ROLES in RoleContext.jsx).
 export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];
+// A pharmacy's staff: their patient list is their own page (pages/PharmacyHome.jsx);
+// the backend shows them the overview only (api/access.py OVERVIEW_ONLY_ROLES).
+export const PHARMACY_ROLES = ['pharmacy'];
 
 export const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Nurse',

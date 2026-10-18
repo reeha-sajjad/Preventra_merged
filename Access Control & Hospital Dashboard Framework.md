@@ -165,13 +165,16 @@ hospital picker.
 who fill at its pharmacy, in any hospital, in both apps; the patients list at the
 overview layer only, and **never** the clinical layer — no reason opens it
 (`OVERVIEW_ONLY_ROLES` in both `access.py` files; 45 CFR 164.502(b), minimum
-necessary). No hospital pages, costs, notes, assignment or alerts. In GLP-1 a
-pharmacy's home page lists its patients with the drug, refill reliability, hospital
-and case manager, and it can **report a refill problem** (missed pickup, prior
-authorisation, out of stock, side effects, cost): that becomes a follow-up for the
-patient's case manager, or a note on the one already open. The pharmacy sees
-the status of its own reports, never the care team's notes. Opening a patient
-is logged as "Dispensing (pharmacy)". Placed in its
+necessary). No hospital pages, costs, notes, assignment or alerts. In both apps
+a pharmacy's home page lists its patients — GLP-1: drug, refill reliability,
+hospital and case manager; Readmissions: readmission risk, discharge date and the
+latest weekly refill from the pharmacy feed — and it can **report a refill
+problem** (missed pickup, prior authorisation, out of stock, side effects, cost).
+That becomes a follow-up for the patient's case manager (Readmissions: the
+hospital's case managers), or a note on the one already open. The pharmacy sees
+the status of its own reports, never the care team's notes. Opening a patient is
+logged as "Dispensing (pharmacy)", and such a log entry never opens the clinical
+layer. Placed in its
 pharmacy by the superadmin, like insurer staff. Patients are linked to a pharmacy
 by `pharmacy_id` on their ownership record (`Readmissions/scripts/seed_pharmacies.py`
 for the demo data).

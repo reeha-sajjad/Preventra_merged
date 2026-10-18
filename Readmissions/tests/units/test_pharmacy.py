@@ -76,3 +76,82 @@ def test_pharmacy_staff_can_ask_to_join_and_wait(main, world):
     assert ops.patch(f"/auth/admin/users/{uid}", json={"status": "active"}).status_code == 422
     done = ops.patch(f"/auth/admin/users/{uid}", json={"status": "active", "pharmacy_id": "bay"})
     assert done.status_code == 200 and done.json()["pharmacy_id"] == "bay"
+
+# ------------------------------------------------- step 3: home and reports
+from api import followups  # noqa: E402
+
+
+def report(main, world, pid=A2, problem="missed_pickup", urgency="routine", note="Didn't collect on Monday"):
+    return rx(main, world).post(f"/api/patients/{pid}/pharmacy-report",
+                                json={"problem": problem, "urgency": urgency, "note": note})
+
+
+def weeks(world, pid, statuses):
+    world["db"]["weekly_monitoring"].insert_many([
+        {"patient_id": pid, "week_number": n, "observed": True, "risk_score": 50, "risk_band": "Low",
+         "monitoring": {"refill_status": s, "adherence_pct": 80}} for n, s in enumerate(statuses, start=2)])
+
+
+def test_the_pharmacy_home_lists_its_patients_with_their_refills(main, world):
+    weeks(world, A2, ["collected", "missed", "missed"])
+    body = rx(main, world).get("/api/pharmacy/home").json()
+    rows = {p["id"]: p for p in body["patients"]}
+    assert set(rows) == {A2, B2}
+    assert rows[A2]["refill_latest"] == "missed" and rows[A2]["missed_recent"] == 2
+    assert body["patients"][0]["id"] == A2                       # missed refills first
+    assert not set(rows[A2]) & access.CLINICAL_FIELDS
+    assert body["stats"]["missed"] == 1 and body["problems"]
+    for email in ("cm@a.test", "doc.a@a.test", "admin@a.test", "claims@acme.test"):
+        assert as_user(main, world, email).get("/api/pharmacy/home").status_code == 403
+
+
+def test_opening_a_patient_shows_refills_and_is_logged(main, world):
+    weeks(world, A2, ["late"])
+    c = rx(main, world)
+    body = c.get(f"/api/patients/{A2}/summary").json()
+    assert body["refill_latest"] == "late"
+    c.get(f"/api/patients/{A2}/summary")
+    from api import access_log
+    entries = list(access_log.collection(world["db"]).find({"email": "rx@bay.test"}))
+    assert len(entries) == 1 and entries[0]["reason"] == "dispensing"
+    # The log entry never opens the clinical layer.
+    assert c.get(f"/api/patients/{A2}").status_code == 403
+    assert "refill_latest" not in as_user(main, world, "admin@a.test").get(f"/api/patients/{A2}/summary").json()
+
+
+def test_a_report_becomes_a_request_for_the_case_managers(main, world):
+    r = report(main, world, urgency="urgent")
+    assert r.status_code == 201 and r.json()["added_to_open"] is False
+    doc = world["db"][followups.COLLECTION].find_one({"patient_id": A2})
+    assert doc["status"] == "open" and doc["requested_by"]["role"] == "pharmacy" and doc["urgency"] == "urgent"
+    listed = as_user(main, world, "cm@a.test").get("/api/followups").json()["items"]
+    item = next(i for i in listed if i["patient_id"] == A2)
+    assert item["pharmacy_reports"][0]["problem_label"] == "Missed a refill pickup"
+    assert "by" not in item["pharmacy_reports"][0]
+    home = rx(main, world).get("/api/pharmacy/home").json()
+    assert home["stats"]["open_reports"] == 1 and home["reports"][0]["by_us"]
+
+
+def test_with_a_request_already_open_the_report_is_added_and_notes_stay_hidden(main, world):
+    doctor = as_user(main, world, "doc.a@a.test")
+    assert doctor.post(f"/api/patients/{A2}/followup",
+                       json={"urgency": "routine", "note": "Breathless on stairs"}).status_code == 201
+    r = report(main, world, problem="side_effects", note="")
+    assert r.status_code == 201 and r.json()["added_to_open"] is True
+    assert world["db"][followups.COLLECTION].count_documents({"patient_id": A2}) == 1
+    seen = rx(main, world).get(f"/api/patients/{A2}/followup").json()
+    assert "Breathless" not in str(seen) and "Breathless" not in str(r.json())
+    fid = str(world["db"][followups.COLLECTION].find_one({"patient_id": A2})["_id"])
+    assert rx(main, world).post(f"/api/followups/{fid}/note", json={"text": "x"}).status_code == 403
+
+
+def test_a_report_needs_a_real_problem_and_a_patient_of_ours(main, world):
+    assert report(main, world, problem="nonsense").status_code == 422
+    assert report(main, world, problem="other", note="").status_code == 422
+    assert report(main, world, pid=A1).status_code == 404
+    assert as_user(main, world, "doc.a@a.test").post(f"/api/patients/{A2}/pharmacy-report",
+                                                     json={"problem": "missed_pickup"}).status_code == 403
+
+
+def test_settings_names_the_pharmacy(main, world):
+    assert rx(main, world).get("/api/me").json()["pharmacy"]["id"] == "bay"

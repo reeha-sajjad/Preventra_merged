@@ -29,6 +29,10 @@ Who does what (api/access.py has the role lists):
                            marks it done
     hospital_admin         sees the same list and can step in (take, mark done)
     superadmin             every hospital's, or the one picked
+    pharmacy               reports a refill problem for a patient who fills
+                           there (report); it becomes a request - or a note on
+                           the open one - for the hospital's case managers.
+                           Sees only the status of its own reports, never notes.
 
 Rules:
   * One request at a time per patient, enforced by a unique index on
@@ -53,12 +57,21 @@ from fastapi import HTTPException
 from pymongo import DESCENDING
 from pymongo.errors import DuplicateKeyError
 
-from api import access
+from api import access, auth
 
 COLLECTION = "followups"
 URGENCY = {"urgent": "Urgent - within days", "routine": "Routine - within weeks"}
 OUTCOMES = {"booked": "Booked", "unreachable": "Couldn't reach patient", "not_needed": "Not needed"}
 REQUEST_ROLES = ("doctor", "nurse")
+# What a pharmacy can report about a patient who fills there. Same list as GLP-1's.
+PHARMACY_PROBLEMS = {
+    "missed_pickup":  "Missed a refill pickup",
+    "prior_auth":     "Prior authorisation needed",
+    "out_of_stock":   "Out of stock / supply problem",
+    "side_effects":   "Mentioned side effects at the counter",
+    "cost":           "Said they can't afford it",
+    "other":          "Something else",
+}
 HANDLE_ROLES = ("superadmin", "hospital_admin", "case_manager")
 OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
@@ -159,6 +172,10 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
         "outcome_note": doc.get("outcome_note", ""), "done_by": doc.get("done_by"),
         "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None,
         "risk_at_request": doc.get("risk_at_request"),
+        # Reported by a pharmacy: which problems, so the case manager sees why.
+        "pharmacy_reports": [{**{k: v for k, v in p.items() if k != "by"}, "at": _aware(p["at"]).isoformat(),
+                              "problem_label": PHARMACY_PROBLEMS.get(p["problem"], p["problem"])}
+                             for p in doc.get("pharmacy_reports", [])],
         "overdue": doc["status"] != "done" and now - asked > timedelta(days=OVERDUE_DAYS),
         "days_open": (now - asked).days,
     }
@@ -244,6 +261,12 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
     since = _now() - timedelta(days=SHOW_DONE_DAYS)
     recent = list(_col(db).find({"patient_id": patient_id, "status": "done", "done_at": {"$gte": since}})
                   .sort("done_at", DESCENDING).limit(1))
+    if access.overview_only(user):
+        # A pharmacy: whether someone is on it, never what the care team wrote.
+        return {"active": pharmacy_view(active, user) if active else None,
+                "recent": pharmacy_view(recent[0], user) if recent else None,
+                "can_request": False, "can_handle": False, "can_report": True,
+                "problems": [{"key": k, "label": v} for k, v in PHARMACY_PROBLEMS.items()]}
     return {"active": public(active) if active else None,
             "recent": public(recent[0]) if recent else None,
             "can_request": user["role"] in REQUEST_ROLES and active is None,
@@ -251,6 +274,8 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
 
 
 def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:
+    if access.overview_only(user):
+        raise HTTPException(status_code=403, detail="Pharmacies report a problem instead")
     doc = _load(db, user, scope, followup_id)
     if doc["status"] == "done":
         raise HTTPException(status_code=409, detail="This request is already done")
@@ -262,6 +287,75 @@ def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str)
         "$push": {"notes": {"by": who, "at": now, "text": text},
                   "history": {"action": "note", "by": who, "at": now}}})
     return public(_col(db).find_one({"_id": doc["_id"]}))
+
+
+# --------------------------------------------------------------- pharmacy side
+def pharmacy_name(db, user: dict) -> Optional[str]:
+    if not user.get("pharmacy_id"):
+        return None
+    org = db.client[auth.IDENTITY_DB]["pharmacies"].find_one({"_id": user["pharmacy_id"]}, {"name": 1})
+    return (org or {}).get("name") or user["pharmacy_id"]
+
+
+def pharmacy_view(doc: dict, user: dict) -> dict:
+    """A request as a pharmacy may see it: who is on it and how it ended, and
+    its own reports - not the care team's notes or the doctor's request."""
+    mine = [p for p in doc.get("pharmacy_reports", []) if p.get("pharmacy_id") == user.get("pharmacy_id")]
+    return {"id": str(doc["_id"]), "patient_id": doc["patient_id"], "status": doc["status"],
+            "urgency": doc["urgency"], "requested_at": _aware(doc["requested_at"]).isoformat(),
+            "by_us": bool(mine),
+            "reports": [{"problem": p["problem"], "problem_label": PHARMACY_PROBLEMS.get(p["problem"], p["problem"]),
+                         "at": _aware(p["at"]).isoformat(), "note": p.get("note", "")} for p in mine],
+            "handled_by": (doc.get("taken_by") or {}).get("name"),
+            "outcome_label": OUTCOMES.get(doc.get("outcome")),
+            "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None}
+
+
+def report(db, user: dict, scope: Optional[list], patient_id: str, problem: str,
+           urgency: str, note: Optional[str]) -> dict:
+    """A pharmacy reports a refill problem. A new request for the hospital's case
+    managers - or, if one is already open, added to it, so there is still only
+    one request per patient and nobody phones them twice."""
+    if user["role"] != "pharmacy":
+        raise HTTPException(status_code=403, detail="Pharmacies report refill problems")
+    patient_id = str(patient_id)
+    access.require_patient(scope, patient_id)
+    if problem not in PHARMACY_PROBLEMS:
+        raise HTTPException(status_code=422, detail="Choose what the problem is")
+    if urgency not in URGENCY:
+        raise HTTPException(status_code=422, detail="Choose urgent or routine")
+    note = _clean_note(note)
+    if problem == "other" and len(note) < 5:
+        raise HTTPException(status_code=422, detail="Say briefly what the problem is")
+    ensure_indexes(db)
+    who, now = {**_who(user), "pharmacy": pharmacy_name(db, user)}, _now()
+    entry = {"pharmacy_id": user.get("pharmacy_id"), "pharmacy": who["pharmacy"], "by": who,
+             "problem": problem, "note": note, "at": now}
+    label = PHARMACY_PROBLEMS[problem] + (f" - {note}" if note else "")
+    existing = _col(db).find_one({"active_patient": patient_id})
+    if existing:
+        _col(db).update_one({"_id": existing["_id"]}, {
+            "$push": {"pharmacy_reports": entry,
+                      "notes": {"by": who, "at": now, "text": f"{who['pharmacy'] or who['name']}: {label}"},
+                      "history": {"action": "pharmacy_report", "by": who, "at": now, "problem": problem}},
+            # An urgent report makes a routine request urgent, never the reverse.
+            **({"$set": {"urgency": "urgent"}} if urgency == "urgent" else {})})
+        return {"added_to_open": True, "followup": pharmacy_view(_col(db).find_one({"_id": existing["_id"]}), user)}
+    try:
+        doc = _insert(db, user, patient_id, urgency, label, source="pharmacy")
+    except DuplicateKeyError:                            # opened at the same moment: add to it
+        return report(db, user, scope, patient_id, problem, urgency, note)
+    _col(db).update_one({"_id": doc["_id"]}, {"$set": {"requested_by": who, "pharmacy_reports": [entry]}})
+    return {"added_to_open": False, "followup": pharmacy_view(_col(db).find_one({"_id": doc["_id"]}), user)}
+
+
+def pharmacy_reports(db, user: dict) -> list:
+    """This pharmacy's reports: still open, or finished in the last SHOW_DONE_DAYS."""
+    since = _now() - timedelta(days=SHOW_DONE_DAYS)
+    docs = _col(db).find({"pharmacy_reports.pharmacy_id": user.get("pharmacy_id") or "__none__",
+                          "$or": [{"status": {"$ne": "done"}}, {"done_at": {"$gte": since}}]}) \
+        .sort("requested_at", DESCENDING).limit(200)
+    return [pharmacy_view(d, user) for d in docs]
 
 
 # ------------------------------------------------------- case manager side

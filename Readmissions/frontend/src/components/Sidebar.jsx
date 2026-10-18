@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
-         FlaskConical, Settings, CalendarClock } from 'lucide-react';
+         FlaskConical, Settings, CalendarClock, Pill } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
 import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
-         ROLE_LABELS } from '../roles';
+         PHARMACY_ROLES, ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
 // Below `md` the sidebar is an off-canvas drawer; at `md` and above it is the
@@ -56,7 +56,9 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   ] : [
     ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
     ...(can(MY_PATIENTS_ROLES) ? [{ name: 'My patients', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
-    { name: 'Patients', path: '/patients', icon: <ClipboardList size={20} /> },
+    // A pharmacy's patient list is its home page.
+    ...(can(PHARMACY_ROLES) ? [{ name: 'Pharmacy', path: '/', icon: <Pill size={20} /> }]
+      : [{ name: 'Patients', path: '/patients', icon: <ClipboardList size={20} /> }]),
     ...(can(STAFF_ROLES) ? [{ name: 'Staff', path: '/staff', icon: <UsersRound size={20} /> }] : []),
     ...(can(FOLLOWUP_HANDLE_ROLES)
       ? [{ name: 'Follow-ups', path: '/follow-ups', icon: <CalendarClock size={20} />, badge: waiting }] : []),

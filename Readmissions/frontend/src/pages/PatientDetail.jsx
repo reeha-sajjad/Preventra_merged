@@ -7,6 +7,7 @@ import CareTeamCard from '../components/shared/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
 import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/shared/ClinicalGate';
+import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
@@ -145,7 +146,9 @@ export default function PatientDetail() {
           </div>
         </div>
         <CareTeamCard summary={summary} onChanged={reload} />
-        <FollowUpCard patientId={summary.id} />
+        {/* A pharmacy: the refill facts and "Report a refill problem" instead of the care team's card. */}
+        {summary.detail_access === 'overview_only' ? <PharmacyPatientCard summary={summary} />
+          : <FollowUpCard patientId={summary.id} />}
         <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload}
           overviewOnly={summary.detail_access === 'overview_only'} />
       </div>

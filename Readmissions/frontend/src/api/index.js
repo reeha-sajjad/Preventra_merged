@@ -147,6 +147,10 @@ const RealAPI = {
     apiFetch(`/api/followups/${fid}/take`, { method: 'POST' }).then(followUpsChanged),
   finishFollowUp: (fid, body) =>
     apiFetch(`/api/followups/${fid}/done`, json(body)).then(followUpsChanged),
+  // Pharmacies (api/pharmacy.py): their patients, and refill-problem reports.
+  getPharmacyHome: () => apiFetch('/api/pharmacy/home'),
+  reportPharmacyProblem: (id, body) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/pharmacy-report`, json(body)).then(followUpsChanged),
 
   // ─── Clinician loop ──────────────────────────────────────────────────────
   // Forecast -> alert -> the doctor's inbox -> a recommendation back on the
@@ -443,6 +447,8 @@ export const requestFollowUp     = realOnly(RealAPI.requestFollowUp);
 export const addFollowUpNote     = realOnly(RealAPI.addFollowUpNote);
 export const takeFollowUp        = realOnly(RealAPI.takeFollowUp);
 export const finishFollowUp      = realOnly(RealAPI.finishFollowUp);
+export const getPharmacyHome     = realOnly(RealAPI.getPharmacyHome);
+export const reportPharmacyProblem = realOnly(RealAPI.reportPharmacyProblem);
 export const setCareTeam       = realOnly(RealAPI.setCareTeam);
 export const getPatientSummary = realOnly(RealAPI.getPatientSummary);
 export const openPatient       = realOnly(RealAPI.openPatient);

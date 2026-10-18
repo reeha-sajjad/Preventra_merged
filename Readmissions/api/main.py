@@ -32,6 +32,7 @@ from api import risk_watch
 from api import followups
 from api import ingest
 from api import emergency
+from api import pharmacy
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -447,8 +448,10 @@ def _opened(request: Request) -> set:
     """Patients whose clinical layer a reason role opened this sign-in."""
     if not hasattr(request.state, "opened"):
         user = request.state.user
+        # A pharmacy's "dispensing" log entries never open the clinical layer
+        # (the chatbot reads this set too), so it gets none.
         request.state.opened = (access_log.opened(db, user, access_log.APP, request.state.session)
-                                if access.needs_reason(user) else set())
+                                if access.needs_reason(user) and not access.overview_only(user) else set())
     return request.state.opened
 
 
@@ -2654,6 +2657,28 @@ def finish_followup(followup_id: str, body: FollowUpDone, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Pharmacies - their patients and refill-problem reports (api/pharmacy.py; GLP-1's twin)
+# ---------------------------------------------------------------------------
+class PharmacyReport(BaseModel):
+    problem: str
+    urgency: str = "routine"
+    note: Optional[str] = None
+
+
+@app.get("/api/pharmacy/home")
+def pharmacy_home(request: Request):
+    """The discharged patients who fill at the caller's pharmacy, and its reports."""
+    return pharmacy.home(db, request.state.user, _scope(request))
+
+
+@app.post("/api/patients/{patient_id}/pharmacy-report", status_code=201)
+def pharmacy_report(patient_id: str, body: PharmacyReport, request: Request):
+    """A pharmacy reports a refill problem; the hospital's case managers get it."""
+    return followups.report(db, request.state.user, _scope(request), patient_id,
+                            body.problem, body.urgency, body.note)
+
+
+# ---------------------------------------------------------------------------
 # Emergency access - "break the glass" (api/emergency.py; the same as GLP-1's)
 # ---------------------------------------------------------------------------
 class EmergencyLookup(BaseModel):
@@ -2742,7 +2767,16 @@ def get_patient_summary(patient_id: str, request: Request):
     team = hospital.care_teams(db, [patient_id])[str(patient_id)]
     state = _detail_access(request, patient_id)
     user = request.state.user
+    extra = {}
+    if access.overview_only(user):
+        # A pharmacy: the refill facts its own feed supplies, and the look is logged.
+        extra = pharmacy.refill_facts(db, patient_id)
+        session = request.state.session
+        if not access_log.has_opened(db, user, access_log.APP, patient_id, session):
+            access_log.record(db, user, access_log.APP, patient_id, _patient_hospital(patient_id),
+                              access.DISPENSING_REASON, session)
     return {
+        **extra,
         "id": str(row.pop("patient_id")),
         **row,
         "current_score": row.get("current_score", row.get("risk_score")),

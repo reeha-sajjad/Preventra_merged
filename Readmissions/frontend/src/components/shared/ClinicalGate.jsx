@@ -37,7 +37,7 @@ export default function ClinicalGate({ patientId, reasons = [], onOpened, compac
         <div>
           <h3 className="font-semibold text-ns-navy">Clinical details are not shared with pharmacies</h3>
           <p className="text-sm text-gray-600 mt-0.5">
-            You see this patient&apos;s risk, care team and case manager. Diagnoses, risk drivers and
+            You see this patient&apos;s risk, care team and refills. Diagnoses, risk drivers and
             notes stay with the hospital&apos;s care team.
           </p>
         </div>
