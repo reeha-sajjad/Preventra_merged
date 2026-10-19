@@ -172,6 +172,14 @@ export const api = {
   getMyHome:            () => get('/api/my-home'),
   /** { reason, note? } - the patient asks their case manager to get in touch */
   askCaseManager:       (body) => post('/api/my-home/ask', body),
+  // Zoe, the patient's reminders - Backend/core/zoe.py
+  getZoe:               () => get('/api/zoe'),
+  /** { time: 'HH:MM', day?: 0-6 (0 = Monday), form?: 'weekly' | 'daily' } */
+  setZoeDose:           (body) => post('/api/zoe/dose', body),
+  clearZoeDose:         () => del('/api/zoe/dose'),
+  /** { kind, date: 'YYYY-MM-DD', time?, note? } */
+  addZoeAppointment:    (body) => post('/api/zoe/appointments', body),
+  removeZoeAppointment: (id) => del(`/api/zoe/appointments/${id}`),
   getCaseManagerToday:  (mine = false) => get(`/api/case-manager/today${mine ? "?mine=1" : ""}`),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 

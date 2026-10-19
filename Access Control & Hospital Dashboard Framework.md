@@ -192,6 +192,10 @@ notes, the model's internal numbers or costs. They can **ask their case manager
 to get in touch**, choosing a reason; that becomes a follow-up (or a note on the
 open one), signed "The patient" on staff screens — never their login. They see
 whether someone is on it and how it ended, not the notes.
+**Zoe**, on the same page, is the patient's own reminders: when they take their
+medicine and appointments they add. It is fixed rules, not an AI, and nothing is
+sent outside the app (no text, email or push). Only the patient can see or change
+it — not the care team, not an admin. Stored in `glp1_analytics.zoe_plans`.
 | Staff page | Yes | Yes | Yes | — | — | — | — |
 | Assign doctors / nurses | Yes | Yes | Yes | — | — | — | — |
 | Add notes, answer alerts | Yes | — | Yes | Yes | Yes | — | — |

@@ -3,6 +3,7 @@ import { Pill, Stethoscope, HeartPulse, UserRound, Store, Building2, CheckCircle
 import { api } from '../data/api';
 import PageState from '../components/shared/PageState';
 import AskDialog from '../components/patient/AskDialog';
+import ZoeCard from '../components/patient/ZoeCard';
 
 // How each level of the status reads (Backend/core/patient_home.STATUS). Calm
 // colours throughout: even the "extra support" level is blue, not red - it
@@ -76,6 +77,9 @@ export default function PatientHome() {
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-5">
+          {/* Zoe - the patient's own reminders */}
+          <ZoeCard />
+
           {/* Medicine */}
           <section className="card p-6" aria-labelledby="med-title">
             <h2 id="med-title" className="flex items-center gap-2 text-base font-semibold text-gray-800">
