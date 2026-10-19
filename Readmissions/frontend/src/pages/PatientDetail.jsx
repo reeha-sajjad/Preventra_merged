@@ -10,6 +10,7 @@ import ClinicalGate from '../components/shared/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
+import InsuranceCard from '../components/insurance/InsuranceCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
@@ -149,6 +150,7 @@ export default function PatientDetail() {
         </div>
         <CareTeamCard summary={summary} onChanged={reload} />
         {can(ASSIGN_ROLES) && <CaretakersCard patientId={summary.id} />}
+        <InsuranceCard patientId={summary.id} />
         {/* A pharmacy: the refill facts and "Report a refill problem" instead of the care team's card. */}
         {summary.detail_access === 'overview_only' ? <PharmacyPatientCard summary={summary} />
           : <FollowUpCard patientId={summary.id} />}
@@ -312,6 +314,8 @@ export default function PatientDetail() {
           <CareTeamCard summary={summary} onChanged={reload} />
 
           {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
+
+          <InsuranceCard patientId={patient.id} />
 
           <MedicinesGivenCard patientId={patient.id} mode="staff" />
 

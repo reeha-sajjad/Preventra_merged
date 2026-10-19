@@ -49,6 +49,8 @@ export function RoleProvider({ children }) {
       isPatient:  role === 'patient',
       // A family or home carer: the home page of each patient who linked them.
       isCaretaker: role === 'caretaker',
+      // Insurance member IDs (Backend/core/member_ids.py): who finds a patient by one.
+      findsMemberIds: ['superadmin', 'hospital_admin', 'case_manager', 'insurer'].includes(role),
       isSuperadmin: role === 'superadmin',
       hasOverview:  OVERVIEW_ROLES.includes(role),
       hasStaff:     STAFF_ROLES.includes(role),

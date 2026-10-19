@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Search, Filter, ChevronLeft, ChevronRight, DollarSign, ChevronUp, ChevronDown, Settings2, X, Building2, Users, UserCheck } from 'lucide-react';
+import MemberLookup from '../components/insurance/MemberLookup';
 import CareTeamDialog from '../components/hospital/CareTeamDialog';
 import { SegmentDot } from '../components/shared';
 import { SkeletonTable } from '../components/shared/LoadingSkeleton';
@@ -195,7 +196,7 @@ function SortHeader({ label, sortKey: sk, currentSort, currentDir, onSort }) {
 /* ── Main Component ───────────────────────────────────────────────── */
 export default function PatientRiskPanel() {
   const navigate = useNavigate();
-  const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager } = useRole();
+  const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager, findsMemberIds } = useRole();
   const { user } = useAuth();
   const { patients, loading, redacted, reload } = usePatients();
   // Filters the Overview and the Staff page link in with.
@@ -427,7 +428,9 @@ export default function PatientRiskPanel() {
             {filtered.length} patients · {highRisk} critical risk{!redacted && ` · ${financial} financial barrier`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Billing staff and insurers: straight to a patient from a card or claim. */}
+          {findsMemberIds && <MemberLookup />}
           {/* A patient not on this list: break the glass (doctors and nurses). */}
           {isCareTeam && <EmergencyAccessButton className="whitespace-nowrap" />}
           {isCaseManager && (

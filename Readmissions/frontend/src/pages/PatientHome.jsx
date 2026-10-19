@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill } from 'lucide-react';
+import { Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard } from 'lucide-react';
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
+import InsuranceCard from '../components/insurance/InsuranceCard';
 
 // How each level of the status reads (api/patient_home.STATUS). Calm colours
 // throughout: "extra support" is blue, not red - it means the team is helping.
@@ -182,6 +183,16 @@ export default function PatientHome() {
               <TeamRow icon={UserRound} role={team.nurses.length > 1 ? 'Nurses' : 'Nurse'} names={team.nurses.map((n) => n.name)} />
               <TeamRow icon={PhoneCall} role="Case managers" names={[]} empty="Your hospital’s case managers" muted={false} />
               <TeamRow icon={Store} role="Pharmacy" names={team.pharmacy ? [team.pharmacy] : []} />
+              {!caretaker && (
+                // The patient's own insurance and member ID, as on their card.
+                <li className="flex gap-3">
+                  <CreditCard size={16} className="mt-0.5 shrink-0 text-gray-400" />
+                  <div className="min-w-0">
+                    <div className="text-xs text-gray-500">Insurance</div>
+                    <InsuranceCard patientId={data.patient_id} compact />
+                  </div>
+                </li>
+              )}
             </ul>
           </Card>
 

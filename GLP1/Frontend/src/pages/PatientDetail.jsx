@@ -15,6 +15,7 @@ import ClinicalGate from '../components/hospital/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import DosesCard from '../components/patient/DosesCard';
+import InsuranceCard from '../components/insurance/InsuranceCard';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
 const INTERPRETATIONS = {
@@ -195,6 +196,7 @@ export default function PatientDetail() {
         </div>
         <CareTeamCard team={summary} patientIdx={summary.patient_idx} canAssign={summary.can_assign} onChanged={careTeamChanged} />
         {canAssign && <CaretakersCard patientIdx={summary.patient_idx} />}
+        <InsuranceCard patientIdx={summary.patient_idx} />
         {isPharmacy && <PharmacyPatientCard summary={summary} />}
         <ClinicalGate patientIdx={summary.patient_idx} reasons={summary.reasons} onOpened={reload}
           overviewOnly={summary.detail_access === 'overview_only'} />
@@ -315,6 +317,9 @@ export default function PatientDetail() {
         <CareTeamCard team={patient} patientIdx={patient.patient_idx}
           canAssign={canAssign && !isPatient} onChanged={careTeamChanged} />
       </div>
+
+      {/* ── Insurance: insurer and member ID (billing staff and the insurer only) ── */}
+      <InsuranceCard patientIdx={patient.patient_idx} className="mb-6" />
 
       {/* ── Caretakers (hospital admin, case manager, superadmin) ─── */}
       {canAssign && (

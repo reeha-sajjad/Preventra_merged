@@ -36,6 +36,7 @@ from api import pharmacy
 from api import patient_home
 from api import caretakers
 from api import medicines_given
+from api import member_ids
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -2698,6 +2699,30 @@ def pharmacy_report(patient_id: str, body: PharmacyReport, request: Request):
     """A pharmacy reports a refill problem; the hospital's case managers get it."""
     return followups.report(db, request.state.user, _scope(request), patient_id,
                             body.problem, body.urgency, body.note)
+
+
+# ---------------------------------------------------------------------------
+# Insurance member IDs (api/member_ids.py; GLP-1's twin)
+# ---------------------------------------------------------------------------
+class MemberIdRequest(BaseModel):
+    member_id: Optional[str] = None             # empty clears it
+
+
+@app.get("/api/patients/{patient_id}/insurance")
+def get_insurance(patient_id: str, request: Request):
+    """The patient's insurer and member ID - billing staff, the insurer, the patient."""
+    return member_ids.insurance(db, request.state.user, _scope(request), patient_id)
+
+
+@app.post("/api/patients/{patient_id}/insurance")
+def set_insurance(patient_id: str, body: MemberIdRequest, request: Request):
+    return member_ids.set_member_id(db, request.state.user, _scope(request), patient_id, body.member_id)
+
+
+@app.get("/api/member-lookup")
+def member_lookup(request: Request, member_id: str, insurer_id: Optional[str] = None):
+    """Find a patient by the member ID on their insurance card."""
+    return member_ids.find(db, request.state.user, _scope(request), member_id, insurer_id)
 
 
 # ---------------------------------------------------------------------------

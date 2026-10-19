@@ -165,6 +165,10 @@ const RealAPI = {
   undoMedicinesGiven: (id, patient) => apiFetch(`/api/my-home/medicines/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
     { method: 'DELETE' }),
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
+  // Insurance member IDs (api/member_ids.py).
+  getInsurance: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurance`),
+  setMemberId: (id, memberId) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurance`, json({ member_id: memberId })),
+  findByMemberId: (memberId) => apiFetch(`/api/member-lookup?member_id=${encodeURIComponent(memberId)}`),
   // Caretakers a patient links (api/caretakers.py).
   getCaretakers: (patient) => apiFetch(`/api/caretakers${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   linkCaretaker: (body) => apiFetch('/api/caretakers', json(body)),
@@ -475,6 +479,9 @@ export const getPharmacyHome     = realOnly(RealAPI.getPharmacyHome);
 export const getMyHome           = realOnly(RealAPI.getMyHome);
 export const askCaseManager      = realOnly(RealAPI.askCaseManager);
 export const getCaretakers       = realOnly(RealAPI.getCaretakers);
+export const getInsurance        = realOnly(RealAPI.getInsurance);
+export const setMemberId         = realOnly(RealAPI.setMemberId);
+export const findByMemberId      = realOnly(RealAPI.findByMemberId);
 export const getMedicinesGiven   = realOnly(RealAPI.getMedicinesGiven);
 export const recordMedicinesGiven = realOnly(RealAPI.recordMedicinesGiven);
 export const undoMedicinesGiven  = realOnly(RealAPI.undoMedicinesGiven);

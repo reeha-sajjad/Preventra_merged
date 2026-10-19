@@ -176,6 +176,10 @@ export const api = {
   getMyHome:            (patient) => get(`/api/my-home${patient != null ? `?patient=${patient}` : ''}`),
   /** { reason, note?, patient_idx? } - the patient (or caretaker) asks the case manager */
   askCaseManager:       (body) => post('/api/my-home/ask', body),
+  // Insurance member IDs - Backend/core/member_ids.py
+  getInsurance:         (idx) => get(`/api/patients/${idx}/insurance`),
+  setMemberId:          (idx, memberId) => post(`/api/patients/${idx}/insurance`, { member_id: memberId }),
+  findByMemberId:       (memberId) => get(`/api/member-lookup?member_id=${encodeURIComponent(memberId)}`),
   // Caretakers a patient links - Backend/core/caretakers.py
   getCaretakers:        (patient) => get(`/api/caretakers${patient != null ? `?patient=${patient}` : ''}`),
   /** { email, patient_idx? (staff), patient_agreed? (staff) } */
