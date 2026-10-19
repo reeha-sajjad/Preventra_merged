@@ -34,7 +34,7 @@ export default function CareTeamCard({ summary, onChanged }) {
           </dd>
         </div>
         <div>
-          <dt className="flex items-center gap-1.5 text-gray-500"><HeartPulse size={14} /> Nurses</dt>
+          <dt className="flex items-center gap-1.5 text-gray-500"><HeartPulse size={14} /> Hospital nurses</dt>
           <dd className="mt-0.5 font-medium text-gray-800">
             {nurses.length ? nurses.map((n) => n.name).join(', ') : <span className="text-risk-high">None assigned</span>}
           </dd>

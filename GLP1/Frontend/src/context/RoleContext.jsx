@@ -8,7 +8,7 @@ const ROLE_LABELS = {
   superadmin:     'Superadmin',
   hospital_admin: 'Hospital admin',
   doctor:         'Doctor',
-  nurse:          'Nurse',
+  nurse:          'Hospital nurse',
   case_manager:   'Case manager',
   insurer:        'Insurer',
   pharmacy:       'Pharmacy',

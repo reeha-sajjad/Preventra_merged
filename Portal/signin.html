@@ -374,7 +374,7 @@
           <option value="doctor">Doctor</option>
           <option value="hospital_admin">Hospital administrator</option>
           <option value="insurer">Insurer</option>
-          <option value="nurse">Nurse</option>
+          <option value="nurse">Hospital nurse</option>
           <option value="patient">Patient</option>
           <option value="pharmacy">Pharmacy staff</option>
         </select>
@@ -515,7 +515,7 @@
     // Display names for the fixed roles in Readmissions/api/auth.py:ROLES.
     const ROLE_LABELS = {
       superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
-      nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
+      nurse: 'Hospital nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
       caretaker: 'Caretaker', patient: 'Patient',
     };
 
@@ -523,7 +523,8 @@
     // The choices must stay within SIGNUP_ROLES in Readmissions/api/auth.py.
     const ROLE_HINTS = {
       doctor: 'Sees and treats the patients assigned to you.',
-      nurse: 'Follows up on the patients assigned to you.',
+      nurse: 'A nurse working for the hospital. Follows up on the patients assigned to you. ' +
+             '(Looking after a family member at home? Choose Caretaker.)',
       case_manager: 'Coordinates care across all of your hospital\'s patients: follow-ups, and ' +
                     'assigning doctors and nurses. No user or cost management.',
       hospital_admin: 'Runs your hospital\'s account: staff, users and costs. Opens a patient\'s ' +

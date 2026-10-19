@@ -37,7 +37,7 @@ export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];
 export const PHARMACY_ROLES = ['pharmacy'];
 
 export const ROLE_LABELS = {
-  superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Nurse',
+  superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor', nurse: 'Hospital nurse',
   case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy', caretaker: 'Caretaker',
   patient: 'Patient',
 };

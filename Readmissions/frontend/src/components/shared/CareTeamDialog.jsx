@@ -104,7 +104,7 @@ export default function CareTeamDialog({ patientIds, hospitalId, current, onClos
             </label>
             <fieldset>
               <legend className="text-sm font-medium text-gray-700">
-                {single ? 'Nurses' : 'Add nurses'}
+                {single ? 'Hospital nurses' : 'Add hospital nurses'}
               </legend>
               {nurses.length === 0 && <p className="mt-1.5 text-sm text-gray-500">No nurse accounts in this hospital yet.</p>}
               <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto">

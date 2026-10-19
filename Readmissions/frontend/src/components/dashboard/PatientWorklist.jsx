@@ -32,7 +32,7 @@ const CSV_COLUMNS = [
   { key: 'primary_driver_label', label: 'Primary Driver' },
   { key: 'discharge_date', label: 'Discharge Date' },
   { key: 'doctor', label: 'Doctor', get: (r) => r.doctor?.name || '' },
-  { key: 'nurses', label: 'Nurses', get: (r) => (r.nurses || []).map((n) => n.name).join('; ') },
+  { key: 'nurses', label: 'Hospital nurses', get: (r) => (r.nurses || []).map((n) => n.name).join('; ') },
   { key: 'insurer', label: 'Insurer', get: (r) => r.insurer?.name || '' },
 ];
 // Left out of a hospital admin's or insurer's export, as the server leaves them

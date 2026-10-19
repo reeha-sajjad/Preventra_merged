@@ -39,7 +39,7 @@ export default function Patients() {
   }, [doctor, nurse]);
 
   const careFilter = doctor ? `Doctor: ${names[doctor] || doctor}`
-    : nurse ? `Nurse: ${names[nurse] || nurse}`
+    : nurse ? `Hospital nurse: ${names[nurse] || nurse}`
     : unassigned === 'doctor' ? 'No doctor assigned'
     : unassigned === 'nurse' ? 'No nurse assigned' : null;
 

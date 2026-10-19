@@ -152,7 +152,7 @@ export default function Staff() {
 
       <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <h2 className="flex items-center gap-2 border-b px-4 py-3 font-semibold text-ns-navy">
-          <HeartPulse size={18} className="text-gray-400" /> Nurses
+          <HeartPulse size={18} className="text-gray-400" /> Hospital nurses
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full whitespace-nowrap">

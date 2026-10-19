@@ -121,7 +121,7 @@ export default function Overview() {
           value={data.staff.doctors.toLocaleString()}
           sub={data.no_doctor ? `${data.no_doctor.toLocaleString()} patients without a doctor` : 'All patients assigned'}
           to="/staff" />
-        <Tile icon={HeartPulse} label="Nurses" tone={data.no_nurse ? 'amber' : 'green'}
+        <Tile icon={HeartPulse} label="Hospital nurses" tone={data.no_nurse ? 'amber' : 'green'}
           value={data.staff.nurses.toLocaleString()}
           sub={data.no_nurse ? `${data.no_nurse.toLocaleString()} patients without a nurse` : 'All patients assigned'}
           to="/staff" />

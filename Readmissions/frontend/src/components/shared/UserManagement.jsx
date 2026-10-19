@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
-  nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
+  nurse: 'Hospital nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
   caretaker: 'Caretaker', patient: 'Patient',
 };
 

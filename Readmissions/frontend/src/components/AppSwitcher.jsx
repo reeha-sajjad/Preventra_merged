@@ -17,7 +17,7 @@ const GLP1_URL = (import.meta.env.VITE_GLP1_URL || '').replace(/\/$/, '');
 // Display names for the fixed roles in api/auth.py:ROLES on the backend.
 const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
-  nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
+  nurse: 'Hospital nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
   caretaker: 'Caretaker', patient: 'Patient',
 };
 
