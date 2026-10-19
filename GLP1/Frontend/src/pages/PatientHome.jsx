@@ -111,8 +111,9 @@ export default function PatientHome() {
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-5">
-          {/* Zoe - the patient's own reminders */}
-          {!caretaker && <ZoeCard />}
+          {/* Zoe - shared by the patient and their caretakers */}
+          <ZoeCard key={data.patient_idx} patientIdx={caretaker ? data.patient_idx : null}
+                   patientName={caretaker ? data.caring_for.patient_name : null} />
 
           {/* Medicine */}
           <section className="card p-6" aria-labelledby="med-title">

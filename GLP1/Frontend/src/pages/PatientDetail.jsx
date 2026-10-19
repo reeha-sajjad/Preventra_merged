@@ -14,6 +14,7 @@ import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/hospital/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
+import DosesCard from '../components/patient/DosesCard';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
 const INTERPRETATIONS = {
@@ -333,6 +334,7 @@ export default function PatientDetail() {
       {!isPatient && (
         <div className="mb-6">
           <MedicationCard patientIdx={patient.patient_idx} />
+          <DosesCard patientIdx={patient.patient_idx} />
         </div>
       )}
 

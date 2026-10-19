@@ -9,6 +9,7 @@ import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/shared/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
+import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
@@ -311,6 +312,8 @@ export default function PatientDetail() {
           <CareTeamCard summary={summary} onChanged={reload} />
 
           {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
+
+          <MedicinesGivenCard patientId={patient.id} mode="staff" />
 
           <FollowUpCard patientId={patient.id} />
 

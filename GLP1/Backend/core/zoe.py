@@ -6,8 +6,9 @@ sent to any outside service, and nothing is sent to the patient outside the app
 (no text, email or push) - reminders show when they open their home page. That
 keeps every detail inside the same access controls as the rest of their record.
 
-What the patient keeps here, for themselves only - the care team does not see
-it, and nobody else can read or change it:
+What is kept here, per patient, shared by the patient and the caretakers they
+linked (core/caretakers.py) - so whoever gives the injection sees the same
+schedule. The care team does not see it, and nobody else can read or change it:
 
     dose          when they take their GLP-1 medicine: a weekday and time for
                   a weekly injection, or a time for a daily one. How often comes
@@ -23,8 +24,10 @@ or side effects it points to the care team or pharmacist.
 The frontend works out "today" and "tomorrow" in the patient's own time zone;
 this module stores the plan and checks it.
 
-Stored in glp1_analytics.zoe_plans, one document per patient account. Talha's
-dataset is never written to.
+Stored in glp1_analytics.zoe_plans, one document per patient (patient_idx).
+Plans saved before caretakers existed were keyed by the patient's account and
+also carry patient_idx, so they are found the same way. Talha's dataset is
+never written to.
 """
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -56,12 +59,17 @@ def _col():
     return get_db()[COLLECTION]
 
 
-def _require_patient(user: dict, scope: Optional[list]) -> int:
-    if user["role"] != "patient":
-        raise HTTPException(status_code=403, detail="Zoe is for patients")
-    if not scope:
-        raise HTTPException(status_code=404, detail="No record is linked to your account yet")
-    return int(scope[0])
+def _require_patient(user: dict, scope: Optional[list], patient_idx: Optional[int] = None) -> int:
+    """The patient whose reminders these are: a patient's own, or - for a
+    caretaker - the one they picked from those who linked them."""
+    if user["role"] not in ("patient", "caretaker"):
+        raise HTTPException(status_code=403, detail="Zoe is for patients and their caretakers")
+    from core.followups import own_patient                  # avoid an import cycle
+    return own_patient(user, scope, patient_idx)
+
+
+def _key(idx: int) -> dict:
+    return {"patient_idx": int(idx)}
 
 
 async def _drug(user: dict, idx: int) -> dict:
@@ -95,16 +103,16 @@ def _public(doc: Optional[dict], drug: dict) -> dict:
     }
 
 
-async def plan(user: dict, scope: Optional[list]) -> dict:
-    idx = _require_patient(user, scope)
-    return _public(await _col().find_one({"account_id": user["id"]}), await _drug(user, idx))
+async def plan(user: dict, scope: Optional[list], patient_idx: Optional[int] = None) -> dict:
+    idx = _require_patient(user, scope, patient_idx)
+    return {**_public(await _col().find_one(_key(idx)), await _drug(user, idx)), "patient_idx": idx}
 
 
 async def set_dose(user: dict, scope: Optional[list], time: str, day: Optional[int],
-                   form: Optional[str]) -> dict:
+                   form: Optional[str], patient_idx: Optional[int] = None) -> dict:
     """When the patient takes their medicine. Weekly: a weekday (0 = Monday) and
     time. Daily: a time."""
-    idx = _require_patient(user, scope)
+    idx = _require_patient(user, scope, patient_idx)
     drug = await _drug(user, idx)
     if drug["stopped"] or not drug["frequency"]:
         raise HTTPException(status_code=409, detail="There's no GLP-1 medicine on your record to remind you about")
@@ -119,21 +127,20 @@ async def set_dose(user: dict, scope: Optional[list], time: str, day: Optional[i
         raise HTTPException(status_code=422, detail="Choose the day of the week you take it")
     dose = {"time": time, "day": day if frequency == "weekly" else None,
             "form": form if drug["frequency"] == "either" else None,
-            "drug": drug["drug"], "updated_at": datetime.now(timezone.utc)}
-    await _col().update_one({"account_id": user["id"]},
-                            {"$set": {"dose": dose, "patient_idx": idx}}, upsert=True)
-    return await plan(user, scope)
+            "drug": drug["drug"], "updated_at": datetime.now(timezone.utc), "updated_by": user["role"]}
+    await _col().update_one(_key(idx), {"$set": {"dose": dose, "patient_idx": idx}}, upsert=True)
+    return await plan(user, scope, idx)
 
 
-async def clear_dose(user: dict, scope: Optional[list]) -> dict:
-    _require_patient(user, scope)
-    await _col().update_one({"account_id": user["id"]}, {"$unset": {"dose": ""}})
-    return await plan(user, scope)
+async def clear_dose(user: dict, scope: Optional[list], patient_idx: Optional[int] = None) -> dict:
+    idx = _require_patient(user, scope, patient_idx)
+    await _col().update_one(_key(idx), {"$unset": {"dose": ""}})
+    return await plan(user, scope, idx)
 
 
 async def add_appointment(user: dict, scope: Optional[list], kind: str, on: str,
-                          time: Optional[str], note: Optional[str]) -> dict:
-    idx = _require_patient(user, scope)
+                          time: Optional[str], note: Optional[str], patient_idx: Optional[int] = None) -> dict:
+    idx = _require_patient(user, scope, patient_idx)
     if kind not in KINDS:
         raise HTTPException(status_code=422, detail="Choose what kind of appointment it is")
     try:
@@ -147,22 +154,32 @@ async def add_appointment(user: dict, scope: Optional[list], kind: str, on: str,
     note = (note or "").strip()
     if len(note) > MAX_NOTE:
         raise HTTPException(status_code=422, detail=f"Keep the note under {MAX_NOTE} characters")
-    doc = await _col().find_one({"account_id": user["id"]}) or {}
+    doc = await _col().find_one(_key(idx)) or {}
     upcoming = _upcoming(doc.get("appointments", []))
     if len(upcoming) >= MAX_APPOINTMENTS:
         raise HTTPException(status_code=409, detail=f"You can keep up to {MAX_APPOINTMENTS} upcoming appointments")
     entry = {"id": uuid.uuid4().hex[:12], "kind": kind, "date": day.isoformat(), "time": time or None,
              "note": note, "added_at": datetime.now(timezone.utc)}
     # Past ones are dropped as the list is saved, so it never grows without end.
-    await _col().update_one({"account_id": user["id"]},
-                            {"$set": {"appointments": upcoming + [entry], "patient_idx": idx}}, upsert=True)
-    return await plan(user, scope)
+    await _col().update_one(_key(idx), {"$set": {"appointments": upcoming + [entry], "patient_idx": idx}},
+                            upsert=True)
+    return await plan(user, scope, idx)
 
 
-async def remove_appointment(user: dict, scope: Optional[list], appointment_id: str) -> dict:
-    _require_patient(user, scope)
-    result = await _col().update_one({"account_id": user["id"]},
-                                     {"$pull": {"appointments": {"id": appointment_id}}})
+async def remove_appointment(user: dict, scope: Optional[list], appointment_id: str,
+                             patient_idx: Optional[int] = None) -> dict:
+    idx = _require_patient(user, scope, patient_idx)
+    result = await _col().update_one(_key(idx), {"$pull": {"appointments": {"id": appointment_id}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    return await plan(user, scope)
+    return await plan(user, scope, idx)
+
+
+async def frequency(user: dict, idx: int) -> Optional[str]:
+    """weekly | daily | None - how often this patient takes their medicine, as
+    far as Zoe knows (the drug, and for semaglutide the form they chose)."""
+    drug = await _drug(user, idx)
+    if drug["frequency"] != "either":
+        return drug["frequency"]
+    doc = await _col().find_one(_key(idx), {"dose": 1}) or {}
+    return (doc.get("dose") or {}).get("form")

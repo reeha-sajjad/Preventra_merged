@@ -65,15 +65,19 @@ async def unlink_caretaker(caretaker_id: str, patient: Optional[int] = None, use
 
 
 # --------------------------------------------------------------- Zoe (core/zoe.py)
+# Shared by the patient and their caretakers; `patient` picks which patient for
+# a caretaker who looks after several (a patient's own is used otherwise).
 from typing import Literal  # noqa: E402
 
-from core import zoe  # noqa: E402
+from core import doses, zoe  # noqa: E402
+from core.access import require_detail  # noqa: E402
 
 
 @router.get("/zoe")
-async def zoe_plan(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
-    """The patient's own reminders: their dose schedule and appointments."""
-    return await zoe.plan(user, scope)
+async def zoe_plan(patient: Optional[int] = None, user: dict = Depends(actor),
+                   scope: Optional[list] = Depends(scope_of)):
+    """The patient's reminders: their dose schedule and appointments."""
+    return await zoe.plan(user, scope, patient)
 
 
 class DoseRequest(BaseModel):
@@ -83,14 +87,15 @@ class DoseRequest(BaseModel):
 
 
 @router.post("/zoe/dose")
-async def zoe_set_dose(body: DoseRequest, user: dict = Depends(actor),
+async def zoe_set_dose(body: DoseRequest, patient: Optional[int] = None, user: dict = Depends(actor),
                        scope: Optional[list] = Depends(scope_of)):
-    return await zoe.set_dose(user, scope, body.time, body.day, body.form)
+    return await zoe.set_dose(user, scope, body.time, body.day, body.form, patient)
 
 
 @router.delete("/zoe/dose")
-async def zoe_clear_dose(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
-    return await zoe.clear_dose(user, scope)
+async def zoe_clear_dose(patient: Optional[int] = None, user: dict = Depends(actor),
+                         scope: Optional[list] = Depends(scope_of)):
+    return await zoe.clear_dose(user, scope, patient)
 
 
 class AppointmentRequest(BaseModel):
@@ -101,12 +106,50 @@ class AppointmentRequest(BaseModel):
 
 
 @router.post("/zoe/appointments", status_code=201)
-async def zoe_add_appointment(body: AppointmentRequest, user: dict = Depends(actor),
-                              scope: Optional[list] = Depends(scope_of)):
-    return await zoe.add_appointment(user, scope, body.kind, body.date, body.time, body.note)
+async def zoe_add_appointment(body: AppointmentRequest, patient: Optional[int] = None,
+                              user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
+    return await zoe.add_appointment(user, scope, body.kind, body.date, body.time, body.note, patient)
 
 
 @router.delete("/zoe/appointments/{appointment_id}")
-async def zoe_remove_appointment(appointment_id: str, user: dict = Depends(actor),
+async def zoe_remove_appointment(appointment_id: str, patient: Optional[int] = None, user: dict = Depends(actor),
                                  scope: Optional[list] = Depends(scope_of)):
-    return await zoe.remove_appointment(user, scope, appointment_id)
+    return await zoe.remove_appointment(user, scope, appointment_id, patient)
+
+
+# ------------------------------------------------- doses given (core/doses.py)
+@router.get("/zoe/doses")
+async def zoe_doses(patient: Optional[int] = None, user: dict = Depends(actor),
+                    scope: Optional[list] = Depends(scope_of)):
+    """The doses caretakers recorded, for the patient or their caretaker."""
+    idx = zoe._require_patient(user, scope, patient)
+    return {**await doses.log(idx, user, await zoe.frequency(user, idx)), "can_tick": user["role"] == "caretaker"}
+
+
+class DoseGiven(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/zoe/doses", status_code=201)
+async def zoe_dose_given(body: DoseGiven, patient: Optional[int] = None, user: dict = Depends(actor),
+                         scope: Optional[list] = Depends(scope_of)):
+    """A caretaker records that they gave the dose, now."""
+    idx = zoe._require_patient(user, scope, patient)
+    await doses.tick(user, idx, body.note)
+    return {**await doses.log(idx, user, await zoe.frequency(user, idx)), "can_tick": True}
+
+
+@router.delete("/zoe/doses/{dose_id}")
+async def zoe_undo_dose(dose_id: str, patient: Optional[int] = None, user: dict = Depends(actor),
+                        scope: Optional[list] = Depends(scope_of)):
+    idx = zoe._require_patient(user, scope, patient)
+    await doses.undo(user, idx, dose_id)
+    return {**await doses.log(idx, user, await zoe.frequency(user, idx)), "can_tick": user["role"] == "caretaker"}
+
+
+@router.get("/patients/{patient_idx}/doses")
+async def patient_doses(patient_idx: int, user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
+    """The care team's view of the doses caretakers recorded - part of the
+    clinical layer, so the same rule as the rest of it."""
+    await require_detail(user, scope, patient_idx)
+    return await doses.log(patient_idx, None, await zoe.frequency(user, patient_idx))

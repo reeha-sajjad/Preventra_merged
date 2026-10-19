@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { BellRing, CalendarDays, Pill, Plus, X, Loader2, Pencil } from 'lucide-react';
+import { BellRing, CalendarDays, Pill, Plus, X, Loader2, Pencil, Check, Undo2 } from 'lucide-react';
 import { api } from '../../data/api';
 
 /**
  * Zoe, the patient's reminder companion (Backend/core/zoe.py). Fixed rules,
  * not an AI: Zoe reads the dose schedule and appointments the patient set and
- * says what's coming up. Everything stays in the app - no texts or emails -
- * and only the patient sees it. "Today" is worked out in the patient's own
- * time zone, here in the browser.
+ * says what's coming up. Everything stays in the app - no texts or emails.
+ * The patient and the caretakers they linked share one plan (patientIdx picks
+ * the patient for a caretaker), and a caretaker who gives the injection ticks
+ * "Dose given" (Backend/core/doses.py), which the care team sees. "Today" is
+ * worked out in the patient's own time zone, here in the browser.
  */
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -48,14 +50,31 @@ function whenLabel(appt, now = new Date()) {
   return appt.time ? `${day}, ${clock(appt.time)}` : day;
 }
 
-export default function ZoeCard() {
+export default function ZoeCard({ patientIdx = null, patientName = null }) {
+  const caretaker = patientIdx != null;
   const [plan, setPlan] = useState(null);
+  const [given, setGiven] = useState(null);               // doses a caretaker recorded
   const [editing, setEditing] = useState(null);           // 'dose' | 'appointment' | null
   const [error, setError] = useState(null);
+  const [ticking, setTicking] = useState(false);
 
-  const load = useCallback(() => { api.getZoe().then(setPlan).catch(() => setPlan(false)); }, []);
+  const load = useCallback(() => {
+    api.getZoe(patientIdx).then(setPlan).catch(() => setPlan(false));
+    api.getZoeDoses(patientIdx).then(setGiven).catch(() => setGiven(null));
+  }, [patientIdx]);
   useEffect(() => { load(); }, [load]);
   if (!plan) return null;                                  // loading, or not available: the page works without Zoe
+
+  const tick = async () => {
+    setTicking(true); setError(null);
+    try { setGiven(await api.doseGiven(null, patientIdx)); } catch (e) { setError(e.message); }
+    finally { setTicking(false); }
+  };
+  const undo = async (id) => {
+    setError(null);
+    try { setGiven(await api.undoDose(id, patientIdx)); } catch (e) { setError(e.message); }
+  };
+  const lastGiven = given?.entries?.[0];
 
   const dose = doseMessage(plan);
   const today = isoDay(new Date());
@@ -69,7 +88,10 @@ export default function ZoeCard() {
              style={{ background: 'linear-gradient(140deg, #2E6DB4, #1B4F8A)', fontFamily: 'DM Serif Display, serif' }}>Z</div>
         <div className="min-w-0 flex-1">
           <h2 id="zoe-title" className="text-base font-semibold text-gray-800">Zoe</h2>
-          <p className="text-xs text-gray-500">Your reminders. Only you can see these.</p>
+          <p className="text-xs text-gray-500">
+            {caretaker ? `${patientName ? `${patientName}’s` : 'Their'} reminders, shared with them and anyone else caring for them.`
+                       : 'Your reminders, shared with the people who help with your care.'}
+          </p>
         </div>
       </div>
 
@@ -99,7 +121,7 @@ export default function ZoeCard() {
                 {a.note && <div className="text-xs text-gray-500 mt-0.5 break-words">{a.note}</div>}
               </div>
               <button type="button" aria-label={`Remove ${a.kind_label} on ${whenLabel(a)}`}
-                onClick={() => api.removeZoeAppointment(a.id).then(saved).catch((e) => setError(e.message))}
+                onClick={() => api.removeZoeAppointment(a.id, patientIdx).then(saved).catch((e) => setError(e.message))}
                 className="self-start text-gray-400 hover:text-gray-700"><X size={15} /></button>
             </li>
           );
@@ -109,8 +131,34 @@ export default function ZoeCard() {
         )}
       </ul>
 
-      {editing === 'dose' && <DoseForm plan={plan} onSaved={saved} onCancel={() => setEditing(null)} />}
-      {editing === 'appointment' && <AppointmentForm plan={plan} onSaved={saved} onCancel={() => setEditing(null)} />}
+      {/* Doses a caretaker recorded: tick (caretaker), and the last one for everyone */}
+      {given && !plan.medicine.stopped && (given.can_tick || lastGiven) && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
+          <div className="flex-1 min-w-[180px] text-sm text-gray-700">
+            {lastGiven
+              ? <>Last dose recorded {new Date(lastGiven.given_at).toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}
+                  {' '}by {lastGiven.logged_by}.
+                  {given.expected_4_weeks ? <span className="text-gray-500"> {given.last_4_weeks} of {given.expected_4_weeks} expected in the last 4 weeks.</span> : null}</>
+              : 'No doses recorded yet.'}
+            {lastGiven?.can_undo && (
+              <button type="button" onClick={() => undo(lastGiven.id)}
+                className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline">
+                <Undo2 size={11} /> Undo
+              </button>
+            )}
+          </div>
+          {given.can_tick && (
+            <button type="button" onClick={tick} disabled={ticking}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white disabled:opacity-50"
+              style={{ background: '#1E6B34' }}>
+              {ticking ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Dose given
+            </button>
+          )}
+        </div>
+      )}
+
+      {editing === 'dose' && <DoseForm plan={plan} patientIdx={patientIdx} onSaved={saved} onCancel={() => setEditing(null)} />}
+      {editing === 'appointment' && <AppointmentForm plan={plan} patientIdx={patientIdx} onSaved={saved} onCancel={() => setEditing(null)} />}
       {error && <p role="alert" className="mt-3 text-sm" style={{ color: '#C62828' }}>{error}</p>}
 
       {!editing && (
@@ -153,7 +201,7 @@ function FormShell({ title, onSubmit, onCancel, busy, error, children, submit })
 
 const field = 'mt-1 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300';
 
-function DoseForm({ plan, onSaved, onCancel }) {
+function DoseForm({ plan, patientIdx, onSaved, onCancel }) {
   const { medicine } = plan;
   const [form, setForm] = useState(plan.dose?.form || (medicine.needs_form ? '' : medicine.frequency));
   const [day, setDay] = useState(plan.dose?.day ?? '');
@@ -166,12 +214,12 @@ function DoseForm({ plan, onSaved, onCancel }) {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      onSaved(await api.setZoeDose({ time, day: weekly ? Number(day) : undefined, form: medicine.needs_form ? form : undefined }));
+      onSaved(await api.setZoeDose({ time, day: weekly ? Number(day) : undefined, form: medicine.needs_form ? form : undefined }, patientIdx));
     } catch (err) { setError(err.message); setBusy(false); }
   };
   const remove = async () => {
     setBusy(true);
-    try { onSaved(await api.clearZoeDose()); } catch (err) { setError(err.message); setBusy(false); }
+    try { onSaved(await api.clearZoeDose(patientIdx)); } catch (err) { setError(err.message); setBusy(false); }
   };
 
   return (
@@ -207,7 +255,7 @@ function DoseForm({ plan, onSaved, onCancel }) {
   );
 }
 
-function AppointmentForm({ plan, onSaved, onCancel }) {
+function AppointmentForm({ plan, patientIdx, onSaved, onCancel }) {
   const [kind, setKind] = useState('doctor');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
@@ -220,7 +268,7 @@ function AppointmentForm({ plan, onSaved, onCancel }) {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      onSaved(await api.addZoeAppointment({ kind, date, time: time || undefined, note: note.trim() || undefined }));
+      onSaved(await api.addZoeAppointment({ kind, date, time: time || undefined, note: note.trim() || undefined }, patientIdx));
     } catch (err) { setError(err.message); setBusy(false); }
   };
 

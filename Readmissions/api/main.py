@@ -35,6 +35,7 @@ from api import emergency
 from api import pharmacy
 from api import patient_home
 from api import caretakers
+from api import medicines_given
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -2743,6 +2744,37 @@ def link_caretaker(body: LinkCaretaker, request: Request):
 @app.delete("/api/caretakers/{caretaker_id}")
 def unlink_caretaker(caretaker_id: str, request: Request, patient: Optional[str] = None):
     return caretakers.unlink(db, request.state.user, _scope(request), caretaker_id, patient)
+
+
+# Medicines given - a caretaker's daily tick (api/medicines_given.py)
+class MedicinesGiven(BaseModel):
+    note: Optional[str] = None
+
+
+@app.get("/api/my-home/medicines")
+def my_medicines_given(request: Request, patient: Optional[str] = None):
+    """The ticks caretakers recorded, for the patient or their caretaker."""
+    pid = followups.own_patient(request.state.user, _scope(request), patient)
+    return medicines_given.log(db, pid, request.state.user)
+
+
+@app.post("/api/my-home/medicines", status_code=201)
+def record_medicines_given(body: MedicinesGiven, request: Request, patient: Optional[str] = None):
+    pid = followups.own_patient(request.state.user, _scope(request), patient)
+    return medicines_given.tick(db, request.state.user, pid, body.note)
+
+
+@app.delete("/api/my-home/medicines/{entry_id}")
+def undo_medicines_given(entry_id: str, request: Request, patient: Optional[str] = None):
+    pid = followups.own_patient(request.state.user, _scope(request), patient)
+    return medicines_given.undo(db, request.state.user, pid, entry_id)
+
+
+@app.get("/api/patients/{patient_id}/medicines-given")
+def patient_medicines_given(patient_id: str, request: Request):
+    """The care team's view of a caretaker's ticks - the clinical layer."""
+    _require_detail(request, patient_id)
+    return medicines_given.log(db, patient_id)
 
 
 # ---------------------------------------------------------------------------

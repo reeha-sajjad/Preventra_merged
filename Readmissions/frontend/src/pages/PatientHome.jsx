@@ -3,6 +3,7 @@ import { Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAl
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
+import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
 
 // How each level of the status reads (api/patient_home.STATUS). Calm colours
 // throughout: "extra support" is blue, not red - it means the team is helping.
@@ -118,6 +119,8 @@ export default function PatientHome() {
             )}
             <p className="mt-3 text-xs text-gray-500">As your hospital recorded it. Your doctor can explain what it means for you.</p>
           </Card>
+
+          <MedicinesGivenCard key={data.patient_id} patientId={caretaker ? data.patient_id : null} />
 
           <Card icon={CalendarCheck} title="Since you went home" id="recovery">
             <ul className="mt-4 space-y-3 text-sm text-gray-700">

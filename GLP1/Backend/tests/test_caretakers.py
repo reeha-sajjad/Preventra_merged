@@ -80,7 +80,7 @@ def test_a_caretaker_sees_the_summary_not_the_clinical_record(world):
     assert carer.get("/api/patients/3").status_code == 403
     assert carer.post("/api/patients/3/open", json={"reason": "care_coordination"}).status_code == 403
     assert carer.get("/api/caretakers?patient=3").status_code == 403          # not theirs to manage
-    for path in ("/api/overview", "/api/staff", "/api/followups", "/api/cost-effectiveness", "/api/zoe"):
+    for path in ("/api/overview", "/api/staff", "/api/followups", "/api/cost-effectiveness", "/api/patients/3/doses"):
         assert carer.get(path).status_code in (403, 404), path
     assert carer.get("/api/patients?page_size=50").json()["redacted"]
 

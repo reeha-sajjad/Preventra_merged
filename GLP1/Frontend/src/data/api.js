@@ -79,6 +79,9 @@ async function post(path, body) {
   return res.json();
 }
 
+/** "?patient=N" for a caretaker acting for one of their people, else nothing. */
+const pq = (patient) => (patient != null ? `?patient=${patient}` : '');
+
 async function del(path) {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE", headers: authHeaders() });
   await check(res, path);
@@ -178,14 +181,20 @@ export const api = {
   /** { email, patient_idx? (staff), patient_agreed? (staff) } */
   linkCaretaker:        (body) => post('/api/caretakers', body),
   unlinkCaretaker:      (id, patient) => del(`/api/caretakers/${id}${patient != null ? `?patient=${patient}` : ''}`),
-  // Zoe, the patient's reminders - Backend/core/zoe.py
-  getZoe:               () => get('/api/zoe'),
+  // Zoe, the patient's reminders - Backend/core/zoe.py. Shared by the patient
+  // and their caretakers; `patient` picks which patient for a caretaker.
+  getZoe:               (patient) => get(`/api/zoe${pq(patient)}`),
   /** { time: 'HH:MM', day?: 0-6 (0 = Monday), form?: 'weekly' | 'daily' } */
-  setZoeDose:           (body) => post('/api/zoe/dose', body),
-  clearZoeDose:         () => del('/api/zoe/dose'),
+  setZoeDose:           (body, patient) => post(`/api/zoe/dose${pq(patient)}`, body),
+  clearZoeDose:         (patient) => del(`/api/zoe/dose${pq(patient)}`),
   /** { kind, date: 'YYYY-MM-DD', time?, note? } */
-  addZoeAppointment:    (body) => post('/api/zoe/appointments', body),
-  removeZoeAppointment: (id) => del(`/api/zoe/appointments/${id}`),
+  addZoeAppointment:    (body, patient) => post(`/api/zoe/appointments${pq(patient)}`, body),
+  removeZoeAppointment: (id, patient) => del(`/api/zoe/appointments/${id}${pq(patient)}`),
+  // Doses a caretaker gave - Backend/core/doses.py
+  getZoeDoses:          (patient) => get(`/api/zoe/doses${pq(patient)}`),
+  doseGiven:            (note, patient) => post(`/api/zoe/doses${pq(patient)}`, { note: note || undefined }),
+  undoDose:             (id, patient) => del(`/api/zoe/doses/${id}${pq(patient)}`),
+  getPatientDoses:      (idx) => get(`/api/patients/${idx}/doses`),
   getCaseManagerToday:  (mine = false) => get(`/api/case-manager/today${mine ? "?mine=1" : ""}`),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 
