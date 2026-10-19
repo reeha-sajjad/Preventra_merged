@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill } from 'lucide-react';
+import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill, Receipt, Siren } from 'lucide-react';
 import { api } from '../../data/api';
 import { RiskBadge } from '../shared';
 
@@ -23,6 +23,12 @@ const KINDS = {
     `Risk up from ${Math.round((i.previous_prob ?? 0) * 100)}% since you last looked`, label: () => 'risk up' },
   new:        { icon: UserPlus,      color: '#1B4F8A', text: () => 'New on your care team', label: () => 'new' },
   unreviewed: { icon: AlertTriangle, color: '#EF6C00', text: () => 'Critical risk, not reviewed yet', label: () => 'not reviewed' },
+  // An insurer's bell (Backend/core/insurer_alerts.py).
+  insurer_flag: { icon: Receipt, color: '#1B4F8A', label: (n) => `hospital flag${n === 1 ? '' : 's'}`, text: (i) =>
+    `${i.hospital}: ${i.kind_label} · from ${i.requested_by}` },
+  turned_critical: { icon: Siren, color: '#C62828', label: () => 'turned critical', text: (i) =>
+    i.previous_prob == null ? 'New member, already at critical risk'
+      : `Turned critical · was ${Math.round(i.previous_prob * 100)}%` },
 };
 
 /**
@@ -30,7 +36,9 @@ const KINDS = {
  * that need a look - opening a patient clears them (the backend does that when
  * the patient page loads); "Mark all as read" clears the rest. Case managers:
  * follow-up requests, and pharmacy reports on ones they hold. Pharmacies: their
- * reports that are done - opening the pharmacy page clears them.
+ * reports that are done - opening the pharmacy page clears them. Insurers:
+ * hospitals' billing flags (cleared by replying, on the Members page) and
+ * members who turned critical (opening the member, or "Mark all as read").
  */
 export default function NotificationBell() {
   const navigate = useNavigate();
@@ -73,10 +81,14 @@ export default function NotificationBell() {
   // Cleared by opening Follow-ups (handed to you, or a pharmacy report on yours).
   const clearsOnFollowUps = (i) => i.kinds.includes('followup_handed') || i.kinds.includes('followup_report');
 
+  const isInsurerBell = items.some((i) => i.kinds.includes('insurer_flag') || i.kinds.includes('turned_critical'));
+  const flagsOnly = items.length > 0 && items.every((i) => i.kinds.includes('insurer_flag'));
+
   const markAll = async () => {
     setBusy(true);
     try {
-      await api.markNotificationsSeen({ all: true });
+      if (isInsurerBell) await api.markInsurerAlertsSeen();
+      else await api.markNotificationsSeen({ all: true });
       load();
     } finally {
       setBusy(false);
@@ -96,7 +108,8 @@ export default function NotificationBell() {
     }
     navigate(clearsOnFollowUps(item) ? '/follow-ups?mine=1'
       : item.kinds.includes('followup_new') ? '/follow-ups'
-      : item.kinds.includes('report_done') ? '/' : `/patients/${item.patient_idx}`);
+      : item.kinds.includes('report_done') || item.kinds.includes('insurer_flag') ? '/'
+      : `/patients/${item.patient_idx}`);
   };
 
   // Hospital admins only get a bell when their hospital has no case manager.
@@ -124,14 +137,16 @@ export default function NotificationBell() {
             <div>
               <div className="font-semibold text-gray-800 text-sm">Notifications</div>
               <div className="text-xs text-gray-400 mt-0.5">
-                {!total ? 'Your patients' : reportsOnly
+                {!total ? 'Your patients' : isInsurerBell
+                  ? `${total.toLocaleString()} for your members`
+                  : reportsOnly
                   ? `${total.toLocaleString()} of your report${total === 1 ? '' : 's'} done`
                   : requestsOnly
                   ? `${total.toLocaleString()} follow-up request${total === 1 ? '' : 's'} for you`
                   : `${total.toLocaleString()} of your patients need a look`}
               </div>
             </div>
-            {total > 0 && !requestsOnly && !reportsOnly && (
+            {total > 0 && !requestsOnly && !reportsOnly && !flagsOnly && (
               <button type="button" onClick={markAll} disabled={busy}
                 className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap disabled:opacity-50"
                 style={{ color: 'var(--color-primary)' }}>
@@ -167,12 +182,16 @@ export default function NotificationBell() {
           ) : (
             <ul className="max-h-[420px] overflow-y-auto divide-y divide-gray-100">
               {items.map((i) => (
-                <li key={i.followup_id || i.patient_idx}>
+                <li key={i.followup_id || i.flag_id || i.patient_idx}>
                   <button type="button" onClick={() => go(i)}
                     className="group w-full text-left flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
-                    <div className="pt-0.5"><RiskBadge prob={i.dropout_prob} /></div>
+                    <div className="pt-0.5">{i.dropout_prob != null
+                      ? <RiskBadge prob={i.dropout_prob} />
+                      : <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: '#1B4F8A14', color: '#1B4F8A' }}>Billing</span>}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-gray-800 font-mono">Patient #{i.patient_idx}</div>
+                      <div className="text-sm font-semibold text-gray-800 font-mono">
+                        {isInsurerBell && i.member_id ? `Member ${i.member_id}` : `Patient #${i.patient_idx}`}
+                      </div>
                       {i.kinds.map((kind) => {
                         const k = KINDS[kind];
                         return (

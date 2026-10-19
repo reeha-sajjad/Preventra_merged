@@ -17,6 +17,8 @@ const NAV_ITEMS = [
   { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'Overview',             primary: null, only: 'hasOverviewHome' },
   { section: 'overview', to: '/',         icon: ListChecks,      label: 'Today',                primary: null, only: 'isCaseManager' },
   { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Hospital overview',    primary: null, only: 'isCaseManager' },
+  { section: 'overview', to: '/',         icon: Users,           label: 'Members',              primary: null, only: 'isInsurer' },
+  { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Members overview',     primary: null, only: 'isInsurer' },
   { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
   { section: 'overview', to: '/',         icon: Pill,            label: 'Pharmacy',             primary: null, only: 'isPharmacy' },
   { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null, only: 'notPharmacy' },
@@ -270,7 +272,7 @@ export default function AppShell({ children }) {
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <HospitalPicker />
-            {(isCareTeam || role === 'case_manager' || role === 'hospital_admin' || role === 'pharmacy') && <NotificationBell />}
+            {(isCareTeam || role === 'case_manager' || role === 'hospital_admin' || role === 'pharmacy' || role === 'insurer') && <NotificationBell />}
             {/* Role indicator pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
                  style={{ background: isCostView || role === 'hospital_admin' ? '#E3F2FD' : '#E8F5E9',

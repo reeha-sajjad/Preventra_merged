@@ -20,6 +20,7 @@ import BudgetSimulator from './pages/BudgetSimulator';
 import CostOfInaction from './pages/CostOfInaction';
 import Settings from './pages/Settings';
 import PatientHome from './pages/PatientHome';
+import InsurerHome from './pages/InsurerHome';
 import Staff from './pages/Staff';
 import FollowUps from './pages/FollowUps';
 import { useRole } from './context/RoleContext';
@@ -47,7 +48,7 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, isCaretaker, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy } = useRole();
+  const { isCostView, isPatient, isCaretaker, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy, isInsurer } = useRole();
 
   // Patients, and caretakers looking after them, get the plain-words home page.
   if (isPatient || isCaretaker) {
@@ -66,12 +67,13 @@ function RoleRoutes() {
     <>
       <Routes>
         <Route path="/"             element={isPharmacy ? <PharmacyHome />
+                                             : isInsurer ? <InsurerHome />
                                              : isCaseManager ? <CaseManagerHome />
                                              : hasOverview ? <ExecutiveSummary />
                                              : isCareTeam ? <CareHome />
                                              : <Navigate to="/patients" replace />} />
         {/* Case managers' home is "Today"; their hospital Overview lives here. */}
-        {isCaseManager && <Route path="/overview" element={<ExecutiveSummary />} />}
+        {(isCaseManager || isInsurer) && <Route path="/overview" element={<ExecutiveSummary />} />}
         {/* A pharmacy's patient list is its home page. */}
         <Route path="/patients"     element={isPharmacy ? <Navigate to="/" replace /> : <PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}

@@ -37,6 +37,8 @@ from api import patient_home
 from api import caretakers
 from api import medicines_given
 from api import member_ids
+from api import insurer_alerts
+from api import insurer as insurer_home_page
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -930,6 +932,9 @@ def clear_cache(request: Request):
 @app.get("/api/patients/{patient_id}")
 def get_patient(patient_id: str, request: Request):
     _require_detail(request, patient_id)
+    if request.state.user["role"] == "insurer":
+        # Looking at a member clears "turned high risk" for them from the bell.
+        insurer_alerts.mark_seen(db, request.state.user, _scope(request), [str(patient_id)])
     batch_date = get_latest_batch_date(db, "patient_worklist")
     if not batch_date:
         raise HTTPException(status_code=404, detail="Patient worklist data not found")
@@ -2636,7 +2641,10 @@ def followups_waiting(request: Request):
 @app.get("/api/followups/bell")
 def followups_bell(request: Request):
     """Follow-up news for the bell: pharmacy reports on requests a case manager
-    holds, or a pharmacy's reports that are done."""
+    holds, or a pharmacy's reports that are done. An insurer: hospitals' billing
+    flags and members who turned high risk (api/insurer_alerts.py)."""
+    if request.state.user["role"] == "insurer":
+        return {"items": insurer_alerts.bell(db, request.state.user, _scope(request))}
     return {"items": followups.bell(db, request.state.user)}
 
 
@@ -2719,10 +2727,65 @@ def set_insurance(patient_id: str, body: MemberIdRequest, request: Request):
     return member_ids.set_member_id(db, request.state.user, _scope(request), patient_id, body.member_id)
 
 
+@app.get("/api/insurer/home")
+def insurer_home(request: Request):
+    """An insurer's members by hospital, their readmission cost, and who is most at risk."""
+    return insurer_home_page.home(db, request.state.user, _scope(request))
+
+
 @app.get("/api/member-lookup")
 def member_lookup(request: Request, member_id: str, insurer_id: Optional[str] = None):
     """Find a patient by the member ID on their insurance card."""
     return member_ids.find(db, request.state.user, _scope(request), member_id, insurer_id)
+
+
+# Insurer alerts and hospitals' billing flags (api/insurer_alerts.py; GLP-1's twin)
+class InsurerFlagRequest(BaseModel):
+    kind: str
+    note: str
+
+
+class InsurerFlagReply(BaseModel):
+    status: str
+    note: Optional[str] = None
+
+
+class InsurerSeenRequest(BaseModel):
+    patient_ids: Optional[List[str]] = None     # none: everyone
+
+
+@app.post("/api/patients/{patient_id}/insurer-flags", status_code=201)
+def send_insurer_flag(patient_id: str, body: InsurerFlagRequest, request: Request):
+    """The hospital flags a patient to their insurer (billing question, prior auth, coverage)."""
+    return insurer_alerts.send_flag(db, request.state.user, _scope(request), patient_id, body.kind, body.note)
+
+
+@app.get("/api/patients/{patient_id}/insurer-flags")
+def list_patient_insurer_flags(patient_id: str, request: Request):
+    user = request.state.user
+    return {"flags": insurer_alerts.flags_for_patient(db, user, _scope(request), patient_id),
+            "kinds": [{"key": k, "label": v} for k, v in insurer_alerts.KINDS.items()],
+            "can_send": user["role"] in insurer_alerts.FLAG_ROLES}
+
+
+@app.get("/api/insurer/flags")
+def list_insurer_flags(request: Request, status: str = "open"):
+    """An insurer's flags from hospitals."""
+    return {"flags": insurer_alerts.insurer_flags(db, request.state.user, status),
+            "statuses": [{"key": k, "label": insurer_alerts.STATUSES[k]} for k in insurer_alerts.REPLY_STATUSES]}
+
+
+@app.post("/api/insurer/flags/{flag_id}/reply")
+def reply_insurer_flag(flag_id: str, body: InsurerFlagReply, request: Request):
+    return insurer_alerts.reply(db, request.state.user, flag_id, body.status, body.note)
+
+
+@app.post("/api/insurer/alerts/seen")
+def insurer_alerts_seen(body: InsurerSeenRequest, request: Request):
+    """'Mark all as read' on the insurer's bell: a new baseline."""
+    if request.state.user["role"] != "insurer":
+        raise HTTPException(status_code=403, detail="For insurers")
+    return {"seen": insurer_alerts.mark_seen(db, request.state.user, _scope(request), body.patient_ids)}
 
 
 # ---------------------------------------------------------------------------

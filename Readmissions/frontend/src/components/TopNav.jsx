@@ -12,7 +12,9 @@ export default function TopNav({ onMenuClick = () => {} }) {
   const getPageTitle = (path) => {
     if (path === '/') return readClaims()?.role === 'patient' ? 'My health'
       : readClaims()?.role === 'caretaker' ? 'People I care for'
+      : readClaims()?.role === 'insurer' ? 'Members'
       : can(PHARMACY_ROLES) ? 'Pharmacy' : can(MY_PATIENTS_ROLES) ? 'My patients' : 'Overview';
+    if (path === '/overview') return 'Members overview';
     if (path === '/patients') return 'Patients';
     if (path.startsWith('/patients/')) return 'Patient Detail';
     if (path === '/staff') return 'Staff';

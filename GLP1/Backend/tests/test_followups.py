@@ -217,8 +217,11 @@ def test_the_doctor_and_nurse_hear_the_outcome_until_they_open_the_patient(world
     assert 1 in {i["patient_idx"] for i in bell(world, "nurse@a.test")["items"]}
 
 
-def test_insurers_patients_and_superadmin_have_no_bell(world):
+def test_patients_and_superadmin_have_no_bell(world):
     ask(world)
-    for email in ("claims@acme.test", "me@patient.test", "ops@team.test"):
+    for email in ("me@patient.test", "ops@team.test"):
         body = bell(world, email)
         assert body["enabled"] is False and body["items"] == []
+    # An insurer has a bell of its own (tests/test_insurer_alerts.py), never follow-up requests.
+    body = bell(world, "claims@acme.test")
+    assert body["enabled"] is True and all("followup_new" not in i["kinds"] for i in body["items"])

@@ -44,7 +44,8 @@ CRITICAL = 0.75
 RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
 KIND_ORDER = {"followup_handed": 0, "followup_report": 1, "followup_new": 2, "risk_up": 3,
-              "followup_done": 4, "report_done": 5, "new": 6, "unreviewed": 7}
+              "followup_done": 4, "report_done": 5, "new": 6, "unreviewed": 7,
+              "insurer_flag": 8, "turned_critical": 9}
 MAX_ITEMS = 50
 
 
@@ -115,6 +116,10 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
     """Every alert the caller has, most serious first."""
     if user["role"] == "pharmacy":
         return await _pharmacy_done(user)
+    if user["role"] == "insurer":
+        # Hospitals' billing flags and members turned critical (core/insurer_alerts.py).
+        from core import insurer_alerts                   # avoid an import cycle
+        return await insurer_alerts.bell_items(user, scope)
     if user["role"] not in CARE_TEAM_ROLES:
         return await _followup_requests(user) if await followups.notifies(user) else []
     db = get_db()

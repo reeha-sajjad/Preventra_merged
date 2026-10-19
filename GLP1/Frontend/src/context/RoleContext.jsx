@@ -66,7 +66,9 @@ export function RoleProvider({ children }) {
       notPharmacy: role !== 'pharmacy',
       // The hospital Overview as the home page: everyone with an Overview except
       // case managers, whose home is "Today" (the Overview moves to /overview).
-      hasOverviewHome: OVERVIEW_ROLES.includes(role) && role !== 'case_manager',
+      hasOverviewHome: OVERVIEW_ROLES.includes(role) && role !== 'case_manager' && role !== 'insurer',
+      // An insurer's home is its members page (pages/InsurerHome.jsx); its overview moves to /overview.
+      isInsurer: role === 'insurer',
     }}>
       {children}
     </RoleContext.Provider>

@@ -11,6 +11,8 @@ export const FOLLOWUP_REQUEST_ROLES = ['doctor', 'nurse'];
 export const FOLLOWUP_HANDLE_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const ASSIGN_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 // Who finds a patient by insurance member ID (api/member_ids.py).
+// An insurer's home is its members page (pages/InsurerHome.jsx); Overview moves to /overview.
+export const INSURER_ROLES = ['insurer'];
 export const MEMBER_LOOKUP_ROLES = ['superadmin', 'hospital_admin', 'case_manager', 'insurer'];
 export const MANAGER_ROLES = ['superadmin', 'hospital_admin'];
 // Registering a doctor for alert routing (api/access.py ACTIONS manage_doctors).

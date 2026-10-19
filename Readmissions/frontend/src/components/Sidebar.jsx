@@ -4,7 +4,7 @@ import { LayoutDashboard, HeartPulse, BarChart, UserPlus, Info, Stethoscope, Use
          FlaskConical, Settings, CalendarClock, Pill } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
-import { can, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
+import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
          PHARMACY_ROLES, ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
@@ -54,7 +54,9 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
     { name: role === 'caretaker' ? 'People I care for' : 'My health', path: '/', icon: <HeartPulse size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ] : [
-    ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
+    ...(can(INSURER_ROLES) ? [{ name: 'Members', path: '/', icon: <UsersRound size={20} /> },
+                              { name: 'Members overview', path: '/overview', icon: <LayoutDashboard size={20} /> }]
+      : can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
     ...(can(MY_PATIENTS_ROLES) ? [{ name: 'My patients', path: '/', icon: <LayoutDashboard size={20} /> }] : []),
     // A pharmacy's patient list is its home page.
     ...(can(PHARMACY_ROLES) ? [{ name: 'Pharmacy', path: '/', icon: <Pill size={20} /> }]

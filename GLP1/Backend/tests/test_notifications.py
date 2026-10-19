@@ -50,7 +50,7 @@ def test_patient_alerts_are_for_doctors_and_nurses_only(world, email):
     c = client(world, email)
     r = c.get("/api/notifications")
     assert r.status_code == 200 and r.json()["items"] == []
-    assert r.json()["enabled"] is (email == "cm@a.test")
+    assert r.json()["enabled"] is (email in ("cm@a.test", "claims@acme.test"))   # insurers: core/insurer_alerts.py
     assert c.post("/api/notifications/seen", json={"all": True}).status_code == 403
 
 
@@ -146,5 +146,6 @@ def test_counts_and_order(world):
     body = client(world, "doc@a.test").get("/api/notifications").json()
     assert [i["patient_idx"] for i in body["items"]] == [1, 3, 0]       # risen, new, unreviewed
     assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0, "followup_handed": 0,
-                                                 "followup_report": 0, "report_done": 0}
+                                                 "followup_report": 0, "report_done": 0, "insurer_flag": 0,
+                                                 "turned_critical": 0}
     assert not {"name", "email", "BMXBMI"} & set().union(*body["items"])

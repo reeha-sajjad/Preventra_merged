@@ -179,6 +179,10 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
     team = (await hospital.care_teams([patient_idx]))[patient_idx]
     state = await detail_access(user, patient_idx)
     extra = {}
+    if user["role"] == "insurer":
+        # Looking at a member clears "turned critical" for them from the bell.
+        from core import insurer_alerts                   # avoid an import cycle
+        await insurer_alerts.mark_seen(user, scope, [patient_idx])
     if user["role"] == "pharmacy":
         # A pharmacy: the dispensing facts it already has, and the look is logged.
         from core import pharmacy                         # avoid an import cycle

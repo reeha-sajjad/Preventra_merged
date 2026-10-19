@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CreditCard, Pencil, Loader2 } from 'lucide-react';
 import { api } from '../../data/api';
+import { PatientFlags } from './InsurerFlags';
 
 /**
  * A patient's insurer and member ID (Backend/core/member_ids.py) - the ID on
@@ -75,6 +76,7 @@ export default function InsuranceCard({ patientIdx, compact = false, className =
         <CreditCard size={16} className="text-gray-400" /> Insurance
       </h2>
       {body}
+      {data.insurer && <PatientFlags patientIdx={patientIdx} insurerName={data.insurer.name} />}
     </div>
   );
 }

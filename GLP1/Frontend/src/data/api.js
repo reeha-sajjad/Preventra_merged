@@ -176,10 +176,20 @@ export const api = {
   getMyHome:            (patient) => get(`/api/my-home${patient != null ? `?patient=${patient}` : ''}`),
   /** { reason, note?, patient_idx? } - the patient (or caretaker) asks the case manager */
   askCaseManager:       (body) => post('/api/my-home/ask', body),
+  // An insurer's home - Backend/core/insurer.py
+  getInsurerHome:       () => get('/api/insurer/home'),
   // Insurance member IDs - Backend/core/member_ids.py
   getInsurance:         (idx) => get(`/api/patients/${idx}/insurance`),
   setMemberId:          (idx, memberId) => post(`/api/patients/${idx}/insurance`, { member_id: memberId }),
   findByMemberId:       (memberId) => get(`/api/member-lookup?member_id=${encodeURIComponent(memberId)}`),
+  // Insurer alerts and hospitals' billing flags - Backend/core/insurer_alerts.py
+  getInsurerFlagsFor:   (idx) => get(`/api/patients/${idx}/insurer-flags`),
+  /** { kind: billing_query | prior_auth | coverage_check, note } */
+  sendInsurerFlag:      (idx, body) => post(`/api/patients/${idx}/insurer-flags`, body),
+  getInsurerFlags:      (status = 'open') => get(`/api/insurer/flags?status=${status}`),
+  /** { status: received | approved | needs_info, note? } */
+  replyInsurerFlag:     (id, body) => post(`/api/insurer/flags/${id}/reply`, body),
+  markInsurerAlertsSeen: (patientIds) => post('/api/insurer/alerts/seen', { patient_ids: patientIds ?? null }),
   // Caretakers a patient links - Backend/core/caretakers.py
   getCaretakers:        (patient) => get(`/api/caretakers${patient != null ? `?patient=${patient}` : ''}`),
   /** { email, patient_idx? (staff), patient_agreed? (staff) } */

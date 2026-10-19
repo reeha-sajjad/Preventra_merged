@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen, getFollowUpBell, FOLLOWUPS_CHANGED } from '../api';
-import { Bell, Check, Loader2, Pill, CalendarCheck } from 'lucide-react';
-import { can, WATCH_ROLES, FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES } from '../roles';
+import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen, getFollowUpBell, markInsurerAlertsSeen, FOLLOWUPS_CHANGED } from '../api';
+import { Bell, Check, CheckCheck, Loader2, Pill, CalendarCheck, Receipt, Siren } from 'lucide-react';
+import { can, WATCH_ROLES, FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, INSURER_ROLES } from '../roles';
 import { RisingRiskRow } from './shared/RisingRiskList';
 
 // How many unopened rising patients the dropdown lists; the rest are on the
@@ -18,9 +18,12 @@ export default function AlertsBell() {
   const [rising, setRising] = useState(null);
   const watches = can(WATCH_ROLES);
   // Follow-up news (api/followups.bell): a case manager hears of pharmacy
-  // reports on requests they hold; a pharmacy hears when its reports are done.
+  // reports on requests they hold; a pharmacy hears when its reports are done;
+  // an insurer hears of hospitals' billing flags and members who turned high
+  // risk (api/insurer_alerts.py).
   const [news, setNews] = useState([]);
-  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES);
+  const isInsurer = can(INSURER_ROLES);
+  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES) || isInsurer;
   const [open, setOpen] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState(null);
   const containerRef = useRef(null);
@@ -40,8 +43,23 @@ export default function AlertsBell() {
   // opening the pharmacy page (both pages tell the backend).
   const openNews = (item) => {
     setOpen(false);
+    if (isInsurer) {
+      // A flag leaves the bell when answered (on Members); a member who turned
+      // high risk when opened.
+      if (item.kind === 'turned_high') {
+        markInsurerAlertsSeen([item.patient_id]).catch(() => {});
+        setNews((n) => n.filter((i) => !(i.kind === 'turned_high' && i.patient_id === item.patient_id)));
+        navigate(`/patients/${encodeURIComponent(item.patient_id)}`);
+      } else navigate('/');
+      return;
+    }
     setNews([]);
     navigate(item.kind === 'report_done' ? '/' : '/follow-ups');
+  };
+  const turnedHigh = news.filter((i) => i.kind === 'turned_high');
+  const markAllHigh = () => {
+    markInsurerAlertsSeen().catch(() => {});
+    setNews((n) => n.filter((i) => i.kind !== 'turned_high'));
   };
 
   const openRising = (item) => {
@@ -115,22 +133,35 @@ export default function AlertsBell() {
           <div className="max-h-[28rem] overflow-y-auto divide-y divide-gray-100">
             {news.length > 0 && (
               <>
-                <div className="px-4 py-3 bg-gray-50">
+                <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-gray-800 text-sm">
-                    {news[0].kind === 'report_done' ? 'Your reports that are done' : 'Pharmacy reports on your follow-ups'}
+                    {isInsurer ? 'Your members' : news[0].kind === 'report_done' ? 'Your reports that are done' : 'Pharmacy reports on your follow-ups'}
                   </h3>
+                  {turnedHigh.length > 0 && (
+                    <button type="button" onClick={markAllHigh}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-ns-navy whitespace-nowrap">
+                      <CheckCheck size={13} /> Mark all as read
+                    </button>
+                  )}
                 </div>
                 {news.map((item) => (
-                  <button key={item.followup_id} type="button" onClick={() => openNews(item)}
+                  <button key={item.followup_id || item.flag_id || `${item.kind}-${item.patient_id}`} type="button" onClick={() => openNews(item)}
                     className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3">
                     {item.kind === 'report_done'
                       ? <CalendarCheck size={16} className="mt-0.5 text-green-700 shrink-0" />
+                      : item.kind === 'insurer_flag' ? <Receipt size={16} className="mt-0.5 text-ns-navy shrink-0" />
+                      : item.kind === 'turned_high' ? <Siren size={16} className="mt-0.5 text-risk-high shrink-0" />
                       : <Pill size={16} className="mt-0.5 text-amber-700 shrink-0" />}
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-semibold text-ns-navy">{item.patient_id}</span>
+                      <span className="block text-sm font-semibold text-ns-navy">
+                        {isInsurer && item.member_id ? `Member ${item.member_id}` : item.patient_id}
+                      </span>
                       <span className="block text-sm text-gray-600 mt-0.5">
                         {item.kind === 'report_done'
                           ? `${item.problem_label ? `${item.problem_label} · ` : ''}done: ${item.outcome_label}`
+                          : item.kind === 'insurer_flag' ? `${item.hospital}: ${item.kind_label} · from ${item.by}`
+                          : item.kind === 'turned_high'
+                          ? `Turned high risk (${Math.round(item.risk_score)}%)${item.previous_band ? ` · was ${item.previous_band}` : ' · new member'}`
                           : `${item.by}: ${item.problem_label}`}
                       </span>
                     </span>

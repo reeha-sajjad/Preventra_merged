@@ -165,10 +165,18 @@ const RealAPI = {
   undoMedicinesGiven: (id, patient) => apiFetch(`/api/my-home/medicines/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
     { method: 'DELETE' }),
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
+  // An insurer's home (api/insurer.py).
+  getInsurerHome: () => apiFetch('/api/insurer/home'),
   // Insurance member IDs (api/member_ids.py).
   getInsurance: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurance`),
   setMemberId: (id, memberId) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurance`, json({ member_id: memberId })),
   findByMemberId: (memberId) => apiFetch(`/api/member-lookup?member_id=${encodeURIComponent(memberId)}`),
+  // Insurer alerts and hospitals' billing flags (api/insurer_alerts.py).
+  getInsurerFlagsFor: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer-flags`),
+  sendInsurerFlag: (id, body) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer-flags`, json(body)),
+  getInsurerFlags: (status = 'open') => apiFetch(`/api/insurer/flags?status=${status}`),
+  replyInsurerFlag: (fid, body) => apiFetch(`/api/insurer/flags/${fid}/reply`, json(body)),
+  markInsurerAlertsSeen: (patientIds) => apiFetch('/api/insurer/alerts/seen', json({ patient_ids: patientIds ?? null })),
   // Caretakers a patient links (api/caretakers.py).
   getCaretakers: (patient) => apiFetch(`/api/caretakers${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   linkCaretaker: (body) => apiFetch('/api/caretakers', json(body)),
@@ -480,8 +488,14 @@ export const getMyHome           = realOnly(RealAPI.getMyHome);
 export const askCaseManager      = realOnly(RealAPI.askCaseManager);
 export const getCaretakers       = realOnly(RealAPI.getCaretakers);
 export const getInsurance        = realOnly(RealAPI.getInsurance);
+export const getInsurerHome      = realOnly(RealAPI.getInsurerHome);
 export const setMemberId         = realOnly(RealAPI.setMemberId);
 export const findByMemberId      = realOnly(RealAPI.findByMemberId);
+export const getInsurerFlagsFor  = realOnly(RealAPI.getInsurerFlagsFor);
+export const sendInsurerFlag     = realOnly(RealAPI.sendInsurerFlag);
+export const getInsurerFlags     = realOnly(RealAPI.getInsurerFlags);
+export const replyInsurerFlag    = realOnly(RealAPI.replyInsurerFlag);
+export const markInsurerAlertsSeen = realOnly(RealAPI.markInsurerAlertsSeen);
 export const getMedicinesGiven   = realOnly(RealAPI.getMedicinesGiven);
 export const recordMedicinesGiven = realOnly(RealAPI.recordMedicinesGiven);
 export const undoMedicinesGiven  = realOnly(RealAPI.undoMedicinesGiven);
