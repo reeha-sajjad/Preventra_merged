@@ -42,7 +42,8 @@ def test_a_patient_with_no_record_linked_is_told_so(world):
     users = world["store"]["shared_identity"].users
     uid = users.insert_one({"email": "new@patient.test", "role": "patient", "status": "active",
                             "hospital_id": "hosp-a", "app_access": ["glp1"]}).inserted_id
-    import jwt, time
+    import time
+    from jose import jwt                        # the same library the app verifies with
     from core.config import settings
     from fastapi.testclient import TestClient
     import main
