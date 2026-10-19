@@ -26,6 +26,9 @@ Who does what (core/access.py has the role lists):
                            there (report); it becomes a request - or a note on
                            the open one - for the patient's case manager. Sees
                            only the status of its own reports, never the notes.
+                           A report on a request someone already holds rings
+                           that person's bell; when the request is done, the
+                           pharmacy's bell says so.
 
 Rules:
   * One request at a time per patient. A second person sees the open one and
@@ -262,11 +265,17 @@ async def report(user: dict, scope: Optional[list], patient_idx: int, problem: s
     text = f"{who.get('pharmacy') or who['name']}: {PHARMACY_PROBLEMS[problem]}" + (f" - {note}" if note else "")
     existing = await _collection().find_one({"active_patient": int(patient_idx)})
     if existing:
+        updates = {"urgency": "urgent"} if urgency == "urgent" else {}  # never urgent -> routine
+        holder = (existing.get("taken_by") or {}).get("id")
+        if existing["status"] == "in_progress" and holder:
+            # Someone is already on it: tell them, since a new request would not
+            # reach their bell (it only shows untaken ones). See reported_for_bell.
+            updates["report_alert"] = {"for": holder, "by": who.get("pharmacy") or who["name"],
+                                       "problem": problem, "at": now}
         await _collection().update_one({"_id": existing["_id"]}, {
             "$push": {"pharmacy_reports": entry, "notes": {"by": who, "at": now, "text": text},
                       "history": {"action": "pharmacy_report", "by": who, "at": now, "problem": problem}},
-            # An urgent report makes a routine request urgent, never the reverse.
-            **({"$set": {"urgency": "urgent"}} if urgency == "urgent" else {})})
+            **({"$set": updates} if updates else {})})
         return {"added_to_open": True, "followup": pharmacy_view(
             await _collection().find_one({"_id": existing["_id"]}), user)}
     access = await get_db().patient_access.find_one({"patient_idx": int(patient_idx)}, {"hospital_id": 1})
@@ -357,10 +366,12 @@ async def complete(user: dict, scope: Optional[list], followup_id: str,
             "followup": public(doc)})
     who, now = await _who(user), _now()
     taken = {} if doc.get("taken_by") else {"taken_by": who, "taken_at": now}
+    # The pharmacies that reported on it hear it is done (pharmacy_done_for_bell).
+    told = sorted({p["pharmacy_id"] for p in doc.get("pharmacy_reports", []) if p.get("pharmacy_id")})
     result = await _collection().update_one({"_id": doc["_id"], "status": doc["status"]}, {
         "$set": {"status": "done", "outcome": outcome, "outcome_note": _clean_note(note),
-                 "done_by": who, "done_at": now, **taken},
-        "$unset": {"active_patient": "", "handover_alert": ""},
+                 "done_by": who, "done_at": now, **taken, **({"pharmacy_alert": told} if told else {})},
+        "$unset": {"active_patient": "", "handover_alert": "", "report_alert": ""},
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
@@ -400,7 +411,8 @@ async def release(user: dict, scope: Optional[list], followup_id: str) -> dict:
     _may_reassign(user, doc)
     who, now = await _who(user), _now()
     result = await _collection().update_one({"_id": doc["_id"], "status": "in_progress"}, {
-        "$set": {"status": "open"}, "$unset": {"taken_by": "", "taken_at": "", "handover_alert": ""},
+        "$set": {"status": "open"},
+        "$unset": {"taken_by": "", "taken_at": "", "handover_alert": "", "report_alert": ""},
         "$push": {"history": {"action": "released", "by": who, "at": now,
                               "from": doc.get("taken_by")}}})
     if result.modified_count == 0:
@@ -431,6 +443,7 @@ async def hand_over(user: dict, scope: Optional[list], followup_id: str, to_user
                  # The bell of the person it was given to, until they open
                  # Follow-ups or act on it (see handed_for_bell).
                  "handover_alert": {"for": to["id"], "by": who["name"], "at": now}},
+        "$unset": {"report_alert": ""},
         "$push": {"history": {"action": "handed_over", "by": who, "at": now,
                               "from": doc.get("taken_by"), "to": to}}})
     if result.modified_count == 0:
@@ -492,8 +505,10 @@ async def has_case_manager(hospital_id: Optional[str]) -> bool:
 
 
 async def notifies(user: dict) -> bool:
-    """Does this person get new requests in their bell? Case managers always;
-    a hospital admin only when the hospital has no case manager."""
+    """Does this person have a bell? Case managers always; a hospital admin only
+    when the hospital has no case manager; a pharmacy placed in one."""
+    if user["role"] == "pharmacy":
+        return bool(user.get("pharmacy_id"))
     if user["role"] == "case_manager":
         return bool(user.get("hospital_id"))
     if user["role"] == "hospital_admin":
@@ -532,12 +547,47 @@ async def handed_for_bell(user: dict) -> list:
              "handed_at": _aware(d["handover_alert"]["at"]).isoformat()} for d in docs]
 
 
+async def reported_for_bell(user: dict) -> list:
+    """Requests the caller holds that a pharmacy has reported on since they
+    last opened Follow-ups. They leave the bell the same way as handed ones."""
+    docs = await _collection().find({"hospital_id": user.get("hospital_id"), "status": "in_progress",
+                                     "report_alert.for": user["id"]}).to_list(length=None)
+    risk = await _risk([d["patient_idx"] for d in docs])
+    return [{**public(d, risk.get(d["patient_idx"])),
+             "reported_by": d["report_alert"]["by"],
+             "reported_problem": PHARMACY_PROBLEMS.get(d["report_alert"]["problem"], d["report_alert"]["problem"]),
+             "reported_at": _aware(d["report_alert"]["at"]).isoformat()} for d in docs]
+
+
 async def seen_handed(user: dict) -> int:
-    """The caller has opened Follow-ups: what was handed to them leaves their
-    bell. (Not done by the list itself - the menu badge loads that too.)"""
+    """The caller has opened Follow-ups: what was handed to them, and pharmacy
+    reports on what they hold, leave their bell. (Not done by the list itself -
+    the menu badge loads that too.)"""
     _require_handler(user)
-    result = await _collection().update_many({"handover_alert.for": user["id"]},
+    handed = await _collection().update_many({"handover_alert.for": user["id"]},
                                              {"$unset": {"handover_alert": ""}})
+    reported = await _collection().update_many({"report_alert.for": user["id"]},
+                                               {"$unset": {"report_alert": ""}})
+    return handed.modified_count + reported.modified_count
+
+
+async def pharmacy_done_for_bell(user: dict) -> list:
+    """A pharmacy's bell: its reports whose request was finished since it last
+    opened its home page. Status and outcome only, as on that page."""
+    if not user.get("pharmacy_id"):
+        return []
+    docs = await _collection().find({"status": "done", "pharmacy_alert": user["pharmacy_id"]}) \
+        .sort("done_at", -1).limit(200).to_list(length=200)
+    risk = await _risk([d["patient_idx"] for d in docs])
+    return [{**pharmacy_view(d, user), "dropout_prob": risk.get(d["patient_idx"], 0.0)} for d in docs]
+
+
+async def seen_pharmacy(user: dict) -> int:
+    """The pharmacy has opened its home page: finished reports leave its bell."""
+    if user["role"] != "pharmacy" or not user.get("pharmacy_id"):
+        raise HTTPException(status_code=403, detail="For pharmacies")
+    result = await _collection().update_many({"pharmacy_alert": user["pharmacy_id"]},
+                                             {"$pull": {"pharmacy_alert": user["pharmacy_id"]}})
     return result.modified_count
 
 

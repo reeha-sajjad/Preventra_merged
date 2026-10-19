@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarClock, Inbox, Hourglass, AlertTriangle, Bell } from 'lucide-react';
-import { getFollowUps, takeFollowUp } from '../api';
+import { getFollowUps, takeFollowUp, markFollowUpReportsSeen } from '../api';
 import { readClaims } from '../api/auth';
 import RiskBadge from '../components/shared/RiskBadge';
 import { DoneDialog, StatusPill, UrgencyPill } from '../components/followups/shared';
@@ -41,6 +41,8 @@ export default function FollowUps() {
     getFollowUps(tab).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   }, [tab]);
   useEffect(() => { load(); }, [load]);
+  // Opening this page clears pharmacy reports on your requests from the bell.
+  useEffect(() => { markFollowUpReportsSeen().catch(() => {}); }, []);
   const switchTab = (k) => { if (k !== tab) { setData(null); setTab(k); } };
 
   const take = async (f) => {

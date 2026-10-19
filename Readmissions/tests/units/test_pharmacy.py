@@ -155,3 +155,38 @@ def test_a_report_needs_a_real_problem_and_a_patient_of_ours(main, world):
 
 def test_settings_names_the_pharmacy(main, world):
     assert rx(main, world).get("/api/me").json()["pharmacy"]["id"] == "bay"
+
+
+# ------------------------------------------------------- the two bell alerts
+def bell(main, world, email):
+    return as_user(main, world, email).get("/api/followups/bell").json()["items"]
+
+
+def test_a_report_on_a_request_someone_holds_rings_their_bell(main, world):
+    cm = as_user(main, world, "cm@a.test")
+    report(main, world)
+    fid = str(world["db"][followups.COLLECTION].find_one({"patient_id": A2})["_id"])
+    assert bell(main, world, "cm@a.test") == []                    # untaken: the waiting count has it
+    assert cm.post(f"/api/followups/{fid}/take").status_code == 200
+    report(main, world, problem="cost", note="")
+    [item] = bell(main, world, "cm@a.test")
+    assert item["kind"] == "followup_report" and item["followup_id"] == fid
+    assert item["problem_label"] == "Said they can't afford it" and item["by"] == "bay"
+    assert bell(main, world, "admin@a.test") == []                 # only the person holding it
+    assert cm.post("/api/followups/reports-seen").json()["seen"] == 1
+    assert bell(main, world, "cm@a.test") == []
+
+
+def test_the_pharmacy_hears_when_its_report_is_done(main, world):
+    report(main, world)
+    fid = str(world["db"][followups.COLLECTION].find_one({"patient_id": A2})["_id"])
+    assert bell(main, world, "rx@bay.test") == []
+    done = as_user(main, world, "cm@a.test").post(f"/api/followups/{fid}/done",
+                                                  json={"outcome": "booked", "note": "New pickup Thursday"})
+    assert done.status_code == 200
+    [item] = bell(main, world, "rx@bay.test")
+    assert item["kind"] == "report_done" and item["outcome_label"] == "Booked"
+    assert item["problem_label"] == "Missed a refill pickup" and "Thursday" not in str(item)
+    assert as_user(main, world, "cm@a.test").post("/api/pharmacy/seen").status_code == 403
+    assert rx(main, world).post("/api/pharmacy/seen").json()["seen"] == 1
+    assert bell(main, world, "rx@bay.test") == []

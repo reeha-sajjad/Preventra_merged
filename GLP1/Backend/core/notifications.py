@@ -1,5 +1,7 @@
 """
 The bell for doctors and hospital nurses: which of their own patients need a look.
+(Case managers get follow-up requests in theirs, and pharmacies hear when a
+problem they reported is done - see the end of this docstring.)
 
 Three reasons, worked out on every call from the patients the caller may see
 (core/access.patient_scope - exactly as for the patient list), so nothing here
@@ -19,6 +21,10 @@ the alert updates it, so a patient leaves the bell and comes back only if their
 risk rises again. Readmissions' bell (api/risk_watch.py) works the same way on
 its weekly scores.
 
+Case managers: requests handed to them, pharmacy reports on requests they
+hold, and new requests (core/followups.py). Pharmacies: their reports that
+were finished, with the outcome only.
+
 Only counts and patient numbers leave this module - no names, and nothing is
 sent outside the app (no email or text), so no patient detail travels anywhere
 the access controls do not reach.
@@ -37,8 +43,8 @@ SEEN_COLLECTION = "notification_seen"
 CRITICAL = 0.75
 RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
-KIND_ORDER = {"followup_handed": 0, "followup_new": 1, "risk_up": 2, "followup_done": 3, "new": 4,
-              "unreviewed": 5}
+KIND_ORDER = {"followup_handed": 0, "followup_report": 1, "followup_new": 2, "risk_up": 3,
+              "followup_done": 4, "report_done": 5, "new": 6, "unreviewed": 7}
 MAX_ITEMS = 50
 
 
@@ -78,19 +84,36 @@ def _request_item(f: dict, kind: str) -> dict:
 
 
 async def _followup_requests(user: dict) -> list:
-    """A case manager's bell: requests handed to them by a colleague (until they
-    open Follow-ups), then new requests nobody has taken yet, urgent first, then
+    """A case manager's bell: requests handed to them by a colleague, and ones
+    they hold that a pharmacy has since reported on (both until they open
+    Follow-ups), then new requests nobody has taken yet, urgent first, then
     oldest. New ones leave the bell when someone takes them."""
     handed = [{**_request_item(f, "followup_handed"), "handed_by": f["handed_by"]}
               for f in await followups.handed_for_bell(user)]
+    reported = [{**_request_item(f, "followup_report"), "requested_by": f["reported_by"],
+                 "problem_label": f["reported_problem"]}
+                for f in await followups.reported_for_bell(user)]
     waiting = [_request_item(f, "followup_new") for f in await followups.open_for_bell(user)]
-    handed.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
-    waiting.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
-    return handed + waiting
+    for group in (handed, reported, waiting):
+        group.sort(key=lambda i: (not i["urgent"], i["requested_at"]))
+    # A request both handed over and reported on shows once, as handed.
+    shown = {i["followup_id"] for i in handed}
+    return handed + [i for i in reported if i["followup_id"] not in shown] + waiting
+
+
+async def _pharmacy_done(user: dict) -> list:
+    """A pharmacy's bell: its reports that are now done, newest first."""
+    return [{"patient_idx": f["patient_idx"], "dropout_prob": f["dropout_prob"], "kinds": ["report_done"],
+             "followup_id": f["id"], "outcome_label": f["outcome_label"],
+             "problem_label": (f["reports"] or [{}])[-1].get("problem_label"),
+             "done_at": f["done_at"], "urgent": False}
+            for f in await followups.pharmacy_done_for_bell(user)]
 
 
 async def alerts(user: dict, scope: Optional[list]) -> list:
     """Every alert the caller has, most serious first."""
+    if user["role"] == "pharmacy":
+        return await _pharmacy_done(user)
     if user["role"] not in CARE_TEAM_ROLES:
         return await _followup_requests(user) if await followups.notifies(user) else []
     db = get_db()

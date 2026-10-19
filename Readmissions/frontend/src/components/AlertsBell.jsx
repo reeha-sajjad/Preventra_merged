@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen } from '../api';
-import { Bell, Check, Loader2 } from 'lucide-react';
-import { can, WATCH_ROLES } from '../roles';
+import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen, getFollowUpBell, FOLLOWUPS_CHANGED } from '../api';
+import { Bell, Check, Loader2, Pill, CalendarCheck } from 'lucide-react';
+import { can, WATCH_ROLES, FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES } from '../roles';
 import { RisingRiskRow } from './shared/RisingRiskList';
 
 // How many unopened rising patients the dropdown lists; the rest are on the
@@ -17,6 +17,10 @@ export default function AlertsBell() {
   // The caller's own patients whose latest week got worse (api/risk_watch.py).
   const [rising, setRising] = useState(null);
   const watches = can(WATCH_ROLES);
+  // Follow-up news (api/followups.bell): a case manager hears of pharmacy
+  // reports on requests they hold; a pharmacy hears when its reports are done.
+  const [news, setNews] = useState([]);
+  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES);
   const [open, setOpen] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState(null);
   const containerRef = useRef(null);
@@ -26,10 +30,19 @@ export default function AlertsBell() {
       .then((data) => setAlerts(Array.isArray(data) ? data : []))
       .catch(() => {});
     if (can(WATCH_ROLES)) getRisingRisk(50).then(setRising).catch(() => {});
+    if (hasNews) getFollowUpBell().then((d) => setNews(d.items || [])).catch(() => {});
   };
 
   const unseen = (rising?.patients || []).filter((p) => !p.seen);
-  const count = alerts.length + (rising?.unseen || 0);
+  const count = alerts.length + (rising?.unseen || 0) + news.length;
+
+  // Pharmacy reports are cleared by opening Follow-ups; finished reports by
+  // opening the pharmacy page (both pages tell the backend).
+  const openNews = (item) => {
+    setOpen(false);
+    setNews([]);
+    navigate(item.kind === 'report_done' ? '/' : '/follow-ups');
+  };
 
   const openRising = (item) => {
     setOpen(false);
@@ -46,9 +59,11 @@ export default function AlertsBell() {
     const interval = setInterval(load, POLL_INTERVAL_MS);
     // The Patients page's "Needs attention" panel marks patients seen too.
     window.addEventListener('rising-risk-changed', load);
+    window.addEventListener(FOLLOWUPS_CHANGED, load);
     return () => {
       clearInterval(interval);
       window.removeEventListener('rising-risk-changed', load);
+      window.removeEventListener(FOLLOWUPS_CHANGED, load);
     };
   }, []);
 
@@ -98,6 +113,31 @@ export default function AlertsBell() {
       {open && (
         <div className="absolute right-0 mt-2 w-96 bg-white rounded-xl border border-gray-200 shadow-lg z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
           <div className="max-h-[28rem] overflow-y-auto divide-y divide-gray-100">
+            {news.length > 0 && (
+              <>
+                <div className="px-4 py-3 bg-gray-50">
+                  <h3 className="font-semibold text-gray-800 text-sm">
+                    {news[0].kind === 'report_done' ? 'Your reports that are done' : 'Pharmacy reports on your follow-ups'}
+                  </h3>
+                </div>
+                {news.map((item) => (
+                  <button key={item.followup_id} type="button" onClick={() => openNews(item)}
+                    className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-start gap-3">
+                    {item.kind === 'report_done'
+                      ? <CalendarCheck size={16} className="mt-0.5 text-green-700 shrink-0" />
+                      : <Pill size={16} className="mt-0.5 text-amber-700 shrink-0" />}
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold text-ns-navy">{item.patient_id}</span>
+                      <span className="block text-sm text-gray-600 mt-0.5">
+                        {item.kind === 'report_done'
+                          ? `${item.problem_label ? `${item.problem_label} · ` : ''}done: ${item.outcome_label}`
+                          : `${item.by}: ${item.problem_label}`}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </>
+            )}
             {watches && (
               <>
                 <div className="px-4 py-3 bg-gray-50">
@@ -120,12 +160,12 @@ export default function AlertsBell() {
                 )}
               </>
             )}
-            {(alerts.length > 0 || !watches) && (
+            {(alerts.length > 0 || (!watches && news.length === 0)) && (
               <div className="px-4 py-3 bg-gray-50">
                 <h3 className="font-semibold text-gray-800 text-sm">Score edits</h3>
               </div>
             )}
-            {alerts.length === 0 && !watches && (
+            {alerts.length === 0 && !watches && news.length === 0 && (
               <p className="text-sm text-gray-400 italic px-4 py-6 text-center">No unacknowledged alerts.</p>
             )}
             {alerts.map((alert) => (

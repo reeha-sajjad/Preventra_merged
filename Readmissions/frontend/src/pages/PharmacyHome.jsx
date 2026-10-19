@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Pill, Users, AlertTriangle, PackageX, Send, Search, ChevronRight, CheckCircle2, Loader2 } from 'lucide-react';
-import { getPharmacyHome } from '../api';
+import { getPharmacyHome, markPharmacySeen } from '../api';
 import RiskBadge from '../components/shared/RiskBadge';
 import ReportDialog, { ReportStatus } from '../components/pharmacy/ReportDialog';
 import { REFILL } from '../components/pharmacy/refill';
@@ -30,6 +30,8 @@ export default function PharmacyHome() {
     getPharmacyHome().then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Opening this page clears "report done" from the bell.
+  useEffect(() => { markPharmacySeen().catch(() => {}); }, []);
 
   const shown = useMemo(() => {
     let rows = data?.patients || [];

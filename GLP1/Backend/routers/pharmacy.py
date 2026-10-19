@@ -31,3 +31,9 @@ async def pharmacy_report(patient_idx: int, body: ReportRequest, user: dict = De
                           scope: Optional[list] = Depends(scope_of)):
     """A pharmacy reports a refill problem; the patient's case manager gets it."""
     return await followups.report(user, scope, patient_idx, body.problem, body.urgency, body.note)
+
+
+@router.post("/pharmacy/seen")
+async def pharmacy_seen(user: dict = Depends(actor)):
+    """The pharmacy home page is open: finished reports leave the bell."""
+    return {"seen": await followups.seen_pharmacy(user)}

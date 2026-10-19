@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward } from 'lucide-react';
+import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill } from 'lucide-react';
 import { api } from '../../data/api';
 import { RiskBadge } from '../shared';
 
@@ -10,9 +10,13 @@ const REFRESH_MS = 60_000;
 const KINDS = {
   followup_handed: { icon: Forward, color: '#1B4F8A', label: () => 'handed to you', text: (i) =>
     `${i.handed_by} handed you ${i.urgency === 'urgent' ? 'an urgent' : 'a'} follow-up${i.overdue ? ' · overdue' : ''}` },
+  followup_report: { icon: Pill, color: '#B45309', label: (n) => `pharmacy report${n === 1 ? '' : 's'}`, text: (i) =>
+    `${i.requested_by}: ${i.problem_label} · on a follow-up you hold` },
   followup_new: { icon: CalendarClock, color: '#C62828', label: (n) => `follow-up request${n === 1 ? '' : 's'}`, text: (i) =>
     (i.problem_label ? `${i.requested_by}: ${i.problem_label}` :
       `${i.urgency === 'urgent' ? 'Urgent f' : 'F'}ollow-up requested by ${i.requested_by}`) + (i.overdue ? ' · overdue' : '') },
+  report_done: { icon: CalendarCheck, color: '#2E7D32', label: (n) => `report${n === 1 ? '' : 's'} done`, text: (i) =>
+    `${i.problem_label ? `${i.problem_label} · ` : ''}done: ${i.outcome_label}` },
   followup_done: { icon: CalendarCheck, color: '#2E7D32', label: (n) => `follow-up${n === 1 ? '' : 's'} done`, text: (i) =>
     `Follow-up done · ${i.followup?.outcome_label} (${i.followup?.done_by})` },
   risk_up:    { icon: TrendingUp,    color: '#C62828', text: (i) =>
@@ -22,9 +26,11 @@ const KINDS = {
 };
 
 /**
- * The bell in the top bar, for doctors and hospital nurses: their own patients
- * that need a look. Opening a patient clears them (the backend does that when
- * the patient page loads); "Mark all as read" clears the rest.
+ * The bell in the top bar. Doctors and hospital nurses: their own patients
+ * that need a look - opening a patient clears them (the backend does that when
+ * the patient page loads); "Mark all as read" clears the rest. Case managers:
+ * follow-up requests, and pharmacy reports on ones they hold. Pharmacies: their
+ * reports that are done - opening the pharmacy page clears them.
  */
 export default function NotificationBell() {
   const navigate = useNavigate();
@@ -60,8 +66,12 @@ export default function NotificationBell() {
   const items = data?.items ?? [];
   // Follow-up requests leave the bell when someone takes them (or, handed to
   // you, when you open Follow-ups), not when read.
-  const isRequest = (i) => i.kinds.includes('followup_new') || i.kinds.includes('followup_handed');
+  const isRequest = (i) => ['followup_new', 'followup_handed', 'followup_report'].some((k) => i.kinds.includes(k));
   const requestsOnly = items.length > 0 && items.every(isRequest);
+  // A pharmacy's bell: its finished reports, cleared by opening its page.
+  const reportsOnly = items.length > 0 && items.every((i) => i.kinds.includes('report_done'));
+  // Cleared by opening Follow-ups (handed to you, or a pharmacy report on yours).
+  const clearsOnFollowUps = (i) => i.kinds.includes('followup_handed') || i.kinds.includes('followup_report');
 
   const markAll = async () => {
     setBusy(true);
@@ -77,15 +87,16 @@ export default function NotificationBell() {
     setOpen(false);
     // Opening Follow-ups clears what was handed to you (the page tells the
     // backend); drop them here at once rather than wait for that.
-    if (item.kinds.includes('followup_handed')) {
+    if (clearsOnFollowUps(item)) {
       setData((d) => {
-        const left = d.items.filter((i) => !i.kinds.includes('followup_handed'));
-        const gone = d.counts.followup_handed ?? 0;
-        return { ...d, items: left, total: Math.max(0, d.total - gone), counts: { ...d.counts, followup_handed: 0 } };
+        const left = d.items.filter((i) => !clearsOnFollowUps(i));
+        return { ...d, items: left, total: Math.max(0, d.total - (d.items.length - left.length)),
+                 counts: { ...d.counts, followup_handed: 0, followup_report: 0 } };
       });
     }
-    navigate(item.kinds.includes('followup_handed') ? '/follow-ups?mine=1'
-      : item.kinds.includes('followup_new') ? '/follow-ups' : `/patients/${item.patient_idx}`);
+    navigate(clearsOnFollowUps(item) ? '/follow-ups?mine=1'
+      : item.kinds.includes('followup_new') ? '/follow-ups'
+      : item.kinds.includes('report_done') ? '/' : `/patients/${item.patient_idx}`);
   };
 
   // Hospital admins only get a bell when their hospital has no case manager.
@@ -113,12 +124,14 @@ export default function NotificationBell() {
             <div>
               <div className="font-semibold text-gray-800 text-sm">Notifications</div>
               <div className="text-xs text-gray-400 mt-0.5">
-                {!total ? 'Your patients' : requestsOnly
+                {!total ? 'Your patients' : reportsOnly
+                  ? `${total.toLocaleString()} of your report${total === 1 ? '' : 's'} done`
+                  : requestsOnly
                   ? `${total.toLocaleString()} follow-up request${total === 1 ? '' : 's'} for you`
                   : `${total.toLocaleString()} of your patients need a look`}
               </div>
             </div>
-            {total > 0 && !requestsOnly && (
+            {total > 0 && !requestsOnly && !reportsOnly && (
               <button type="button" onClick={markAll} disabled={busy}
                 className="inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap disabled:opacity-50"
                 style={{ color: 'var(--color-primary)' }}>

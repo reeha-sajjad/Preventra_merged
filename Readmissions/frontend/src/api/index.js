@@ -139,6 +139,13 @@ const RealAPI = {
   // menu's waiting count refreshes at once rather than on the next page.
   getFollowUps: (status = 'active') => apiFetch(`/api/followups?status=${status}`),
   getFollowUpsWaiting: () => apiFetch('/api/followups/waiting'),
+  // The bell's follow-up news: pharmacy reports on requests a case manager
+  // holds, or a pharmacy's reports that are done. Opening Follow-ups (or the
+  // pharmacy page) clears them and tells the bell.
+  getFollowUpBell: () => apiFetch('/api/followups/bell'),
+  markFollowUpReportsSeen: () =>
+    apiFetch('/api/followups/reports-seen', { method: 'POST' }).then(followUpsChanged),
+  markPharmacySeen: () => apiFetch('/api/pharmacy/seen', { method: 'POST' }).then(followUpsChanged),
   getPatientFollowUp: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`),
   requestFollowUp: (id, body) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/followup`, json(body)).then(followUpsChanged),
@@ -442,6 +449,9 @@ export const emergencyGrant      = realOnly(RealAPI.emergencyGrant);
 export const getPatientEmergency = realOnly(RealAPI.getPatientEmergency);
 export const getFollowUps        = realOnly(RealAPI.getFollowUps);
 export const getFollowUpsWaiting = realOnly(RealAPI.getFollowUpsWaiting);
+export const getFollowUpBell     = realOnly(RealAPI.getFollowUpBell);
+export const markFollowUpReportsSeen = realOnly(RealAPI.markFollowUpReportsSeen);
+export const markPharmacySeen    = realOnly(RealAPI.markPharmacySeen);
 export const getPatientFollowUp  = realOnly(RealAPI.getPatientFollowUp);
 export const requestFollowUp     = realOnly(RealAPI.requestFollowUp);
 export const addFollowUpNote     = realOnly(RealAPI.addFollowUpNote);

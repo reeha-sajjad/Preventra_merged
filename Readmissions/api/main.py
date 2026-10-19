@@ -2629,6 +2629,19 @@ def followups_waiting(request: Request):
     return {"waiting": followups.waiting(db, request.state.user)}
 
 
+@app.get("/api/followups/bell")
+def followups_bell(request: Request):
+    """Follow-up news for the bell: pharmacy reports on requests a case manager
+    holds, or a pharmacy's reports that are done."""
+    return {"items": followups.bell(db, request.state.user)}
+
+
+@app.post("/api/followups/reports-seen")
+def followups_reports_seen(request: Request):
+    """The Follow-ups page is open: pharmacy reports leave the caller's bell."""
+    return {"seen": followups.seen_reports(db, request.state.user)}
+
+
 @app.get("/api/patients/{patient_id}/followup")
 def get_patient_followup(patient_id: str, request: Request):
     return followups.for_patient(db, request.state.user, _scope(request), patient_id)
@@ -2669,6 +2682,12 @@ class PharmacyReport(BaseModel):
 def pharmacy_home(request: Request):
     """The discharged patients who fill at the caller's pharmacy, and its reports."""
     return pharmacy.home(db, request.state.user, _scope(request))
+
+
+@app.post("/api/pharmacy/seen")
+def pharmacy_seen(request: Request):
+    """The pharmacy home page is open: finished reports leave the bell."""
+    return {"seen": followups.seen_pharmacy(db, request.state.user)}
 
 
 @app.post("/api/patients/{patient_id}/pharmacy-report", status_code=201)

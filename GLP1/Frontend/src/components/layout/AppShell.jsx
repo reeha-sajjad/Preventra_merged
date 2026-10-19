@@ -267,7 +267,7 @@ export default function AppShell({ children }) {
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <HospitalPicker />
-            {(isCareTeam || role === 'case_manager' || role === 'hospital_admin') && <NotificationBell />}
+            {(isCareTeam || role === 'case_manager' || role === 'hospital_admin' || role === 'pharmacy') && <NotificationBell />}
             {/* Role indicator pill */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
                  style={{ background: isCostView || role === 'hospital_admin' ? '#E3F2FD' : '#E8F5E9',

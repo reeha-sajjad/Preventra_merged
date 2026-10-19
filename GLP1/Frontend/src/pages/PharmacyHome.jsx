@@ -34,6 +34,12 @@ export default function PharmacyHome() {
     api.getPharmacyHome().then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Opening this page clears "report done" from the bell.
+  useEffect(() => {
+    api.markPharmacySeen()
+      .then(() => window.dispatchEvent(new Event('preventra:bell-refresh')))
+      .catch(() => {});
+  }, []);
 
   const shown = useMemo(() => {
     let rows = data?.patients || [];

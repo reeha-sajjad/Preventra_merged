@@ -127,3 +127,40 @@ def test_a_report_needs_a_real_problem_and_a_patient_of_ours(world, clean):
 
 def test_settings_names_the_pharmacy(world):
     assert rx(world).get("/api/me").json()["pharmacy"]["id"] == "bay"
+
+# ------------------------------------------------------- the two bell alerts
+def bell(world, email):
+    return client(world, email).get("/api/notifications").json()
+
+
+def test_a_report_on_a_request_someone_holds_rings_their_bell(world, clean):
+    cm = client(world, "cm@a.test")
+    report(world)
+    fid = str(world["db"][COLLECTION].find_one({"patient_idx": 1})["_id"])
+    assert cm.post(f"/api/followups/{fid}/take").status_code == 200
+    assert not any(i["followup_id"] == fid for i in bell(world, "cm@a.test")["items"])   # taken: gone
+    report(world, problem="cost", note="")                         # a second problem while held
+    item = next(i for i in bell(world, "cm@a.test")["items"] if i["followup_id"] == fid)
+    assert item["kinds"] == ["followup_report"] and item["problem_label"] == "Said they can't afford it"
+    assert item["requested_by"] == "bay"                            # the pharmacy, not the person
+    # Opening Follow-ups clears it.
+    assert cm.post("/api/followups/handed-seen").json()["seen"] == 1
+    assert not any(i["followup_id"] == fid for i in bell(world, "cm@a.test")["items"])
+
+
+def test_the_pharmacy_hears_when_its_report_is_done(world, clean):
+    empty = bell(world, "rx@bay.test")
+    assert empty["enabled"] is True and empty["total"] == 0
+    report(world)
+    fid = str(world["db"][COLLECTION].find_one({"patient_idx": 1})["_id"])
+    assert bell(world, "rx@bay.test")["total"] == 0                 # not done yet
+    done = client(world, "cm@a.test").post(f"/api/followups/{fid}/done",
+                                           json={"outcome": "booked", "note": "Rang her, new pickup Thursday"})
+    assert done.status_code == 200
+    item = bell(world, "rx@bay.test")["items"][0]
+    assert item["kinds"] == ["report_done"] and item["outcome_label"] == "Booked"
+    assert item["problem_label"] == "Missed a refill pickup" and "Thursday" not in str(item)  # no notes
+    # Opening the home page clears it; nobody else can clear it for them.
+    assert client(world, "cm@a.test").post("/api/pharmacy/seen").status_code == 403
+    assert rx(world).post("/api/pharmacy/seen").json()["seen"] == 1
+    assert bell(world, "rx@bay.test")["total"] == 0

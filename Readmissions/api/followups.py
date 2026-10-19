@@ -33,6 +33,9 @@ Who does what (api/access.py has the role lists):
                            there (report); it becomes a request - or a note on
                            the open one - for the hospital's case managers.
                            Sees only the status of its own reports, never notes.
+                           A report on a request someone already holds rings
+                           that person's bell; when the request is done, the
+                           pharmacy's bell says so (bell() below).
 
 Rules:
   * One request at a time per patient, enforced by a unique index on
@@ -334,12 +337,18 @@ def report(db, user: dict, scope: Optional[list], patient_id: str, problem: str,
     label = PHARMACY_PROBLEMS[problem] + (f" - {note}" if note else "")
     existing = _col(db).find_one({"active_patient": patient_id})
     if existing:
+        updates = {"urgency": "urgent"} if urgency == "urgent" else {}  # never urgent -> routine
+        holder = (existing.get("taken_by") or {}).get("id")
+        if existing["status"] == "in_progress" and holder:
+            # Someone is already on it: tell them (bell below), since the
+            # waiting count only shows untaken requests.
+            updates["report_alert"] = {"for": holder, "by": who["pharmacy"] or who["name"],
+                                       "problem": problem, "at": now}
         _col(db).update_one({"_id": existing["_id"]}, {
             "$push": {"pharmacy_reports": entry,
                       "notes": {"by": who, "at": now, "text": f"{who['pharmacy'] or who['name']}: {label}"},
                       "history": {"action": "pharmacy_report", "by": who, "at": now, "problem": problem}},
-            # An urgent report makes a routine request urgent, never the reverse.
-            **({"$set": {"urgency": "urgent"}} if urgency == "urgent" else {})})
+            **({"$set": updates} if updates else {})})
         return {"added_to_open": True, "followup": pharmacy_view(_col(db).find_one({"_id": existing["_id"]}), user)}
     try:
         doc = _insert(db, user, patient_id, urgency, label, source="pharmacy")
@@ -420,10 +429,12 @@ def complete(db, user: dict, scope: Optional[list], followup_id: str,
             "followup": public(doc)})
     who, now = _who(user), _now()
     taken = {} if doc.get("taken_by") else {"taken_by": who, "taken_at": now}
+    # The pharmacies that reported on it hear it is done (bell below).
+    told = sorted({p["pharmacy_id"] for p in doc.get("pharmacy_reports", []) if p.get("pharmacy_id")})
     result = _col(db).update_one({"_id": doc["_id"], "status": doc["status"]}, {
         "$set": {"status": "done", "outcome": outcome, "outcome_note": _clean_note(note),
-                 "done_by": who, "done_at": now, **taken},
-        "$unset": {"active_patient": ""},
+                 "done_by": who, "done_at": now, **taken, **({"pharmacy_alert": told} if told else {})},
+        "$unset": {"active_patient": "", "report_alert": ""},
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
@@ -474,3 +485,46 @@ def waiting(db, user: dict) -> int:
     if not hospital and user["role"] != "superadmin":
         return 0
     return _col(db).count_documents({**({"hospital_id": hospital} if hospital else {}), "status": "open"})
+
+
+# ------------------------------------------------------------- for the bell
+def bell(db, user: dict) -> list:
+    """Follow-up news for the top-bar bell (GLP-1 has the same two kinds in
+    GLP1/Backend/core/notifications.py):
+
+        followup_report   a case manager: a pharmacy reported a problem on a
+                          request they hold. Cleared by opening Follow-ups.
+        report_done       a pharmacy: a request it reported on is done, with
+                          the outcome only. Cleared by opening its home page.
+    """
+    if user["role"] == "pharmacy" and user.get("pharmacy_id"):
+        docs = list(_col(db).find({"status": "done", "pharmacy_alert": user["pharmacy_id"]})
+                    .sort("done_at", DESCENDING).limit(200))
+        return [{"kind": "report_done", "followup_id": str(d["_id"]), "patient_id": d["patient_id"],
+                 "outcome_label": OUTCOMES.get(d.get("outcome")),
+                 "problem_label": (pharmacy_view(d, user)["reports"] or [{}])[-1].get("problem_label"),
+                 "at": _aware(d["done_at"]).isoformat()} for d in docs]
+    if user["role"] in HANDLE_ROLES:
+        docs = list(_col(db).find({"status": "in_progress", "report_alert.for": str(user["_id"])})
+                    .sort("report_alert.at", DESCENDING))
+        return [{"kind": "followup_report", "followup_id": str(d["_id"]), "patient_id": d["patient_id"],
+                 "urgency": d["urgency"], "by": d["report_alert"]["by"],
+                 "problem_label": PHARMACY_PROBLEMS.get(d["report_alert"]["problem"], d["report_alert"]["problem"]),
+                 "at": _aware(d["report_alert"]["at"]).isoformat()} for d in docs]
+    return []
+
+
+def seen_reports(db, user: dict) -> int:
+    """A case manager opened Follow-ups: pharmacy reports on what they hold
+    leave their bell."""
+    _require_handler(user)
+    return _col(db).update_many({"report_alert.for": str(user["_id"])},
+                                {"$unset": {"report_alert": ""}}).modified_count
+
+
+def seen_pharmacy(db, user: dict) -> int:
+    """A pharmacy opened its home page: finished reports leave its bell."""
+    if user["role"] != "pharmacy" or not user.get("pharmacy_id"):
+        raise HTTPException(status_code=403, detail="For pharmacies")
+    return _col(db).update_many({"pharmacy_alert": user["pharmacy_id"]},
+                                {"$pull": {"pharmacy_alert": user["pharmacy_id"]}}).modified_count
