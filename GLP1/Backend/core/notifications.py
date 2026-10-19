@@ -78,7 +78,8 @@ def _request_item(f: dict, kind: str) -> dict:
     return {"patient_idx": f["patient_idx"], "dropout_prob": f.get("dropout_prob", 0.0),
             "kinds": [kind], "followup_id": f["id"], "urgency": f["urgency"],
             "requested_by": f["requested_by"].get("pharmacy") or f["requested_by"]["name"],
-            "problem_label": (f.get("pharmacy_reports") or [{}])[-1].get("problem_label"),
+            "problem_label": (f.get("pharmacy_reports") or [{}])[-1].get("problem_label")
+                             or (f.get("patient_requests") or [{}])[-1].get("reason_label"),
             "overdue": f["overdue"],
             "requested_at": f["requested_at"], "urgent": f["urgency"] == "urgent"}
 

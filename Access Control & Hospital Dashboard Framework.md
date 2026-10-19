@@ -181,6 +181,17 @@ layer. Placed in its
 pharmacy by the superadmin, like insurer staff. Patients are linked to a pharmacy
 by `pharmacy_id` on their ownership record (`Readmissions/scripts/seed_pharmacies.py`
 for the demo data).
+
+**Patient** (GLP-1; Readmissions to follow): sees only their own record, on a home
+page written for them — how things look in words (never the percentage), their
+current medicine and how often it's taken, age, BMI and HbA1c with the usual
+ranges, the main things affecting them in plain words, and their care team by
+name and role. Patients have a right of access to their own record
+(45 CFR 164.524). They don't see the clinician's patient page, the care team's
+notes, the model's internal numbers or costs. They can **ask their case manager
+to get in touch**, choosing a reason; that becomes a follow-up (or a note on the
+open one), signed "The patient" on staff screens — never their login. They see
+whether someone is on it and how it ended, not the notes.
 | Staff page | Yes | Yes | Yes | — | — | — | — |
 | Assign doctors / nurses | Yes | Yes | Yes | — | — | — | — |
 | Add notes, answer alerts | Yes | — | Yes | Yes | Yes | — | — |

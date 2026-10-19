@@ -19,7 +19,7 @@ import CostEffectiveness from './pages/CostEffectiveness';
 import BudgetSimulator from './pages/BudgetSimulator';
 import CostOfInaction from './pages/CostOfInaction';
 import Settings from './pages/Settings';
-import MyRecord from './pages/MyRecord';
+import PatientHome from './pages/PatientHome';
 import Staff from './pages/Staff';
 import FollowUps from './pages/FollowUps';
 import { useRole } from './context/RoleContext';
@@ -52,10 +52,11 @@ function RoleRoutes() {
   if (isPatient) {
     return (
       <Routes>
-        <Route path="/my-record"    element={<MyRecord />} />
+        {/* A patient's home is their own record in plain words. The
+            clinician's patient page is not theirs to read through. */}
+        <Route path="/"             element={<PatientHome />} />
         <Route path="/settings"     element={<Settings />} />
-        <Route path="/patients/:id" element={<PatientDetail />} />
-        <Route path="*"             element={<Navigate to="/my-record" replace />} />
+        <Route path="*"             element={<Navigate to="/" replace />} />
       </Routes>
     );
   }

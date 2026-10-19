@@ -30,7 +30,7 @@ const NAV_ITEMS = [
   // { to: '/settings', icon: Settings,        label: 'Settings & Data Info', primary: null },
 ];
 
-const PAGE_TITLES = { '/settings': 'Settings', '/my-record': 'My record' };
+const PAGE_TITLES = { '/settings': 'Settings' };
 
 // `primary` marks who a page is mainly for: 'cost' pages for the roles that own
 // the budget, 'care_team' pages for the people looking after patients. Pages
@@ -89,7 +89,8 @@ export default function AppShell({ children }) {
     return () => { live = false; clearInterval(t); };
   }, [handlesFollowUps, location.pathname]);
 
-  const pageTitle = NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
+  const pageTitle = (isPatient && location.pathname === '/' ? 'My health' : null)
+    ?? NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
     ?? PAGE_TITLES[location.pathname]
     ?? (location.pathname.startsWith('/patients/') ? 'Patient detail' : 'GLP-1 Platform');
 
@@ -161,11 +162,11 @@ export default function AppShell({ children }) {
         {/* Nav links — any tap inside closes the mobile drawer */}
         <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5" onClick={() => setMobileOpen(false)}>
           {isPatient ? (
-            // A patient sees one thing: their own record.
-            <NavLink to="/my-record" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              title={isCollapsed ? 'My record' : undefined}>
+            // A patient sees one thing: their own record, in plain words.
+            <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              title={isCollapsed ? 'My health' : undefined}>
               <UserCircle size={17} className="nav-icon flex-shrink-0" />
-              {!isCollapsed && <span className="animate-fade-in">My record</span>}
+              {!isCollapsed && <span className="animate-fade-in">My health</span>}
             </NavLink>
           ) : (<>
           {/* Section: Overview */}

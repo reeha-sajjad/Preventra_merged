@@ -168,6 +168,10 @@ export const api = {
   getPharmacyHome:      () => get('/api/pharmacy/home'),
   reportPharmacyProblem: (idx, body) => post(`/api/patients/${idx}/pharmacy-report`, body),
   markPharmacySeen:     () => post('/api/pharmacy/seen', {}),
+  // A patient's own home page - Backend/core/patient_home.py
+  getMyHome:            () => get('/api/my-home'),
+  /** { reason, note? } - the patient asks their case manager to get in touch */
+  askCaseManager:       (body) => post('/api/my-home/ask', body),
   getCaseManagerToday:  (mine = false) => get(`/api/case-manager/today${mine ? "?mine=1" : ""}`),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 
