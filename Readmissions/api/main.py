@@ -33,6 +33,7 @@ from api import followups
 from api import ingest
 from api import emergency
 from api import pharmacy
+from api import patient_home
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -2695,6 +2696,26 @@ def pharmacy_report(patient_id: str, body: PharmacyReport, request: Request):
     """A pharmacy reports a refill problem; the hospital's case managers get it."""
     return followups.report(db, request.state.user, _scope(request), patient_id,
                             body.problem, body.urgency, body.note)
+
+
+# ---------------------------------------------------------------------------
+# A patient's own home page (api/patient_home.py; GLP-1's twin)
+# ---------------------------------------------------------------------------
+class AskCaseManager(BaseModel):
+    reason: str
+    note: Optional[str] = None
+
+
+@app.get("/api/my-home")
+def my_home(request: Request):
+    """The caller's own record in plain words. Patients only."""
+    return patient_home.home(db, request.state.user, _scope(request))
+
+
+@app.post("/api/my-home/ask", status_code=201)
+def ask_case_manager(body: AskCaseManager, request: Request):
+    """The patient asks the hospital's case managers to get in touch, saying why."""
+    return followups.patient_request(db, request.state.user, _scope(request), body.reason, body.note)
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import ManualEntry from './pages/ManualEntry';
 import About from './pages/About';
 import Settings from './pages/Settings';
 import TestComponents from './pages/TestComponents';
-import MyRecord from './pages/MyRecord';
+import PatientHome from './pages/PatientHome';
 import ModelStudio from './pages/ModelStudio';
 import MyPatients from './pages/MyPatients';
 import FollowUps from './pages/FollowUps';
@@ -52,11 +52,11 @@ function AppRoutes() {
       <Router>
         <Routes>
           <Route element={<Layout />}>
-            <Route path="/my-record" element={<MyRecord />} />
+            {/* A patient's home is their own record in plain words. The
+                clinician's patient pages are not theirs to read through. */}
+            <Route path="/" element={<PatientHome />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/patients/:id" element={<PatientDetail />} />
-            <Route path="/patients/:id/trend" element={<PatientTrend />} />
-            <Route path="*" element={<Navigate to="/my-record" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </Router>

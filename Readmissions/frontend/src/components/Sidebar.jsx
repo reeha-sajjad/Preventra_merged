@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
+import { LayoutDashboard, HeartPulse, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
          FlaskConical, Settings, CalendarClock, Pill } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
@@ -51,7 +51,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   // refuses them anyway; this keeps the menu to what the user can use.
   // Doctors and nurses have no Overview: "My patients" is their home.
   const navItems = isPatient ? [
-    { name: 'My record', path: '/my-record', icon: <Info size={20} /> },
+    { name: 'My health', path: '/', icon: <HeartPulse size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ] : [
     ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),

@@ -3,19 +3,20 @@ import { useLocation } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import AlertsBell from './AlertsBell';
 import HospitalPicker from './HospitalPicker';
+import { readClaims } from '../api/auth';
 import { can, MY_PATIENTS_ROLES, PHARMACY_ROLES } from '../roles';
 
 export default function TopNav({ onMenuClick = () => {} }) {
   const location = useLocation();
 
   const getPageTitle = (path) => {
-    if (path === '/') return can(PHARMACY_ROLES) ? 'Pharmacy' : can(MY_PATIENTS_ROLES) ? 'My patients' : 'Overview';
+    if (path === '/') return readClaims()?.role === 'patient' ? 'My health'
+      : can(PHARMACY_ROLES) ? 'Pharmacy' : can(MY_PATIENTS_ROLES) ? 'My patients' : 'Overview';
     if (path === '/patients') return 'Patients';
     if (path.startsWith('/patients/')) return 'Patient Detail';
     if (path === '/staff') return 'Staff';
     if (path === '/follow-ups') return 'Follow-ups';
     if (path === '/settings') return 'Settings';
-    if (path === '/my-record') return 'My record';
     if (path === '/analytics') return 'Analytics';
     if (path === '/doctor') return 'Clinician Console';
     if (path === '/upload') return 'Pipeline Upload';

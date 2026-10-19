@@ -36,6 +36,10 @@ Who does what (api/access.py has the role lists):
                            A report on a request someone already holds rings
                            that person's bell; when the request is done, the
                            pharmacy's bell says so (bell() below).
+    patient                asks the hospital's case managers to get in touch,
+                           with a reason (patient_request) - a new request, or
+                           added to the open one. Sees whether someone is on it
+                           and how it ended, never the notes. GLP-1's twin.
 
 Rules:
   * One request at a time per patient, enforced by a unique index on
@@ -75,6 +79,18 @@ PHARMACY_PROBLEMS = {
     "cost":           "Said they can't afford it",
     "other":          "Something else",
 }
+# Why a patient asks a case manager to get in touch (patient_request). The
+# same idea as GLP-1's list, worded for someone home from hospital.
+PATIENT_REASONS = {
+    "symptoms":     "I'm not feeling well since I got home",
+    "medicines":    "Questions about my medicines",
+    "refill":       "Trouble getting my prescriptions",
+    "appointment":  "Help with a follow-up appointment",
+    "support":      "Help at home or with getting around",
+    "cost":         "Paying for my care or medicines",
+    "other":        "Something else",
+}
+PATIENT_NAME = "The patient"        # how a patient's own request is signed on staff screens
 HANDLE_ROLES = ("superadmin", "hospital_admin", "case_manager")
 OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
@@ -179,6 +195,10 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
         "pharmacy_reports": [{**{k: v for k, v in p.items() if k != "by"}, "at": _aware(p["at"]).isoformat(),
                               "problem_label": PHARMACY_PROBLEMS.get(p["problem"], p["problem"])}
                              for p in doc.get("pharmacy_reports", [])],
+        # Asked for by the patient: why.
+        "patient_requests": [{"reason": p["reason"], "note": p.get("note", ""), "at": _aware(p["at"]).isoformat(),
+                              "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"])}
+                             for p in doc.get("patient_requests", [])],
         "overdue": doc["status"] != "done" and now - asked > timedelta(days=OVERDUE_DAYS),
         "days_open": (now - asked).days,
     }
@@ -264,6 +284,12 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
     since = _now() - timedelta(days=SHOW_DONE_DAYS)
     recent = list(_col(db).find({"patient_id": patient_id, "status": "done", "done_at": {"$gte": since}})
                   .sort("done_at", DESCENDING).limit(1))
+    if user["role"] == "patient":
+        # The patient: whether someone is on it, never what the care team wrote.
+        return {"active": patient_view(active) if active else None,
+                "recent": patient_view(recent[0]) if recent else None,
+                "can_request": False, "can_handle": False, "can_ask": True,
+                "reasons": [{"key": k, "label": v} for k, v in PATIENT_REASONS.items()]}
     if access.overview_only(user):
         # A pharmacy: whether someone is on it, never what the care team wrote.
         return {"active": pharmacy_view(active, user) if active else None,
@@ -279,6 +305,8 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
 def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:
     if access.overview_only(user):
         raise HTTPException(status_code=403, detail="Pharmacies report a problem instead")
+    if user["role"] == "patient":
+        raise HTTPException(status_code=403, detail="Ask your case manager from your home page instead")
     doc = _load(db, user, scope, followup_id)
     if doc["status"] == "done":
         raise HTTPException(status_code=409, detail="This request is already done")
@@ -343,7 +371,7 @@ def report(db, user: dict, scope: Optional[list], patient_id: str, problem: str,
             # Someone is already on it: tell them (bell below), since the
             # waiting count only shows untaken requests.
             updates["report_alert"] = {"for": holder, "by": who["pharmacy"] or who["name"],
-                                       "problem": problem, "at": now}
+                                       "problem": problem, "label": PHARMACY_PROBLEMS[problem], "at": now}
         _col(db).update_one({"_id": existing["_id"]}, {
             "$push": {"pharmacy_reports": entry,
                       "notes": {"by": who, "at": now, "text": f"{who['pharmacy'] or who['name']}: {label}"},
@@ -356,6 +384,65 @@ def report(db, user: dict, scope: Optional[list], patient_id: str, problem: str,
         return report(db, user, scope, patient_id, problem, urgency, note)
     _col(db).update_one({"_id": doc["_id"]}, {"$set": {"requested_by": who, "pharmacy_reports": [entry]}})
     return {"added_to_open": False, "followup": pharmacy_view(_col(db).find_one({"_id": doc["_id"]}), user)}
+
+
+# ---------------------------------------------------------------- patient side
+def patient_view(doc: dict) -> dict:
+    """A request as the patient sees it: whether someone is on it, who, and how
+    it ended, and what they themselves asked - not the care team's notes, a
+    doctor's request or a pharmacy's report."""
+    return {"id": str(doc["_id"]), "patient_id": doc["patient_id"], "status": doc["status"],
+            "requested_at": _aware(doc["requested_at"]).isoformat(),
+            "by_you": bool(doc.get("patient_requests")),
+            "asked": [{"reason": p["reason"], "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"]),
+                       "at": _aware(p["at"]).isoformat()} for p in doc.get("patient_requests", [])],
+            "handled_by": (doc.get("taken_by") or {}).get("name"),
+            "outcome_label": OUTCOMES.get(doc.get("outcome")),
+            "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None}
+
+
+def patient_request(db, user: dict, scope: Optional[list], reason: str, note: Optional[str]) -> dict:
+    """A patient asks the case managers to get in touch. One request per
+    patient: a new one, or added to the one already open (and the case manager
+    holding it hears of it in their bell)."""
+    if user["role"] != "patient":
+        raise HTTPException(status_code=403, detail="For patients")
+    if not scope:
+        raise HTTPException(status_code=404, detail="No record is linked to your account yet")
+    patient_id = str(scope[0])
+    if reason not in PATIENT_REASONS:
+        raise HTTPException(status_code=422, detail="Choose what it's about")
+    note = _clean_note(note)
+    if reason == "other" and len(note) < 5:
+        raise HTTPException(status_code=422, detail="Say briefly what it's about")
+    ensure_indexes(db)
+    who, now = {**_who(user), "name": PATIENT_NAME}, _now()
+    who.pop("email", None)                         # staff screens never need the patient's login
+    entry = {"reason": reason, "note": note, "at": now}
+    label = PATIENT_REASONS[reason] + (f" - {note}" if note else "")
+    existing = _col(db).find_one({"active_patient": patient_id})
+    if existing:
+        updates = {}
+        holder = (existing.get("taken_by") or {}).get("id")
+        if existing["status"] == "in_progress" and holder:
+            updates["report_alert"] = {"for": holder, "by": PATIENT_NAME, "problem": reason,
+                                       "label": PATIENT_REASONS[reason], "at": now}
+        _col(db).update_one({"_id": existing["_id"]}, {
+            "$push": {"patient_requests": entry, "notes": {"by": who, "at": now, "text": f"{PATIENT_NAME}: {label}"},
+                      "history": {"action": "patient_request", "by": who, "at": now, "reason": reason}},
+            **({"$set": updates} if updates else {})})
+        return {"added_to_open": True, "followup": patient_view(_col(db).find_one({"_id": existing["_id"]}))}
+    if not _hospital_of_patient(db, patient_id):
+        raise HTTPException(status_code=409, detail="Your record isn't with a hospital yet, so there is no case manager to ask")
+    try:
+        doc = _insert(db, user, patient_id, "routine", label, source="patient")
+    except DuplicateKeyError:                            # opened at the same moment: add to it
+        return patient_request(db, user, scope, reason, note)
+    history = doc["history"]
+    history[0]["by"] = who
+    _col(db).update_one({"_id": doc["_id"]}, {"$set": {"requested_by": who, "patient_requests": [entry],
+                                                       "history": history}})
+    return {"added_to_open": False, "followup": patient_view(_col(db).find_one({"_id": doc["_id"]}))}
 
 
 def pharmacy_reports(db, user: dict) -> list:
@@ -509,7 +596,8 @@ def bell(db, user: dict) -> list:
                     .sort("report_alert.at", DESCENDING))
         return [{"kind": "followup_report", "followup_id": str(d["_id"]), "patient_id": d["patient_id"],
                  "urgency": d["urgency"], "by": d["report_alert"]["by"],
-                 "problem_label": PHARMACY_PROBLEMS.get(d["report_alert"]["problem"], d["report_alert"]["problem"]),
+                 "problem_label": d["report_alert"].get("label")
+                                  or PHARMACY_PROBLEMS.get(d["report_alert"]["problem"], d["report_alert"]["problem"]),
                  "at": _aware(d["report_alert"]["at"]).isoformat()} for d in docs]
     return []
 
