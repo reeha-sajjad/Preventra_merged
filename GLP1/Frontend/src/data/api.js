@@ -169,9 +169,15 @@ export const api = {
   reportPharmacyProblem: (idx, body) => post(`/api/patients/${idx}/pharmacy-report`, body),
   markPharmacySeen:     () => post('/api/pharmacy/seen', {}),
   // A patient's own home page - Backend/core/patient_home.py
-  getMyHome:            () => get('/api/my-home'),
-  /** { reason, note? } - the patient asks their case manager to get in touch */
+  /** patient: a caretaker picks which of their people (omit for a patient) */
+  getMyHome:            (patient) => get(`/api/my-home${patient != null ? `?patient=${patient}` : ''}`),
+  /** { reason, note?, patient_idx? } - the patient (or caretaker) asks the case manager */
   askCaseManager:       (body) => post('/api/my-home/ask', body),
+  // Caretakers a patient links - Backend/core/caretakers.py
+  getCaretakers:        (patient) => get(`/api/caretakers${patient != null ? `?patient=${patient}` : ''}`),
+  /** { email, patient_idx? (staff), patient_agreed? (staff) } */
+  linkCaretaker:        (body) => post('/api/caretakers', body),
+  unlinkCaretaker:      (id, patient) => del(`/api/caretakers/${id}${patient != null ? `?patient=${patient}` : ''}`),
   // Zoe, the patient's reminders - Backend/core/zoe.py
   getZoe:               () => get('/api/zoe'),
   /** { time: 'HH:MM', day?: 0-6 (0 = Monday), form?: 'weekly' | 'daily' } */

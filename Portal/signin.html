@@ -369,11 +369,12 @@
         <label for="signup-role">I am joining as</label>
         <select id="signup-role" name="role">
           <option value="">Choose your role…</option>
+          <option value="caretaker">Caretaker (family or home carer)</option>
           <option value="case_manager">Case manager</option>
           <option value="doctor">Doctor</option>
           <option value="hospital_admin">Hospital administrator</option>
           <option value="insurer">Insurer</option>
-          <option value="nurse">Nurse or caretaker</option>
+          <option value="nurse">Nurse</option>
           <option value="patient">Patient</option>
           <option value="pharmacy">Pharmacy staff</option>
         </select>
@@ -515,7 +516,7 @@
     const ROLE_LABELS = {
       superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
       nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
-      patient: 'Patient',
+      caretaker: 'Caretaker', patient: 'Patient',
     };
 
     // What each role on the sign-up form means, so people pick the right one.
@@ -530,6 +531,9 @@
       insurer: 'Sees your members across hospitals, mainly costs and outcomes.',
       pharmacy: 'Sees the patients who fill their prescriptions at your pharmacy: medicine, refills ' +
                 'and risk, never diagnoses. Your pharmacy is confirmed by our team.',
+      caretaker: 'Helps a patient at home - as family or a paid carer. Your account is ready straight ' +
+                 'away; you see a patient\'s summary once they add you from their own page, or their ' +
+                 'hospital does with their agreement.',
       patient: 'Sees your own record only.',
     };
 

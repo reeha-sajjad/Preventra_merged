@@ -4,6 +4,7 @@ import { api } from '../data/api';
 import PageState from '../components/shared/PageState';
 import AskDialog from '../components/patient/AskDialog';
 import ZoeCard from '../components/patient/ZoeCard';
+import CaretakersCard from '../components/patient/CaretakersCard';
 
 // How each level of the status reads (Backend/core/patient_home.STATUS). Calm
 // colours throughout: even the "extra support" level is blue, not red - it
@@ -34,15 +35,31 @@ export default function PatientHome() {
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(null);
+  // A caretaker looking after several people picks whose summary to see.
+  const [who, setWho] = useState(null);
 
   const load = useCallback(() => {
-    api.getMyHome().then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
-  }, []);
+    api.getMyHome(who).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
+  }, [who]);
   useEffect(() => { load(); }, [load]);
 
   if (!data) return <PageState error={error} label="your health summary" />;
 
   const first = data.name ? data.name.split(' ')[0] : null;
+  const caretaker = data.viewer === 'caretaker';
+  if (!data.linked && caretaker) {
+    return (
+      <div className="max-w-xl mx-auto card p-8 text-center animate-fade-in">
+        <h1 className="text-xl text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          {greeting()}{first ? `, ${first}` : ''}
+        </h1>
+        <p className="mt-3 text-sm text-gray-600 leading-relaxed">
+          Nobody has added you as their caretaker yet. Ask the person you care for to add you from their own
+          page, using the email you signed up with - or ask their hospital to, with their agreement.
+        </p>
+      </div>
+    );
+  }
   if (!data.linked) {
     return (
       <div className="max-w-xl mx-auto card p-8 text-center animate-fade-in">
@@ -63,10 +80,27 @@ export default function PatientHome() {
 
   return (
     <div className="max-w-[1080px] mx-auto space-y-5 animate-fade-in">
+      {caretaker && (
+        // Whose summary this is - written to the patient, read by their carer.
+        <div className="card px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-700">
+            {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
+            summary as their caretaker. It’s written to them.
+          </p>
+          {data.caring_for.people.length > 1 && (
+            <label className="text-sm text-gray-600 flex items-center gap-2">Show
+              <select value={data.patient_idx} onChange={(e) => { setSent(null); setWho(Number(e.target.value)); }}
+                className="text-sm rounded-lg border border-gray-200 px-2.5 py-1.5">
+                {data.caring_for.people.map((p) => <option key={p.patient_idx} value={p.patient_idx}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
       {/* How things look - the one thing a patient opens this page to read */}
       <section className="rounded-2xl p-6 md:p-8 border" style={{ background: tone.bg, borderColor: tone.ring }}
                aria-labelledby="status-title">
-        <p className="text-sm text-gray-600">{greeting()}{first ? `, ${first}` : ''}</p>
+        {!caretaker && <p className="text-sm text-gray-600">{greeting()}{first ? `, ${first}` : ''}</p>}
         <h1 id="status-title" className="mt-2 text-[28px] md:text-[34px] leading-tight max-w-[30ch]"
             style={{ fontFamily: 'DM Serif Display, serif', color: tone.fg }}>
           {data.status.title}
@@ -78,7 +112,7 @@ export default function PatientHome() {
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-5">
           {/* Zoe - the patient's own reminders */}
-          <ZoeCard />
+          {!caretaker && <ZoeCard />}
 
           {/* Medicine */}
           <section className="card p-6" aria-labelledby="med-title">
@@ -212,6 +246,9 @@ export default function PatientHome() {
             </ul>
           </section>
 
+          {/* The patient's own: who else can see this page */}
+          {!caretaker && <CaretakersCard />}
+
           {/* Safety - always shown, never dismissible */}
           <aside className="rounded-xl border p-4 flex gap-3" style={{ borderColor: '#F5C6C6', background: '#FFF6F6' }}>
             <ShieldAlert size={18} className="flex-shrink-0 mt-0.5" style={{ color: '#B42318' }} />
@@ -222,6 +259,7 @@ export default function PatientHome() {
 
       {asking && (
         <AskDialog reasons={followup.reasons} caseManager={team.case_manager?.name}
+          patientIdx={caretaker ? data.patient_idx : undefined}
           onClose={() => setAsking(false)}
           onDone={(out) => { setAsking(false); setSent(out); load(); }} />
       )}

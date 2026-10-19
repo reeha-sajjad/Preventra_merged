@@ -157,8 +157,13 @@ const RealAPI = {
   // Pharmacies (api/pharmacy.py): their patients, and refill-problem reports.
   getPharmacyHome: () => apiFetch('/api/pharmacy/home'),
   // A patient's own home page (api/patient_home.py), and asking a case manager.
-  getMyHome: () => apiFetch('/api/my-home'),
+  getMyHome: (patient) => apiFetch(`/api/my-home${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   askCaseManager: (body) => apiFetch('/api/my-home/ask', json(body)).then(followUpsChanged),
+  // Caretakers a patient links (api/caretakers.py).
+  getCaretakers: (patient) => apiFetch(`/api/caretakers${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
+  linkCaretaker: (body) => apiFetch('/api/caretakers', json(body)),
+  unlinkCaretaker: (id, patient) => apiFetch(`/api/caretakers/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
+    { method: 'DELETE' }),
   reportPharmacyProblem: (id, body) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/pharmacy-report`, json(body)).then(followUpsChanged),
 
@@ -463,6 +468,9 @@ export const finishFollowUp      = realOnly(RealAPI.finishFollowUp);
 export const getPharmacyHome     = realOnly(RealAPI.getPharmacyHome);
 export const getMyHome           = realOnly(RealAPI.getMyHome);
 export const askCaseManager      = realOnly(RealAPI.askCaseManager);
+export const getCaretakers       = realOnly(RealAPI.getCaretakers);
+export const linkCaretaker       = realOnly(RealAPI.linkCaretaker);
+export const unlinkCaretaker     = realOnly(RealAPI.unlinkCaretaker);
 export const reportPharmacyProblem = realOnly(RealAPI.reportPharmacyProblem);
 export const setCareTeam       = realOnly(RealAPI.setCareTeam);
 export const getPatientSummary = realOnly(RealAPI.getPatientSummary);

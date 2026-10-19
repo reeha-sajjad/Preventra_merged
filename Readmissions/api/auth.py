@@ -78,7 +78,7 @@ USERS_COLLECTION = "users"
 # used in the database, the token, both backends and both frontends. GLP-1 keeps
 # a copy in GLP1/Backend/core/security.py that must stay identical to this one.
 ROLES = ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager",
-         "insurer", "pharmacy", "patient")
+         "insurer", "pharmacy", "caretaker", "patient")
 STATUSES = ("pending", "active")
 
 # What a self-signup becomes when it names no role (an older portal, or a
@@ -91,11 +91,19 @@ DEFAULT_ROLE = "case_manager"
 # buys is a sign-up list the admin can sort by who people say they are.
 # superadmin is never on offer; that account comes from scripts/create_superadmin.py.
 SIGNUP_ROLES = ("doctor", "nurse", "case_manager", "hospital_admin", "insurer", "pharmacy",
-                "patient")
+                "caretaker", "patient")
+
+# Roles whose sign-up is active at once. A caretaker (a family or home carer)
+# belongs to no organisation, so there is nobody to approve them - and an
+# active caretaker still sees nothing until a patient, or hospital staff with
+# the patient's agreement, links them (api/caretakers.py). The link is the
+# approval.
+ACTIVE_ON_SIGNUP = ("caretaker",)
 
 # Roles that work for one hospital. superadmin belongs to none, because it
 # oversees all of them; insurer belongs to an insurer organisation instead, and
-# pharmacy (a pharmacy's staff) to a pharmacy organisation.
+# pharmacy (a pharmacy's staff) to a pharmacy organisation; a caretaker to no
+# organisation - to the patients who linked them.
 HOSPITAL_ROLES = ("hospital_admin", "doctor", "nurse", "case_manager", "patient")
 
 # Enforced by the database itself once scripts/migrate_user_roles.py has run, so
@@ -316,7 +324,7 @@ def signup(db, email: str, password: str, app_access: Optional[list] = None,
            # even once the role has been changed.
            "requested_role": role,
            "requested_hospital_id": wanted_hospital,
-           "status": "pending",
+           "status": "active" if role in ACTIVE_ON_SIGNUP else "pending",
            "hospital_id": None,
            "app_access": list(app_access) if app_access else list(DEFAULT_APP_ACCESS),
            "created_at": now,

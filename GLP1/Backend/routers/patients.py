@@ -179,7 +179,7 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
     team = (await hospital.care_teams([patient_idx]))[patient_idx]
     state = await detail_access(user, patient_idx)
     extra = {}
-    if overview_only(user):
+    if user["role"] == "pharmacy":
         # A pharmacy: the dispensing facts it already has, and the look is logged.
         from core import pharmacy                         # avoid an import cycle
         facts = await get_db().patients.find_one({"patient_idx": patient_idx},
@@ -213,7 +213,7 @@ async def open_patient(patient_idx: int, req: OpenPatientRequest, user: dict = D
     if not needs_reason(user):
         return {"patient_idx": patient_idx, "detail_access": "open"}
     if overview_only(user):
-        raise HTTPException(status_code=403, detail="Pharmacies see the overview of a patient only")
+        raise HTTPException(status_code=403, detail="This account sees the overview of a patient only")
     if req.reason not in REASONS:
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if not await access_log.has_opened(user, patient_idx):

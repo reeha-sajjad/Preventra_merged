@@ -8,7 +8,7 @@ import { askCaseManager } from '../../api';
  * already open, so they're never phoned twice about the same thing. The same
  * dialog as GLP-1's (GLP1/Frontend/src/components/patient/AskDialog.jsx).
  */
-export default function AskDialog({ reasons, onClose, onDone }) {
+export default function AskDialog({ reasons, patientId, onClose, onDone }) {
   const [reason, setReason] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -26,7 +26,7 @@ export default function AskDialog({ reasons, onClose, onDone }) {
     if (reason === 'other' && note.trim().length < 5) { setError('Say briefly what it’s about.'); return; }
     setBusy(true); setError(null);
     try {
-      onDone(await askCaseManager({ reason, note: note.trim() || undefined }));
+      onDone(await askCaseManager({ reason, note: note.trim() || undefined, patient_id: patientId || undefined }));
     } catch (err) {
       setError(err.message); setBusy(false);
     }

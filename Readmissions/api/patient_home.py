@@ -27,9 +27,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import HTTPException
 
-from api import access, auth, followups, pharmacy
+from api import access, access_log, auth, followups, pharmacy
 from api.db_utils import get_latest_batch_date
 from api.hospital import care_teams
 
@@ -82,12 +84,42 @@ def _tidy(text: Optional[str]) -> Optional[str]:
     return text[0].upper() + text[1:].lower() if text.isupper() else text
 
 
-def home(db, user: dict, scope: Optional[list]) -> dict:
-    if user["role"] != "patient":
-        raise HTTPException(status_code=403, detail="This page is for patients")
+def _patient_names(db, ids) -> dict:
+    """patient_id -> the patient's own account name, where they have one - how
+    a caretaker caring for several people tells them apart."""
+    own = {str(r["patient_id"]): r.get("patient_account_id")
+           for r in db["care_actions"].find({"patient_id": {"$in": access.id_variants(list(ids))}},
+                                            {"patient_id": 1, "patient_account_id": 1})}
+    oids = []
+    for a in own.values():
+        try:
+            oids.append(ObjectId(a))
+        except (InvalidId, TypeError):
+            pass
+    names = {str(u["_id"]): u.get("name") for u in auth.users(db).find({"_id": {"$in": oids}}, {"name": 1})}
+    return {str(i): names.get(own.get(str(i))) or f"Patient {i}" for i in ids}
+
+
+def home(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None, session: str = "") -> dict:
+    """The patient's home page - for the patient, or for a caretaker they
+    linked (api/caretakers.py), who picks which of their people to look at."""
+    if user["role"] not in ("patient", "caretaker"):
+        raise HTTPException(status_code=403, detail="This page is for patients and their caretakers")
     if not scope:
-        return {"linked": False, "name": _name(db, user)}
-    pid = str(scope[0])
+        return {"linked": False, "name": _name(db, user), "viewer": user["role"]}
+    caring_for = None
+    if user["role"] == "caretaker":
+        pid = followups.own_patient(user, scope, patient_id or str(scope[0]))
+        names = _patient_names(db, scope)
+        caring_for = {"patient_name": names[pid],
+                      "people": [{"patient_id": str(i), "name": names[str(i)]} for i in scope]}
+        # A disclosure to someone involved in the patient's care: on the record.
+        if not access_log.has_opened(db, user, access_log.APP, pid, session):
+            own = db["care_actions"].find_one({"patient_id": {"$in": access.id_variants([pid])}}, {"hospital_id": 1})
+            access_log.record(db, user, access_log.APP, pid, (own or {}).get("hospital_id"),
+                              access.CARETAKER_REASON, session)
+    else:
+        pid = str(scope[0])
     batch = get_latest_batch_date(db, "patient_worklist")
     row = db["patient_worklist"].find_one({"patient_id": {"$in": access.id_variants([pid])}, "batch_date": batch},
                                           {"_id": 0}) or {}
@@ -115,4 +147,5 @@ def home(db, user: dict, scope: Optional[list]) -> dict:
         "followup": {"active": follow["active"], "recent": follow["recent"], "reasons": follow["reasons"],
                      "can_ask": bool(team.get("hospital_id"))},
         "safety": SAFETY,
+        "viewer": user["role"], "caring_for": caring_for,
     }

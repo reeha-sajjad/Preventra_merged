@@ -13,6 +13,7 @@ import MedicationCard from '../components/medications/MedicationCard';
 import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/hospital/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
+import CaretakersCard from '../components/patient/CaretakersCard';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
 const INTERPRETATIONS = {
@@ -192,6 +193,7 @@ export default function PatientDetail() {
           </div>
         </div>
         <CareTeamCard team={summary} patientIdx={summary.patient_idx} canAssign={summary.can_assign} onChanged={careTeamChanged} />
+        {canAssign && <CaretakersCard patientIdx={summary.patient_idx} />}
         {isPharmacy && <PharmacyPatientCard summary={summary} />}
         <ClinicalGate patientIdx={summary.patient_idx} reasons={summary.reasons} onOpened={reload}
           overviewOnly={summary.detail_access === 'overview_only'} />
@@ -312,6 +314,13 @@ export default function PatientDetail() {
         <CareTeamCard team={patient} patientIdx={patient.patient_idx}
           canAssign={canAssign && !isPatient} onChanged={careTeamChanged} />
       </div>
+
+      {/* ── Caretakers (hospital admin, case manager, superadmin) ─── */}
+      {canAssign && (
+        <div className="mb-6">
+          <CaretakersCard patientIdx={patient.patient_idx} />
+        </div>
+      )}
 
       {/* ── Follow-up request (care team asks, case manager handles) ── */}
       {!isPatient && (

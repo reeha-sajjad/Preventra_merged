@@ -46,12 +46,12 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
   }, [location.pathname]);
 
   const role = readClaims()?.role;
-  const isPatient = role === 'patient';
+  const isPatient = role === 'patient' || role === 'caretaker';
   // Each role's pages - hidden, not dimmed, for everyone else. The server
   // refuses them anyway; this keeps the menu to what the user can use.
   // Doctors and nurses have no Overview: "My patients" is their home.
   const navItems = isPatient ? [
-    { name: 'My health', path: '/', icon: <HeartPulse size={20} /> },
+    { name: role === 'caretaker' ? 'People I care for' : 'My health', path: '/', icon: <HeartPulse size={20} /> },
     { name: 'Settings', path: '/settings', icon: <Settings size={20} /> },
   ] : [
     ...(can(OVERVIEW_ROLES) ? [{ name: 'Overview', path: '/', icon: <LayoutDashboard size={20} /> }] : []),

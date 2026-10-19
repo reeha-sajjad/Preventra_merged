@@ -51,9 +51,10 @@ Two consequences run through everything below:
 | **Hospital admin** | The person who runs the hospital's account | One hospital | Manages the hospital's people and money; sees patients at overview level. |
 | **Case manager** | A care coordinator (often a nurse or social worker) | One hospital | Works on *every* patient in the hospital to keep their care on track. |
 | **Doctor** | A treating clinician | One hospital | Works on the patients assigned to them. |
-| **Nurse** (includes caretakers) | A nurse or caretaker | One hospital | Follows up the patients assigned to them. |
+| **Nurse** | A hospital nurse | One hospital | Follows up the patients assigned to them. |
 | **Insurer** | A payer's staff | One insurer | Sees its own members, in any hospital, mainly costs and outcomes. |
 | **Pharmacy** | A pharmacy's staff | One pharmacy | Sees the patients who fill there, in any hospital: risk, care team and case manager — never diagnoses. |
+| **Caretaker** | A family member or home carer | The patients who linked them | Sees each of those patients' plain-words summary and can ask a case manager for help. |
 | **Patient** | A patient | One hospital | Sees their own record only. |
 
 The role names are identical everywhere — database, sign-in token, both
@@ -182,8 +183,8 @@ pharmacy by the superadmin, like insurer staff. Patients are linked to a pharmac
 by `pharmacy_id` on their ownership record (`Readmissions/scripts/seed_pharmacies.py`
 for the demo data).
 
-**Patient** (GLP-1; Readmissions to follow): sees only their own record, on a home
-page written for them — how things look in words (never the percentage), their
+**Patient** (both apps): sees only their own record, on a home page written for
+them — how things look in words (never the percentage), their
 current medicine and how often it's taken, age, BMI and HbA1c with the usual
 ranges, the main things affecting them in plain words, and their care team by
 name and role. Patients have a right of access to their own record
@@ -192,6 +193,29 @@ notes, the model's internal numbers or costs. They can **ask their case manager
 to get in touch**, choosing a reason; that becomes a follow-up (or a note on the
 open one), signed "The patient" on staff screens — never their login. They see
 whether someone is on it and how it ended, not the notes.
+In Readmissions the page shows their hospital stay (dates, main reason, conditions
+on file), the weeks of check-ins since discharge and whether their latest
+prescription was collected, instead of medicine and health numbers; requests go
+to the hospital's case managers. The model's risk drivers are left out there: they
+are lab values worded for clinicians.
+**Caretaker** (both apps): a family member or home carer - including agency
+carers, who may look after several patients. Signs up at the Portal and is
+active at once, but sees nothing until a **patient adds them** by email from
+their own page, or **hospital staff** (hospital admin, case manager, superadmin)
+link them after confirming the patient agreed (recorded). Only an existing
+caretaker account can be added, because the system does not verify email
+ownership, so a waiting invite could be claimed by someone else. HIPAA allows
+sharing what is relevant to someone's involvement in a patient's care when the
+patient agrees or does not object (45 CFR 164.510(b)); the patient sees every
+caretaker by name and email and can remove them at any time (staff can too, and
+a caretaker can remove themselves). A caretaker sees the patient's plain-words
+home page - the same page, written to the patient - and can ask a case manager
+to get in touch, signed "The caretaker". Never the clinician's page, the
+clinical layer, notes or costs (`OVERVIEW_ONLY_ROLES`). Each look is logged as
+"Caretaker (linked by the patient)". Links live on the patient's ownership
+record in each app (`caretaker_ids`, with `caretaker_history`), so linking in
+one app does not link the other.
+
 **Zoe**, on the same page, is the patient's own reminders: when they take their
 medicine and appointments they add. It is fixed rules, not an AI, and nothing is
 sent outside the app (no text, email or push). Only the patient can see or change
@@ -342,12 +366,14 @@ easier. It is safe because choosing a role is only a **request**.
 **What changed:**
 
 1. **The Portal's "Create account" form has an "I am joining as" dropdown**:
-   Doctor, Nurse or caretaker, Case manager, Hospital administrator, Insurer,
-   Patient. Picking one shows a one-line explanation of that role underneath, so
+   Caretaker, Case manager, Doctor, Hospital administrator, Insurer, Nurse,
+   Patient, Pharmacy staff. Picking one shows a one-line explanation of that role underneath, so
    people choose correctly. Superadmin is never offered, and the server refuses
    it even if someone sends it directly.
 2. **The account is still pending**, with no hospital, and sees nothing until an
-   admin approves it. Asking to be a hospital admin grants nothing.
+   admin approves it. Asking to be a hospital admin grants nothing. The one
+   exception is a caretaker: active at once, because there is no organisation to
+   approve them, but still seeing nothing until a patient links them.
 3. **The waiting screen** now says "You asked to join as: Doctor", for example.
 4. **User Management can filter accounts by role.** A pending sign-up shows
    "Signed up as Doctor" under its email, and its role picker already shows the

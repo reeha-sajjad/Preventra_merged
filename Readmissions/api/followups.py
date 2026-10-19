@@ -91,6 +91,7 @@ PATIENT_REASONS = {
     "other":        "Something else",
 }
 PATIENT_NAME = "The patient"        # how a patient's own request is signed on staff screens
+CARETAKER_NAME = "The caretaker"    # ... and their caretaker's
 HANDLE_ROLES = ("superadmin", "hospital_admin", "case_manager")
 OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
@@ -197,7 +198,8 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
                              for p in doc.get("pharmacy_reports", [])],
         # Asked for by the patient: why.
         "patient_requests": [{"reason": p["reason"], "note": p.get("note", ""), "at": _aware(p["at"]).isoformat(),
-                              "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"])}
+                              "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"]),
+                              "by": CARETAKER_NAME if p.get("by") == "caretaker" else PATIENT_NAME}
                              for p in doc.get("patient_requests", [])],
         "overdue": doc["status"] != "done" and now - asked > timedelta(days=OVERDUE_DAYS),
         "days_open": (now - asked).days,
@@ -284,8 +286,9 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
     since = _now() - timedelta(days=SHOW_DONE_DAYS)
     recent = list(_col(db).find({"patient_id": patient_id, "status": "done", "done_at": {"$gte": since}})
                   .sort("done_at", DESCENDING).limit(1))
-    if user["role"] == "patient":
-        # The patient: whether someone is on it, never what the care team wrote.
+    if user["role"] in ("patient", "caretaker"):
+        # The patient or their caretaker: whether someone is on it, never what
+        # the care team wrote.
         return {"active": patient_view(active) if active else None,
                 "recent": patient_view(recent[0]) if recent else None,
                 "can_request": False, "can_handle": False, "can_ask": True,
@@ -303,9 +306,9 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
 
 
 def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:
-    if access.overview_only(user):
+    if user["role"] == "pharmacy":
         raise HTTPException(status_code=403, detail="Pharmacies report a problem instead")
-    if user["role"] == "patient":
+    if user["role"] in ("patient", "caretaker"):
         raise HTTPException(status_code=403, detail="Ask your case manager from your home page instead")
     doc = _load(db, user, scope, followup_id)
     if doc["status"] == "done":
@@ -401,43 +404,56 @@ def patient_view(doc: dict) -> dict:
             "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None}
 
 
-def patient_request(db, user: dict, scope: Optional[list], reason: str, note: Optional[str]) -> dict:
-    """A patient asks the case managers to get in touch. One request per
-    patient: a new one, or added to the one already open (and the case manager
-    holding it hears of it in their bell)."""
-    if user["role"] != "patient":
-        raise HTTPException(status_code=403, detail="For patients")
+def own_patient(user: dict, scope: Optional[list], patient_id: Optional[str] = None) -> str:
+    """The patient a patient or caretaker account is acting for: a patient's
+    only record, or the one a caretaker picked from those who linked them."""
+    if user["role"] not in ("patient", "caretaker"):
+        raise HTTPException(status_code=403, detail="For patients and their caretakers")
     if not scope:
         raise HTTPException(status_code=404, detail="No record is linked to your account yet")
-    patient_id = str(scope[0])
+    if user["role"] == "patient" or patient_id is None:
+        if user["role"] == "caretaker" and len(scope) > 1:
+            raise HTTPException(status_code=422, detail="Choose which person you're asking about")
+        return str(scope[0])
+    access.require_patient(scope, str(patient_id))
+    return str(patient_id)
+
+
+def patient_request(db, user: dict, scope: Optional[list], reason: str, note: Optional[str],
+                    patient_id: Optional[str] = None) -> dict:
+    """A patient - or their caretaker - asks the case managers to get in touch.
+    One request per patient: a new one, or added to the one already open (and
+    the case manager holding it hears of it in their bell)."""
+    patient_id = own_patient(user, scope, patient_id)
+    signed = CARETAKER_NAME if user["role"] == "caretaker" else PATIENT_NAME
     if reason not in PATIENT_REASONS:
         raise HTTPException(status_code=422, detail="Choose what it's about")
     note = _clean_note(note)
     if reason == "other" and len(note) < 5:
         raise HTTPException(status_code=422, detail="Say briefly what it's about")
     ensure_indexes(db)
-    who, now = {**_who(user), "name": PATIENT_NAME}, _now()
+    who, now = {**_who(user), "name": signed}, _now()
     who.pop("email", None)                         # staff screens never need the patient's login
-    entry = {"reason": reason, "note": note, "at": now}
+    entry = {"reason": reason, "note": note, "at": now, "by": user["role"]}
     label = PATIENT_REASONS[reason] + (f" - {note}" if note else "")
     existing = _col(db).find_one({"active_patient": patient_id})
     if existing:
         updates = {}
         holder = (existing.get("taken_by") or {}).get("id")
         if existing["status"] == "in_progress" and holder:
-            updates["report_alert"] = {"for": holder, "by": PATIENT_NAME, "problem": reason,
+            updates["report_alert"] = {"for": holder, "by": signed, "problem": reason,
                                        "label": PATIENT_REASONS[reason], "at": now}
         _col(db).update_one({"_id": existing["_id"]}, {
-            "$push": {"patient_requests": entry, "notes": {"by": who, "at": now, "text": f"{PATIENT_NAME}: {label}"},
+            "$push": {"patient_requests": entry, "notes": {"by": who, "at": now, "text": f"{signed}: {label}"},
                       "history": {"action": "patient_request", "by": who, "at": now, "reason": reason}},
             **({"$set": updates} if updates else {})})
         return {"added_to_open": True, "followup": patient_view(_col(db).find_one({"_id": existing["_id"]}))}
     if not _hospital_of_patient(db, patient_id):
         raise HTTPException(status_code=409, detail="Your record isn't with a hospital yet, so there is no case manager to ask")
     try:
-        doc = _insert(db, user, patient_id, "routine", label, source="patient")
+        doc = _insert(db, user, patient_id, "routine", label, source=user["role"])
     except DuplicateKeyError:                            # opened at the same moment: add to it
-        return patient_request(db, user, scope, reason, note)
+        return patient_request(db, user, scope, reason, note, patient_id)
     history = doc["history"]
     history[0]["by"] = who
     _col(db).update_one({"_id": doc["_id"]}, {"$set": {"requested_by": who, "patient_requests": [entry],

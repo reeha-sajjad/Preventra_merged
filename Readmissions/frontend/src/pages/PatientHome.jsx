@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill } from 'lucide-react';
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
+import CaretakersCard from '../components/patient/CaretakersCard';
 
 // How each level of the status reads (api/patient_home.STATUS). Calm colours
 // throughout: "extra support" is blue, not red - it means the team is helping.
@@ -31,16 +32,30 @@ export default function PatientHome() {
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(null);
+  // A caretaker looking after several people picks whose summary to see.
+  const [who, setWho] = useState(null);
 
   const load = useCallback(() => {
-    getMyHome().then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
-  }, []);
+    getMyHome(who).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
+  }, [who]);
   useEffect(() => { load(); }, [load]);
 
   if (!data) {
     return <p className="p-6 text-sm text-gray-500">{error ? `Your summary couldn’t load: ${error}` : 'Loading your summary…'}</p>;
   }
   const first = data.name ? data.name.split(' ')[0] : null;
+  const caretaker = data.viewer === 'caretaker';
+  if (!data.linked && caretaker) {
+    return (
+      <div className="mx-auto mt-6 max-w-xl rounded-xl border border-gray-200 bg-white p-8 text-center">
+        <h1 className="text-xl font-semibold text-gray-900">{greeting()}{first ? `, ${first}` : ''}</h1>
+        <p className="mt-3 text-sm leading-relaxed text-gray-600">
+          Nobody has added you as their caretaker yet. Ask the person you care for to add you from their own page,
+          using the email you signed up with - or ask their hospital to, with their agreement.
+        </p>
+      </div>
+    );
+  }
   if (!data.linked) {
     return (
       <div className="mx-auto max-w-xl rounded-xl border border-gray-200 bg-white p-8 text-center">
@@ -59,9 +74,26 @@ export default function PatientHome() {
 
   return (
     <div className="mx-auto max-w-[1080px] space-y-5 py-6">
+      {caretaker && (
+        // Whose summary this is - written to the patient, read by their carer.
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4">
+          <p className="text-sm text-gray-700">
+            {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
+            summary as their caretaker. It’s written to them.
+          </p>
+          {data.caring_for.people.length > 1 && (
+            <label className="flex items-center gap-2 text-sm text-gray-600">Show
+              <select value={data.patient_id} onChange={(e) => { setSent(null); setWho(e.target.value); }}
+                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm">
+                {data.caring_for.people.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
       <section className="rounded-2xl border p-6 md:p-8" style={{ background: tone.bg, borderColor: tone.ring }}
                aria-labelledby="status-title">
-        <p className="text-sm text-gray-600">{greeting()}{first ? `, ${first}` : ''}</p>
+        {!caretaker && <p className="text-sm text-gray-600">{greeting()}{first ? `, ${first}` : ''}</p>}
         <h1 id="status-title" className="mt-2 max-w-[30ch] text-[26px] font-semibold leading-tight md:text-[32px]"
             style={{ color: tone.fg }}>
           {data.status.title}
@@ -150,6 +182,8 @@ export default function PatientHome() {
             </ul>
           </Card>
 
+          {!caretaker && <CaretakersCard />}
+
           <aside className="flex gap-3 rounded-xl border border-red-200 bg-red-50/60 p-4">
             <ShieldAlert size={18} className="mt-0.5 shrink-0 text-red-700" />
             <p className="text-xs leading-relaxed text-gray-700">{data.safety}</p>
@@ -158,7 +192,8 @@ export default function PatientHome() {
       </div>
 
       {asking && (
-        <AskDialog reasons={followup.reasons} onClose={() => setAsking(false)}
+        <AskDialog reasons={followup.reasons} patientId={caretaker ? data.patient_id : undefined}
+          onClose={() => setAsking(false)}
           onDone={(out) => { setAsking(false); setSent(out); load(); }} />
       )}
     </div>

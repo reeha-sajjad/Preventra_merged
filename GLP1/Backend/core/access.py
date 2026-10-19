@@ -13,6 +13,9 @@ data reload does not orphan anyone:
                         doctor_ids) and kept in step on every change
     assigned_nurse_ids  shared_identity user ids of their nurses
     patient_account_id  the patient's own login, if they have one
+    caretaker_ids       logins of the family or home carers the patient (or the
+                        hospital, with the patient's agreement) linked - see
+                        core/caretakers.py
     pharmacy            where they collect their prescription
 
     superadmin                    every patient
@@ -21,6 +24,7 @@ data reload does not orphan anyone:
     insurer                       their members, in any hospital
     pharmacy                      patients who fill at their pharmacy, in any hospital
     patient                       their own record
+    caretaker                     the patients who linked them, overview only
     anyone without a placement    nobody
 
 The superadmin can look at one hospital at a time through the hospital picker
@@ -62,7 +66,11 @@ REASON_ROLES = ("hospital_admin", "insurer")
 # know who to call about a refill and how at risk they are, not diagnoses,
 # vitals or risk drivers (45 CFR 164.502(b), minimum necessary). Mirrors
 # Readmissions/api/access.py.
-OVERVIEW_ONLY_ROLES = ("pharmacy",)
+# A caretaker (a family or home carer the patient linked) is the same: they see
+# the patient's plain-words home page (core/patient_home.py), which is what is
+# relevant to helping with their care (45 CFR 164.510(b)), not the clinical
+# layer.
+OVERVIEW_ONLY_ROLES = ("pharmacy", "caretaker")
 
 # Must match REASONS in Readmissions/api/access.py: one access log, one list.
 REASONS = {
@@ -92,17 +100,21 @@ AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON
 EMERGENCY_REASON = "emergency_access"
 # A pharmacy opening one of its patients (core/pharmacy.py): logged, never asked.
 DISPENSING_REASON = "dispensing"
+# A caretaker opening the home page of a patient who linked them: logged, never
+# asked - a disclosure to someone involved in the patient's care (164.510(b)).
+CARETAKER_REASON = "caretaker"
 EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
                   COORDINATION_REASON: "Care coordination (case manager)",
                   EMERGENCY_REASON: "Emergency access (break the glass)",
-                  DISPENSING_REASON: "Dispensing (pharmacy)"}
+                  DISPENSING_REASON: "Dispensing (pharmacy)",
+                  CARETAKER_REASON: "Caretaker (linked by the patient)"}
 
 REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
 OVERVIEW_ONLY = {"code": "overview_only",
-                 "message": "Pharmacies see a patient's overview only"}
+                 "message": "This account sees a patient's overview only"}
 
 # Fields of a patient row that belong to the clinical layer. The overview layer
 # is what is left: patient_idx, dropout risk and prediction, care team, insurer.
@@ -183,6 +195,8 @@ async def patient_scope(user: dict) -> Optional[list]:
         query = {"pharmacy_id": user["pharmacy_id"]} if user.get("pharmacy_id") else None
     elif role == "patient":
         query = {"patient_account_id": uid}
+    elif role == "caretaker":
+        query = {"caretaker_ids": uid}
     else:
         query = None
     if query is None:

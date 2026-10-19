@@ -47,7 +47,8 @@ function App() {
 }
 
 function AppRoutes() {
-  if (readClaims()?.role === 'patient') {
+  // Patients, and caretakers looking after them, get the plain-words home page.
+  if (['patient', 'caretaker'].includes(readClaims()?.role)) {
     return (
       <Router>
         <Routes>

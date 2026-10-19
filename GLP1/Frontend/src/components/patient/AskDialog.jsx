@@ -7,7 +7,7 @@ import { api } from '../../data/api';
  * patient_request). It goes to the case manager as a follow-up, or onto the one
  * already open, so they're never phoned twice about the same thing.
  */
-export default function AskDialog({ reasons, caseManager, onClose, onDone }) {
+export default function AskDialog({ reasons, caseManager, patientIdx, onClose, onDone }) {
   const [reason, setReason] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -25,7 +25,7 @@ export default function AskDialog({ reasons, caseManager, onClose, onDone }) {
     if (reason === 'other' && note.trim().length < 5) { setError('Say briefly what it’s about.'); return; }
     setBusy(true); setError(null);
     try {
-      onDone(await api.askCaseManager({ reason, note: note.trim() || undefined }));
+      onDone(await api.askCaseManager({ reason, note: note.trim() || undefined, patient_idx: patientIdx ?? undefined }));
     } catch (err) {
       setError(err.message); setBusy(false);
     }

@@ -12,6 +12,7 @@ const ROLE_LABELS = {
   case_manager:   'Case manager',
   insurer:        'Insurer',
   pharmacy:       'Pharmacy',
+  caretaker:      'Caretaker',
   patient:        'Patient',
 };
 
@@ -46,6 +47,8 @@ export function RoleProvider({ children }) {
       isCostView: COST_VIEW_ROLES.includes(role),
       // Patients get one page - their own record - and nothing else.
       isPatient:  role === 'patient',
+      // A family or home carer: the home page of each patient who linked them.
+      isCaretaker: role === 'caretaker',
       isSuperadmin: role === 'superadmin',
       hasOverview:  OVERVIEW_ROLES.includes(role),
       hasStaff:     STAFF_ROLES.includes(role),

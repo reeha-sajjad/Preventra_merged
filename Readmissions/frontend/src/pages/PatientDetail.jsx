@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getPatientById, getPatientSummary } from '../api';
-import { myRole } from '../roles';
+import { myRole, can, ASSIGN_ROLES } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
 import CareTeamCard from '../components/shared/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
 import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
 import ClinicalGate from '../components/shared/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
+import CaretakersCard from '../components/patient/CaretakersCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
@@ -146,6 +147,7 @@ export default function PatientDetail() {
           </div>
         </div>
         <CareTeamCard summary={summary} onChanged={reload} />
+        {can(ASSIGN_ROLES) && <CaretakersCard patientId={summary.id} />}
         {/* A pharmacy: the refill facts and "Report a refill problem" instead of the care team's card. */}
         {summary.detail_access === 'overview_only' ? <PharmacyPatientCard summary={summary} />
           : <FollowUpCard patientId={summary.id} />}
@@ -307,6 +309,8 @@ export default function PatientDetail() {
           </div>
 
           <CareTeamCard summary={summary} onChanged={reload} />
+
+          {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
 
           <FollowUpCard patientId={patient.id} />
 

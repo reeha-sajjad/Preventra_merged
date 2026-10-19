@@ -31,7 +31,8 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException
 
-from core import followups, hospital, medications
+from core import access_log, followups, hospital, medications
+from core.access import CARETAKER_REASON, patient_hospital
 from core.mongo import get_db, get_shared_identity_db
 
 # How the model's dropout estimate is put into words. Three levels, so a small
@@ -152,13 +153,42 @@ async def _pharmacy(idx: int, team: dict) -> Optional[str]:
     return (access or {}).get("pharmacy") or team.get("pharmacy")
 
 
-async def home(user: dict, scope: Optional[list]) -> dict:
-    if user["role"] != "patient":
-        raise HTTPException(status_code=403, detail="This page is for patients")
+async def _patient_names(idxs) -> dict:
+    """patient_idx -> the patient's own account name, where they have one - how
+    a caretaker caring for several people tells them apart."""
+    access = await get_db().patient_access.find({"patient_idx": {"$in": [int(i) for i in idxs]}},
+                                                {"_id": 0, "patient_idx": 1, "patient_account_id": 1}).to_list(length=None)
+    accounts = {a["patient_idx"]: a.get("patient_account_id") for a in access}
+    oids = []
+    for a in accounts.values():
+        try:
+            oids.append(ObjectId(a))
+        except (InvalidId, TypeError):
+            pass
+    names = {str(u["_id"]): u.get("name") for u in await get_shared_identity_db().users.find(
+        {"_id": {"$in": oids}}, {"name": 1}).to_list(length=None)}
+    return {int(i): names.get(accounts.get(int(i))) or f"Patient #{int(i)}" for i in idxs}
+
+
+async def home(user: dict, scope: Optional[list], patient_idx: Optional[int] = None) -> dict:
+    """The patient's home page - for the patient, or for a caretaker they
+    linked (core/caretakers.py), who picks which of their people to look at."""
+    if user["role"] not in ("patient", "caretaker"):
+        raise HTTPException(status_code=403, detail="This page is for patients and their caretakers")
     name = await _name(user)
     if not scope:
-        return {"linked": False, "name": name}
-    idx = int(scope[0])
+        return {"linked": False, "name": name, "viewer": user["role"]}
+    caring_for = None
+    if user["role"] == "caretaker":
+        idx = followups.own_patient(user, scope, patient_idx if patient_idx is not None else int(scope[0]))
+        names = await _patient_names(scope)
+        caring_for = {"patient_name": names[idx],
+                      "people": [{"patient_idx": int(i), "name": names[int(i)]} for i in scope]}
+        # A disclosure to someone involved in the patient's care: on the record.
+        if not await access_log.has_opened(user, idx):
+            await access_log.record(user, idx, await patient_hospital(idx), CARETAKER_REASON)
+    else:
+        idx = int(scope[0])
     doc = await get_db().patients.find_one({"patient_idx": idx}, {"_id": 0}) or {}
     prob = float(doc.get("dropout_prob") or doc.get("dropout_proba") or 0.5)
     team = (await hospital.care_teams([idx]))[idx]
@@ -192,6 +222,7 @@ async def home(user: dict, scope: Optional[list]) -> dict:
                       "pharmacy": await _pharmacy(idx, team)},
         "followup": {"active": follow["active"], "recent": follow["recent"], "reasons": follow["reasons"],
                      "can_ask": bool(team.get("hospital_id"))},
+        "viewer": user["role"], "caring_for": caring_for,
         "safety": SAFETY,
         "data_as_of": "May 2026",
     }

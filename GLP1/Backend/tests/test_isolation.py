@@ -37,6 +37,7 @@ ACCOUNTS = {
     "claims@acme.test": ("insurer", None, {"insurer_id": "acme"}, {0, 4}),
     "rx@bay.test":      ("pharmacy", None, {"pharmacy_id": "bay"}, {1, 5}),
     "me@patient.test":  ("patient", "hosp-a", {}, {3}),
+    "carer@home.test":  ("caretaker", None, {}, {3}),            # linked by patient 3
     "admin@b.test":     ("hospital_admin", "hosp-b", {}, B),
     "floating@x.test":  ("case_manager", None, {}, set()),
 }
@@ -71,7 +72,8 @@ def world():
         {"patient_idx": 1, "hospital_id": "hosp-a", "pharmacy_id": "bay",
          "assigned_doctor_id": uid["doc@a.test"], "assigned_nurse_ids": [uid["nurse@a.test"]]},
         {"patient_idx": 2, "hospital_id": "hosp-a", "assigned_nurse_ids": [uid["nurse@a.test"]]},
-        {"patient_idx": 3, "hospital_id": "hosp-a", "patient_account_id": uid["me@patient.test"]},
+        {"patient_idx": 3, "hospital_id": "hosp-a", "patient_account_id": uid["me@patient.test"],
+         "caretaker_ids": [uid["carer@home.test"]]},
         {"patient_idx": 4, "hospital_id": "hosp-b", "insurer_id": "acme"},
         {"patient_idx": 5, "hospital_id": "hosp-b", "pharmacy_id": "bay"},
     ])
@@ -145,8 +147,9 @@ def test_single_patient_routes_hide_everyone_else(world, email):
     for idx in allowed(email):
         # Hospital admins and insurers open the clinical layer with a reason
         # (tests/test_hospital_pages.py); for them the record is there, but
-        # behind the prompt. A pharmacy never gets it (tests/test_pharmacy.py).
-        expected = 403 if ACCOUNTS[email][0] in ("hospital_admin", "insurer", "pharmacy") else 200
+        # behind the prompt. A pharmacy or a caretaker never gets it
+        # (tests/test_pharmacy.py, tests/test_caretakers.py).
+        expected = 403 if ACCOUNTS[email][0] in ("hospital_admin", "insurer", "pharmacy", "caretaker") else 200
         assert c.get(f"/api/patients/{idx}").status_code == expected
 
 

@@ -10,12 +10,12 @@ import { useCallback, useEffect, useState } from 'react';
 const ROLE_LABELS = {
   superadmin: 'Superadmin', hospital_admin: 'Hospital admin', doctor: 'Doctor',
   nurse: 'Nurse', case_manager: 'Case manager', insurer: 'Insurer', pharmacy: 'Pharmacy',
-  patient: 'Patient',
+  caretaker: 'Caretaker', patient: 'Patient',
 };
 
 // Mirrors ASSIGNABLE in Readmissions/api/user_admin.py.
 const ASSIGNABLE = {
-  superadmin: ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'insurer', 'pharmacy', 'patient'],
+  superadmin: ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'insurer', 'pharmacy', 'caretaker', 'patient'],
   hospital_admin: ['doctor', 'nurse', 'case_manager', 'patient'],
 };
 const HOSPITAL_ROLES = ['hospital_admin', 'doctor', 'nurse', 'case_manager', 'patient'];

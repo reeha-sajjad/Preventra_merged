@@ -39,6 +39,7 @@ ACCOUNTS = {
     "claims@acme.test": ("insurer", None, {"insurer_id": "acme"}, {A1, B1}),
     "rx@bay.test":      ("pharmacy", None, {"pharmacy_id": "bay"}, {A2, B2}),
     "me@patient.test":  ("patient", "hosp-a", {}, {A4}),
+    "carer@home.test":  ("caretaker", None, {}, {A4}),         # linked by A4
     "admin@b.test":     ("hospital_admin", "hosp-b", {}, {B1, B2}),
     "floating@x.test":  ("case_manager", None, {}, set()),     # approved, never placed
 }
@@ -89,7 +90,8 @@ def world(main, monkeypatch):
         A2: {"hospital_id": "hosp-a", "assigned_doctor_id": "DR-A", "assigned_nurse_ids": [nurse],
              "pharmacy_id": "bay"},
         A3: {"hospital_id": "hosp-a", "assigned_nurse_ids": [nurse]},
-        A4: {"hospital_id": "hosp-a", "patient_account_id": ids["me@patient.test"]},
+        A4: {"hospital_id": "hosp-a", "patient_account_id": ids["me@patient.test"],
+             "caretaker_ids": [ids["carer@home.test"]]},
         B1: {"hospital_id": "hosp-b", "assigned_doctor_id": "DR-B", "insurer_id": "acme"},
         B2: {"hospital_id": "hosp-b", "pharmacy_id": "bay"},
     }

@@ -34,6 +34,7 @@ from api import ingest
 from api import emergency
 from api import pharmacy
 from api import patient_home
+from api import caretakers
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
@@ -2704,18 +2705,44 @@ def pharmacy_report(patient_id: str, body: PharmacyReport, request: Request):
 class AskCaseManager(BaseModel):
     reason: str
     note: Optional[str] = None
+    patient_id: Optional[str] = None           # a caretaker: which of their people
 
 
 @app.get("/api/my-home")
-def my_home(request: Request):
-    """The caller's own record in plain words. Patients only."""
-    return patient_home.home(db, request.state.user, _scope(request))
+def my_home(request: Request, patient: Optional[str] = None):
+    """The caller's own record in plain words - or, for a caretaker, that of a
+    patient who linked them (`patient` picks which)."""
+    return patient_home.home(db, request.state.user, _scope(request), patient, request.state.session)
 
 
 @app.post("/api/my-home/ask", status_code=201)
 def ask_case_manager(body: AskCaseManager, request: Request):
-    """The patient asks the hospital's case managers to get in touch, saying why."""
-    return followups.patient_request(db, request.state.user, _scope(request), body.reason, body.note)
+    """The patient or their caretaker asks the case managers to get in touch."""
+    return followups.patient_request(db, request.state.user, _scope(request), body.reason, body.note,
+                                     body.patient_id)
+
+
+# Caretakers - family and home carers a patient links (api/caretakers.py; GLP-1's twin)
+class LinkCaretaker(BaseModel):
+    email: str
+    patient_id: Optional[str] = None           # staff only
+    patient_agreed: bool = False               # staff only: confirmed with the patient
+
+
+@app.get("/api/caretakers")
+def list_caretakers(request: Request, patient: Optional[str] = None):
+    return caretakers.listing(db, request.state.user, _scope(request), patient)
+
+
+@app.post("/api/caretakers", status_code=201)
+def link_caretaker(body: LinkCaretaker, request: Request):
+    return caretakers.link(db, request.state.user, _scope(request), body.email, body.patient_id,
+                           body.patient_agreed)
+
+
+@app.delete("/api/caretakers/{caretaker_id}")
+def unlink_caretaker(caretaker_id: str, request: Request, patient: Optional[str] = None):
+    return caretakers.unlink(db, request.state.user, _scope(request), caretaker_id, patient)
 
 
 # ---------------------------------------------------------------------------
@@ -2808,7 +2835,7 @@ def get_patient_summary(patient_id: str, request: Request):
     state = _detail_access(request, patient_id)
     user = request.state.user
     extra = {}
-    if access.overview_only(user):
+    if user["role"] == "pharmacy":
         # A pharmacy: the refill facts its own feed supplies, and the look is logged.
         extra = pharmacy.refill_facts(db, patient_id)
         session = request.state.session
@@ -2842,7 +2869,7 @@ def open_patient(patient_id: str, payload: OpenPatientRequest, request: Request)
     if not access.needs_reason(user):
         return {"patient_id": patient_id, "detail_access": "open"}
     if access.overview_only(user):
-        raise HTTPException(status_code=403, detail="Pharmacies see the overview of a patient only")
+        raise HTTPException(status_code=403, detail="This account sees the overview of a patient only")
     if payload.reason not in access.REASONS:
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if str(patient_id) not in _opened(request):

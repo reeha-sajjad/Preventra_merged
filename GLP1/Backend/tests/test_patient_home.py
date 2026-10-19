@@ -49,7 +49,7 @@ def test_a_patient_with_no_record_linked_is_told_so(world):
     import main
     tok = jwt.encode({"sub": str(uid), "exp": int(time.time()) + 600}, settings.shared_secret_key, algorithm="HS256")
     c = TestClient(main.app, headers={"Authorization": f"Bearer {tok}"})
-    assert c.get("/api/my-home").json() == {"linked": False, "name": None}
+    assert c.get("/api/my-home").json() == {"linked": False, "name": None, "viewer": "patient"}
     assert c.post("/api/my-home/ask", json={"reason": "cost"}).status_code == 404
     users.delete_one({"_id": ObjectId(uid)})
 

@@ -135,7 +135,7 @@ def test_the_role_list_matches_the_auth_service():
     """GLP-1 keeps a copy of Readmissions/api/auth.py:ROLES. If this fails, one
     side added or renamed a role without the other."""
     assert security.ROLES == ("superadmin", "hospital_admin", "doctor", "nurse",
-                              "case_manager", "insurer", "pharmacy", "patient")
+                              "case_manager", "insurer", "pharmacy", "caretaker", "patient")
 
 
 # ------------------------------------------------------- the whole service

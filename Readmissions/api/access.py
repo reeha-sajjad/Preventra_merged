@@ -24,6 +24,8 @@ What each role sees:
     insurer                       their members, in any hospital
     pharmacy                      patients who fill at their pharmacy, in any hospital
     patient                       their own record
+    caretaker                     the patients who linked them (caretaker_ids),
+                                  overview only - api/caretakers.py
     anyone without a placement    nothing
 
 A patient with no ownership record is visible to the superadmin only; the seed
@@ -102,7 +104,10 @@ ACTIONS = {
 REASON_ROLES = ("hospital_admin", "insurer")
 # Overview layer only, with no reason that opens the rest: a pharmacy needs to
 # know who to call about a refill and how at risk they are, not their diagnoses.
-OVERVIEW_ONLY_ROLES = ("pharmacy",)
+# A caretaker (a family or home carer the patient linked) is the same: the
+# patient's plain-words home page (api/patient_home.py) is what is relevant to
+# helping with their care (45 CFR 164.510(b)), not the clinical layer.
+OVERVIEW_ONLY_ROLES = ("pharmacy", "caretaker")
 
 # What a hospital admin or insurer may give as the reason for opening a
 # patient's clinical details. Stored as the key, shown as the label.
@@ -131,12 +136,16 @@ AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON
 EMERGENCY_REASON = "emergency_access"
 # A pharmacy opening one of its patients (api/pharmacy.py): logged, never asked.
 DISPENSING_REASON = "dispensing"
+# A caretaker opening the home page of a patient who linked them: logged, never
+# asked - a disclosure to someone involved in the patient's care (164.510(b)).
+CARETAKER_REASON = "caretaker"
 EMERGENCY_COLLECTION = "emergency_access"          # in shared_identity, both apps
 LOGGED_REASONS = {SUPERADMIN_REASON: "Superadmin (not asked)",
                   TREATMENT_REASON: "Treatment (care team)",
                   COORDINATION_REASON: "Care coordination (case manager)",
                   EMERGENCY_REASON: "Emergency access (break the glass)",
-                  DISPENSING_REASON: "Dispensing (pharmacy)"}
+                  DISPENSING_REASON: "Dispensing (pharmacy)",
+                  CARETAKER_REASON: "Caretaker (linked by the patient)"}
 
 # The 403 a reason-role gets for the clinical layer of a patient it has not
 # opened this session. A structured detail so the frontends can tell it from
@@ -145,7 +154,7 @@ REASON_REQUIRED = {"code": "reason_required",
                    "message": "Give a reason to open this patient's clinical details"}
 # The 403 a pharmacy gets for the clinical layer: there is no reason to give.
 OVERVIEW_ONLY = {"code": "overview_only",
-                 "message": "Pharmacies see a patient's overview only"}
+                 "message": "This account sees a patient's overview only"}
 
 # Fields of a worklist row, or a patient record, that belong to the clinical
 # layer. Everything else - id, risk scores and bands, trend status, discharge
@@ -228,6 +237,8 @@ def patient_scope(db, user: dict) -> Optional[list]:
         query = {"pharmacy_id": user["pharmacy_id"]} if user.get("pharmacy_id") else None
     elif role == "patient":
         query = {"patient_account_id": uid}
+    elif role == "caretaker":
+        query = {"caretaker_ids": uid}
     else:
         query = None
     if query is None:

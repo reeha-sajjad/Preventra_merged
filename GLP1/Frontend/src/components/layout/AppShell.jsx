@@ -72,7 +72,9 @@ export default function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const roleFlags = useRole();
-  const { roleLabel, isCostView, isPatient, isCareTeam, handlesFollowUps, role } = roleFlags;
+  const { roleLabel, isCostView, isPatient: isPatientRole, isCaretaker, isCareTeam, handlesFollowUps, role } = roleFlags;
+  // A caretaker's app is the patient's home page, so the same short menu.
+  const isPatient = isPatientRole || isCaretaker;
   const { logout, user, token } = useAuth();
   const location = useLocation();
   const allowed = (item) => !item.only || roleFlags[item.only];
@@ -89,7 +91,7 @@ export default function AppShell({ children }) {
     return () => { live = false; clearInterval(t); };
   }, [handlesFollowUps, location.pathname]);
 
-  const pageTitle = (isPatient && location.pathname === '/' ? 'My health' : null)
+  const pageTitle = (isPatient && location.pathname === '/' ? (isCaretaker ? 'People I care for' : 'My health') : null)
     ?? NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
     ?? PAGE_TITLES[location.pathname]
     ?? (location.pathname.startsWith('/patients/') ? 'Patient detail' : 'GLP-1 Platform');
@@ -164,9 +166,9 @@ export default function AppShell({ children }) {
           {isPatient ? (
             // A patient sees one thing: their own record, in plain words.
             <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              title={isCollapsed ? 'My health' : undefined}>
+              title={isCollapsed ? (isCaretaker ? 'People I care for' : 'My health') : undefined}>
               <UserCircle size={17} className="nav-icon flex-shrink-0" />
-              {!isCollapsed && <span className="animate-fade-in">My health</span>}
+              {!isCollapsed && <span className="animate-fade-in">{isCaretaker ? 'People I care for' : 'My health'}</span>}
             </NavLink>
           ) : (<>
           {/* Section: Overview */}

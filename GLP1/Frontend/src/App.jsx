@@ -47,9 +47,10 @@ function AuthenticatedApp() {
 // data after a refusal. Doctors and nurses have no Overview: their Patients
 // list is their home.
 function RoleRoutes() {
-  const { isCostView, isPatient, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy } = useRole();
+  const { isCostView, isPatient, isCaretaker, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy } = useRole();
 
-  if (isPatient) {
+  // Patients, and caretakers looking after them, get the plain-words home page.
+  if (isPatient || isCaretaker) {
     return (
       <Routes>
         {/* A patient's home is their own record in plain words. The

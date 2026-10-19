@@ -26,7 +26,7 @@ _bearer_scheme = HTTPBearer()
 # owns the accounts. The two services deploy separately, so they cannot share
 # one module.
 ROLES = ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager",
-         "insurer", "pharmacy", "patient")
+         "insurer", "pharmacy", "caretaker", "patient")
 STATUSES = ("pending", "active")
 DEFAULT_ROLE = "case_manager"
 

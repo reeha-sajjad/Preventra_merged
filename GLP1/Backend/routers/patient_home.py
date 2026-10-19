@@ -15,21 +15,53 @@ router = APIRouter()
 
 
 @router.get("/my-home")
-async def my_home(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
-    """The caller's own record in plain words. Patients only."""
-    return await patient_home.home(user, scope)
+async def my_home(patient: Optional[int] = None, user: dict = Depends(actor),
+                  scope: Optional[list] = Depends(scope_of)):
+    """The caller's own record in plain words - or, for a caretaker, that of a
+    patient who linked them (`patient` picks which). Patients and caretakers."""
+    return await patient_home.home(user, scope, patient)
 
 
 class AskRequest(BaseModel):
     reason: str
     note: Optional[str] = None
+    patient_idx: Optional[int] = None          # a caretaker: which of their people
 
 
 @router.post("/my-home/ask", status_code=201)
 async def ask_case_manager(body: AskRequest, user: dict = Depends(actor),
                            scope: Optional[list] = Depends(scope_of)):
-    """The patient asks their case manager to get in touch, saying why."""
-    return await followups.patient_request(user, scope, body.reason, body.note)
+    """The patient or their caretaker asks the case manager to get in touch."""
+    return await followups.patient_request(user, scope, body.reason, body.note, body.patient_idx)
+
+
+# -------------------------------------------------- caretakers (core/caretakers.py)
+from core import caretakers  # noqa: E402
+
+
+@router.get("/caretakers")
+async def list_caretakers(patient: Optional[int] = None, user: dict = Depends(actor),
+                          scope: Optional[list] = Depends(scope_of)):
+    """A patient's caretakers: the patient's own, or a patient's in staff scope."""
+    return await caretakers.listing(user, scope, patient)
+
+
+class LinkCaretaker(BaseModel):
+    email: str
+    patient_idx: Optional[int] = None          # staff only
+    patient_agreed: bool = False               # staff only: confirmed with the patient
+
+
+@router.post("/caretakers", status_code=201)
+async def link_caretaker(body: LinkCaretaker, user: dict = Depends(actor),
+                         scope: Optional[list] = Depends(scope_of)):
+    return await caretakers.link(user, scope, body.email, body.patient_idx, body.patient_agreed)
+
+
+@router.delete("/caretakers/{caretaker_id}")
+async def unlink_caretaker(caretaker_id: str, patient: Optional[int] = None, user: dict = Depends(actor),
+                           scope: Optional[list] = Depends(scope_of)):
+    return await caretakers.unlink(user, scope, caretaker_id, patient)
 
 
 # --------------------------------------------------------------- Zoe (core/zoe.py)

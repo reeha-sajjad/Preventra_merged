@@ -10,6 +10,10 @@ Who may do what - enforced here, never only in a frontend:
                     every account except other superadmins
     hospital_admin  manages doctors, nurses, case managers and patients in its
                     own hospital, and nothing outside it
+    caretaker       a family or home carer signs up themselves and is active at
+                    once, attached to nothing; they see a patient only once
+                    the patient (or staff, with the patient's agreement) links
+                    them (api/caretakers.py). The superadmin can manage them.
 
 No path here can create a superadmin or promote anyone to one; that is
 scripts/create_superadmin.py, run by someone with direct cluster access.
