@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getPatientById, getPatientSummary } from '../api';
-import { myRole, can, ASSIGN_ROLES } from '../roles';
+import { myRole, can, ASSIGN_ROLES, INSURER_ROLES } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
 import CareTeamCard from '../components/shared/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
@@ -96,7 +96,7 @@ export default function PatientDetail() {
         className="flex items-center space-x-2 text-gray-500 hover:text-ns-navy transition-colors font-medium mb-2 focus:outline-none"
       >
         <ArrowLeft size={18} />
-        <span>Back to patients</span>
+        <span>Back to {can(INSURER_ROLES) ? 'members' : 'patients'}</span>
       </button>
     )
   );
@@ -133,6 +133,7 @@ export default function PatientDetail() {
         <div className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="space-y-2 text-center md:text-left">
             <h1 className="text-3xl font-bold text-gray-900">{summary.id}</h1>
+            <MemberLine summary={summary} />
             <div className="flex items-center space-x-2 text-gray-500">
               <Calendar size={18} />
               <span>Discharged: <strong>{summary.discharge_date}</strong></span>
@@ -155,7 +156,7 @@ export default function PatientDetail() {
         {summary.detail_access === 'overview_only' ? <PharmacyPatientCard summary={summary} />
           : <FollowUpCard patientId={summary.id} />}
         <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload}
-          overviewOnly={summary.detail_access === 'overview_only'} />
+          overviewOnly={summary.detail_access === 'overview_only'} insurer={summary.viewer === 'insurer'} />
       </div>
     );
   }
@@ -185,6 +186,7 @@ export default function PatientDetail() {
       <div className="bg-white p-8 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row items-center md:items-start justify-between gap-6">
         <div className="flex flex-col items-center md:items-start space-y-2">
           <h1 className="text-3xl font-bold text-gray-900">{patient.id}</h1>
+          <MemberLine summary={summary} />
           <div className="flex items-center space-x-2 text-gray-500">
             <Calendar size={18} />
             <span>Discharged: <strong>{patient.discharge_date}</strong></span>
@@ -336,6 +338,17 @@ export default function PatientDetail() {
       </div>
 
       <div className="h-10"></div>
+    </div>
+  );
+}
+/** An insurer's line under the patient: which hospital, and the member ID. */
+function MemberLine({ summary }) {
+  if (summary?.viewer !== 'insurer') return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 text-sm text-gray-500">
+      <span>{summary.hospital || 'No hospital on file'}</span>
+      <span className="text-gray-300">·</span>
+      <span>Member ID <span className="font-mono font-semibold text-gray-800">{summary.member_id || '—'}</span></span>
     </div>
   );
 }

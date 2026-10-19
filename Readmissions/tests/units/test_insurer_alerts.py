@@ -18,7 +18,7 @@ def test_first_look_is_a_baseline_then_a_member_turning_high_rings(main, world):
     assert [(i["kind"], i["patient_id"], i["previous_band"]) for i in items] == [("turned_high", A1, "Low")]
     # Opening the member (with a reason) clears it.
     c = as_user(main, world, "claims@acme.test")
-    reason = "billing"
+    reason = "claim_review"                                       # a payer reason
     assert c.post(f"/api/patients/{A1}/open", json={"reason": reason}).status_code == 200
     assert c.get(f"/api/patients/{A1}").status_code == 200
     assert bell(main, world) == []

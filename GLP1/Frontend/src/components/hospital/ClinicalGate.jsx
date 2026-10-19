@@ -11,7 +11,7 @@ import { api } from '../../data/api';
  * A pharmacy (overviewOnly) gets a note instead: no reason opens the clinical
  * layer for a pharmacy, and the backend refuses it (Backend/core/access.py).
  */
-export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overviewOnly = false }) {
+export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overviewOnly = false, insurer = false }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -63,7 +63,7 @@ export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overv
           </h2>
           <p className="text-sm text-gray-500 mt-0.5">
             Vitals, medication, pharmacy and dropout drivers open one patient at a time. Tell us why you
-            need them; the reason is recorded in your hospital&apos;s access log.
+            need them; the reason is recorded in {insurer ? 'the hospital' : 'your hospital'}&apos;s access log.
           </p>
         </div>
       </div>

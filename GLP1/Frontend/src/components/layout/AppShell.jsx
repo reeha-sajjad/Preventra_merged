@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Users, UserCircle, PieChart, TrendingDown, UsersRound,
   Calculator, Settings, ChevronLeft, ChevronRight,
-  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock, ListChecks, Pill,
+  Building2, Stethoscope, AlertTriangle, LogOut, Menu, X, ExternalLink, CalendarClock, ListChecks, Pill, List,
 } from 'lucide-react';
 import { api } from '../../data/api';
 import HospitalPicker from '../hospital/HospitalPicker';
@@ -18,10 +18,10 @@ const NAV_ITEMS = [
   { section: 'overview', to: '/',         icon: ListChecks,      label: 'Today',                primary: null, only: 'isCaseManager' },
   { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Hospital overview',    primary: null, only: 'isCaseManager' },
   { section: 'overview', to: '/',         icon: Users,           label: 'Members',              primary: null, only: 'isInsurer' },
-  { section: 'overview', to: '/overview', icon: LayoutDashboard, label: 'Members overview',     primary: null, only: 'isInsurer' },
+  { section: 'overview', to: '/patients', icon: List,            label: 'All members',          primary: null, only: 'isInsurer' },
   { section: 'overview', to: '/',         icon: LayoutDashboard, label: 'My patients',          primary: null, only: 'isCareTeam' },
   { section: 'overview', to: '/',         icon: Pill,            label: 'Pharmacy',             primary: null, only: 'isPharmacy' },
-  { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null, only: 'notPharmacy' },
+  { section: 'overview', to: '/patients', icon: Users,           label: 'Patients',             primary: null, only: 'listsPatients' },
   { section: 'overview', to: '/staff',    icon: UsersRound,      label: 'Staff',                primary: null, only: 'hasStaff' },
   { section: 'overview', to: '/follow-ups', icon: CalendarClock, label: 'Follow-ups',           primary: null, only: 'handlesFollowUps', badge: 'followups' },
   { section: 'analytics', to: '/segments', icon: PieChart,        label: 'Segment Explorer',     primary: null },
@@ -74,7 +74,7 @@ export default function AppShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const roleFlags = useRole();
-  const { roleLabel, isCostView, isPatient: isPatientRole, isCaretaker, isCareTeam, handlesFollowUps, role } = roleFlags;
+  const { roleLabel, isCostView, isPatient: isPatientRole, isCaretaker, isCareTeam, handlesFollowUps, isInsurer, role } = roleFlags;
   // A caretaker's app is the patient's home page, so the same short menu.
   const isPatient = isPatientRole || isCaretaker;
   const { logout, user, token } = useAuth();
@@ -96,7 +96,7 @@ export default function AppShell({ children }) {
   const pageTitle = (isPatient && location.pathname === '/' ? (isCaretaker ? 'People I care for' : 'My health') : null)
     ?? NAV_ITEMS.find(n => n.to === location.pathname && allowed(n))?.label
     ?? PAGE_TITLES[location.pathname]
-    ?? (location.pathname.startsWith('/patients/') ? 'Patient detail' : 'GLP-1 Platform');
+    ?? (location.pathname.startsWith('/patients/') ? (isInsurer ? 'Member detail' : 'Patient detail') : 'GLP-1 Platform');
 
   // The mobile drawer always shows the full-width sidebar, even if the user
   // collapsed it on desktop before shrinking the window.

@@ -135,7 +135,8 @@ export function InsurerInbox() {
 
   const load = useCallback(() => { api.getInsurerFlags('open').then(setData).catch(() => setData(null)); }, []);
   useEffect(() => { load(); }, [load]);
-  if (!data) return null;
+  // Only when something is open: the bell already says when one arrives.
+  if (!data || data.flags.length === 0) return null;
 
   const send = async (e) => {
     e.preventDefault();

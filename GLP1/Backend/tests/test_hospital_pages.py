@@ -49,7 +49,13 @@ def test_reason_roles_get_the_overview_layer_in_the_list(world, email):
     assert body["redacted"] is True and body["patients"]
     for row in body["patients"]:
         assert not access.CLINICAL_FIELDS & row.keys(), sorted(access.CLINICAL_FIELDS & row.keys())
-        assert {"patient_idx", "dropout_prob", "prediction", "doctor", "nurses", "insurer"} <= row.keys()
+        # An insurer gets the hospital, case manager and member ID instead of the
+        # clinical staff (core/hospital.for_insurer); a hospital admin the care team.
+        expected = ({"patient_idx", "dropout_prob", "prediction", "hospital", "case_manager", "member_id"}
+                    if email == "claims@acme.test"
+                    else {"patient_idx", "dropout_prob", "prediction", "doctor", "nurses", "insurer"})
+        assert expected <= row.keys()
+        assert email != "claims@acme.test" or not {"doctor", "doctors", "nurses"} & row.keys()
 
 
 def test_the_care_team_gets_the_whole_row_with_names(world):
@@ -77,7 +83,9 @@ def test_detail_asks_for_a_reason_and_the_summary_says_so(world, email):
         assert r.status_code == 403 and r.json()["detail"]["code"] == "reason_required", path
     summary = c.get("/api/patients/0/summary").json()
     assert summary["detail_access"] == "reason_required"
-    assert {r["key"] for r in summary["reasons"]} == set(access.REASONS)
+    # An insurer picks from the payer's list; a hospital admin from the hospital's.
+    expected = access.PAYER_REASONS if email == "claims@acme.test" else access.REASONS
+    assert {r["key"] for r in summary["reasons"]} == set(expected)
     assert not access.CLINICAL_FIELDS & summary.keys()
 
 

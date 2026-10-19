@@ -196,7 +196,7 @@ function SortHeader({ label, sortKey: sk, currentSort, currentDir, onSort }) {
 /* ── Main Component ───────────────────────────────────────────────── */
 export default function PatientRiskPanel() {
   const navigate = useNavigate();
-  const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager, findsMemberIds } = useRole();
+  const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager, findsMemberIds, isInsurer } = useRole();
   const { user } = useAuth();
   const { patients, loading, redacted, reload } = usePatients();
   // Filters the Overview and the Staff page link in with.
@@ -329,6 +329,19 @@ export default function PatientRiskPanel() {
           </div>
         );
       case 'care_team':
+        if (isInsurer) {
+          // An insurer: the hospital and the case manager to contact, not the clinical staff.
+          return (
+            <div style={{ maxWidth: 180 }}>
+              <div className="text-xs truncate text-gray-700">{p.hospital || '—'}</div>
+              {p.case_manager && (
+                <div className="text-[10px] truncate mt-0.5" style={{ color: '#1B4F8A' }} title="Case manager">
+                  CM · {p.case_manager.name}
+                </div>
+              )}
+            </div>
+          );
+        }
         return (
           <div style={{ maxWidth: 180 }}>
             <div className="text-xs truncate" style={{ color: doctorsOf(p).length ? '#2D3748' : '#C62828' }}
@@ -369,7 +382,11 @@ export default function PatientRiskPanel() {
   };
 
   // The overview layer (hospital admins, insurers) never offers a clinical column.
-  const offeredColumns = ALL_COLUMNS.filter(c => !(redacted && c.clinical));
+  // An insurer: "Hospital" for the care team, and no Insurer column - it is them.
+  const offeredColumns = ALL_COLUMNS
+    .filter(c => !(redacted && c.clinical))
+    .filter(c => !(isInsurer && c.key === 'insurer'))
+    .map(c => (isInsurer && c.key === 'care_team' ? { ...c, label: 'Hospital' } : c));
   const visibleColumns = offeredColumns.filter(c => hasCol(c.key));
 
   if (loading) {
@@ -398,8 +415,9 @@ export default function PatientRiskPanel() {
         <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl text-sm font-medium mb-4 animate-fade-up"
           style={{ background: '#EBF4FF', color: '#1B4F8A', border: '1px solid #BFDBFE' }}>
           <Building2 size={15} />
-          Adherence risk, care team and insurer for each patient. Vitals, medication and dropout drivers open one
-          patient at a time, with a reason.
+          {isInsurer
+            ? 'Dropout risk, hospital and case manager for each member. Clinical details open one member at a time, with a reason.'
+            : 'Adherence risk, care team and insurer for each patient. Vitals, medication and dropout drivers open one patient at a time, with a reason.'}
         </div>
       )}
 
@@ -422,10 +440,10 @@ export default function PatientRiskPanel() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
-            Patients
+            {isInsurer ? 'All members' : 'Patients'}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">
-            {filtered.length} patients · {highRisk} critical risk{!redacted && ` · ${financial} financial barrier`}
+            {filtered.length} {isInsurer ? 'members' : 'patients'} · {highRisk} critical risk{!redacted && ` · ${financial} financial barrier`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -611,7 +629,7 @@ export default function PatientRiskPanel() {
                       aria-label="Select every patient on this page" />
                   </th>
                 )}
-                <th style={{ width: 50 }}>#</th>
+                <th style={{ width: isInsurer ? 120 : 50 }}>{isInsurer ? "Member ID" : "#"}</th>
                 {visibleColumns.map(col => (
                   <th key={col.key}>
                     {col.sortable ? (
@@ -641,6 +659,9 @@ export default function PatientRiskPanel() {
                     </td>
                   )}
                   <td>
+                    {isInsurer && p.member_id && (
+                      <span className="block text-xs font-mono font-semibold text-gray-700">{p.member_id}</span>
+                    )}
                     <span className="text-xs font-mono text-gray-400">#{String(p.patient_idx).padStart(3, '0')}</span>
                   </td>
                   {visibleColumns.map(col => (

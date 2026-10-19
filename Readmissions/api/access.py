@@ -109,14 +109,29 @@ REASON_ROLES = ("hospital_admin", "insurer")
 # helping with their care (45 CFR 164.510(b)), not the clinical layer.
 OVERVIEW_ONLY_ROLES = ("pharmacy", "caretaker")
 
-# What a hospital admin or insurer may give as the reason for opening a
-# patient's clinical details. Stored as the key, shown as the label.
+# What a hospital admin may give as the reason for opening a patient's
+# clinical details. Stored as the key, shown as the label.
 REASONS = {
     "care_coordination": "Care coordination",
     "incident_review":   "Complaint / incident review",
     "audit":             "Audit",
     "billing":           "Billing query",
 }
+# An insurer's reasons, in a payer's words. A health plan may see a member's
+# information for its own payment and health care operations - claims, prior
+# authorisation, care management, quality review (45 CFR 164.506(c)(1), (c)(4);
+# the definitions in 164.501). Must match PAYER_REASONS in GLP1/Backend/core/access.py.
+PAYER_REASONS = {
+    "claim_review":      "Claim review",
+    "prior_auth_review": "Prior authorisation review",
+    "care_management":   "Care management",
+    "quality_review":    "Quality review or audit",
+}
+
+
+def reasons_for(user: dict) -> dict:
+    """The reasons this account picks from to open a patient's clinical details."""
+    return PAYER_REASONS if user.get("role") == "insurer" else REASONS
 SUPERADMIN_REASON = "superadmin"            # logged, never asked for
 
 # Roles that are never asked for a reason but whose first look at each patient

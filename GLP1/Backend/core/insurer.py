@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+from core import scoped
 from core.access import scope_query
 from core.mongo import get_db, get_shared_identity_db
 from core.pharmacy import drug_label
@@ -34,12 +35,12 @@ async def home(user: dict, scope: Optional[list]) -> dict:
     db = get_db()
     mine = scope_query(scope)
     rows = await db.patients.find(mine, {"_id": 0, "patient_idx": 1, "dropout_prob": 1, "cluster": 1,
-                                         "assigned_molecule": 1}).to_list(length=None)
+                                         "assigned_molecule": 1, "is_adherent": 1}).to_list(length=None)
     idxs = [int(r["patient_idx"]) for r in rows]
     access = {int(a["patient_idx"]): a for a in await db.patient_access.find(
         {"patient_idx": {"$in": idxs}}, {"_id": 0, "patient_idx": 1, "hospital_id": 1,
                                          "insurer_member_id": 1}).to_list(length=None)}
-    cea = {int(d["cluster"]): d for d in await db.cost_effectiveness.find({}, {"_id": 0}).to_list(length=None)}
+    cea = {int(d["cluster"]): d for d in await scoped.cost_table(scope)}
     ident = get_shared_identity_db()
     hospital_ids = {a.get("hospital_id") for a in access.values() if a.get("hospital_id")}
     hospitals = {h["_id"]: h.get("name", h["_id"]) for h in await ident.hospitals.find(
@@ -71,15 +72,37 @@ async def home(user: dict, scope: Optional[list]) -> dict:
                         "dropout_prob": round(float(r.get("dropout_prob") or 0), 4),
                         "drug": drug_label(r.get("assigned_molecule"))})
 
+    # Where the spend at risk sits, by behaviour segment (core/scoped.py: the
+    # members' own adherence), and the drug mix - formulary questions.
+    profiles = {int(p["cluster"]): p for p in await db.segment_profiles.find(
+        {}, {"_id": 0, "cluster": 1, "label": 1, "color": 1}).to_list(length=None)}
+    by_segment = []
+    for c, d in sorted(cea.items()):
+        n = sum(1 for r in rows if int(r.get("cluster") or 0) == c)
+        if not n:
+            continue
+        by_segment.append({"cluster": c, "label": (profiles.get(c) or {}).get("label") or d.get("segment"),
+                           "color": (profiles.get(c) or {}).get("color"), "members": n,
+                           "adherence": d.get("adherence_rate"),
+                           "spend_at_risk": round(float(d.get("wasted_spend_per_pt") or 0) * n)})
+    drugs: dict = {}
+    for r in rows:
+        name = drug_label(r.get("assigned_molecule"))
+        drugs[name] = drugs.get(name, 0) + 1
+
     total = len(rows)
+    adherent = sum(1 for r in rows if int(r.get("is_adherent") or 0) == 1)
     return {
         "insurer": {"id": user.get("insurer_id"), "name": insurer.get("name") or user.get("insurer_id")},
         "stats": {"members": total, "hospitals": len([h for h in by_hospital if h]),
+                  "adherent": adherent,
                   "high_risk": sum(h["high_risk"] for h in by_hospital.values()),
                   "annual_spend": sum(h["annual_spend"] for h in by_hospital.values()),
                   "spend_at_risk": sum(h["spend_at_risk"] for h in by_hospital.values()),
                   "without_member_id": sum(1 for i in idxs if not (access.get(i) or {}).get("insurer_member_id"))},
         "by_hospital": sorted(by_hospital.values(), key=lambda h: -h["members"]),
         "high_risk_members": members,
+        "by_segment": by_segment,
+        "drug_mix": sorted(({"drug": k, "members": v} for k, v in drugs.items()), key=lambda d: -d["members"]),
         "high_risk_line": HIGH_RISK,
     }

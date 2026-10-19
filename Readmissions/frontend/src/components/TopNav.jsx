@@ -4,7 +4,7 @@ import { Menu } from 'lucide-react';
 import AlertsBell from './AlertsBell';
 import HospitalPicker from './HospitalPicker';
 import { readClaims } from '../api/auth';
-import { can, MY_PATIENTS_ROLES, PHARMACY_ROLES } from '../roles';
+import { can, INSURER_ROLES, MY_PATIENTS_ROLES, PHARMACY_ROLES } from '../roles';
 
 export default function TopNav({ onMenuClick = () => {} }) {
   const location = useLocation();
@@ -14,9 +14,9 @@ export default function TopNav({ onMenuClick = () => {} }) {
       : readClaims()?.role === 'caretaker' ? 'People I care for'
       : readClaims()?.role === 'insurer' ? 'Members'
       : can(PHARMACY_ROLES) ? 'Pharmacy' : can(MY_PATIENTS_ROLES) ? 'My patients' : 'Overview';
-    if (path === '/overview') return 'Members overview';
+    if (path === '/patients' && can(INSURER_ROLES)) return 'All members';
     if (path === '/patients') return 'Patients';
-    if (path.startsWith('/patients/')) return 'Patient Detail';
+    if (path.startsWith('/patients/')) return can(INSURER_ROLES) ? 'Member Detail' : 'Patient Detail';
     if (path === '/staff') return 'Staff';
     if (path === '/follow-ups') return 'Follow-ups';
     if (path === '/settings') return 'Settings';

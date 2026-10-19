@@ -73,7 +73,9 @@ function RoleRoutes() {
                                              : isCareTeam ? <CareHome />
                                              : <Navigate to="/patients" replace />} />
         {/* Case managers' home is "Today"; their hospital Overview lives here. */}
-        {(isCaseManager || isInsurer) && <Route path="/overview" element={<ExecutiveSummary />} />}
+        {isCaseManager && <Route path="/overview" element={<ExecutiveSummary />} />}
+        {/* An insurer's overview is part of Members now. */}
+        {isInsurer && <Route path="/overview" element={<Navigate to="/" replace />} />}
         {/* A pharmacy's patient list is its home page. */}
         <Route path="/patients"     element={isPharmacy ? <Navigate to="/" replace /> : <PatientRiskPanel />} />
         {hasStaff && <Route path="/staff" element={<Staff />} />}

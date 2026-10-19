@@ -58,7 +58,11 @@ def test_reason_roles_get_the_overview_layer_in_the_list(main, marked, email):
     assert body["redacted"] is True and body["data"]
     for row in body["data"]:
         assert not access.CLINICAL_FIELDS & row.keys(), row.keys()
-        assert {"doctor", "nurses", "insurer", "risk_score", "discharge_date"} <= row.keys()
+        # An insurer gets the hospital and member ID instead of the care team
+        # (api/hospital.for_insurer); a hospital admin the care team.
+        expected = ({"hospital", "member_id", "risk_score", "discharge_date"} if email == "claims@acme.test"
+                    else {"doctor", "nurses", "insurer", "risk_score", "discharge_date"})
+        assert expected <= row.keys()
     assert DX not in str(body) and DRV not in str(body)
 
 
@@ -95,7 +99,9 @@ def test_detail_routes_ask_for_a_reason(main, marked, email):
         assert r.status_code == 403 and r.json()["detail"]["code"] == "reason_required", path
     summary = client.get(f"/api/patients/{pid}/summary").json()
     assert summary["detail_access"] == "reason_required"
-    assert {r["key"] for r in summary["reasons"]} == set(access.REASONS)
+    # An insurer picks from the payer's list; a hospital admin from the hospital's.
+    expected = access.PAYER_REASONS if email == "claims@acme.test" else access.REASONS
+    assert {r["key"] for r in summary["reasons"]} == set(expected)
 
 
 def test_a_reason_opens_one_patient_for_the_rest_of_the_sign_in(main, marked):
@@ -179,8 +185,8 @@ def test_the_superadmin_is_never_asked_but_is_logged_once_per_sign_in(main, mark
 def test_the_access_log_is_read_per_hospital(main, marked):
     as_user(main, marked, "admin@a.test").post(f"/api/patients/{A1}/open", json={"reason": "audit"})
     insurer = as_user(main, marked, "claims@acme.test")
-    insurer.post(f"/api/patients/{A1}/open", json={"reason": "billing"})
-    insurer.post(f"/api/patients/{B1}/open", json={"reason": "billing"})
+    insurer.post(f"/api/patients/{A1}/open", json={"reason": "claim_review"})
+    insurer.post(f"/api/patients/{B1}/open", json={"reason": "claim_review"})
     as_user(main, marked, "ops@team.test").get(f"/api/patients/{A2}")
 
     def read(email, **params):

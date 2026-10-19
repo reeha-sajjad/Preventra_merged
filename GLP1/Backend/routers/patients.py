@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import core.model as model
 from core import access_log, hospital
 from core.mongo import get_db
-from core.access import (REASONS, ASSIGN_ROLES, DISPENSING_REASON, actor, detail_access, needs_reason, overview_only, patient_hospital,
+from core.access import (reasons_for, ASSIGN_ROLES, DISPENSING_REASON, actor, detail_access, needs_reason, overview_only, patient_hospital,
                          redact, require_detail, require_patient, scope_of, scope_query)
 from schemas.patient_views import PatientPharmacyView
 
@@ -151,6 +151,8 @@ async def get_patients(
     # Who looks after each patient, and who pays - the overview layer, on
     # every row for every role. Pharmacy is clinical and goes with the rest.
     teams = await hospital.care_teams([r["patient_idx"] for r in rows])
+    if user["role"] == "insurer":
+        teams = await hospital.for_insurer(teams)
     for r in rows:
         r.update(teams.get(r["patient_idx"], {}))
     if redacted:
@@ -183,6 +185,8 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
         # Looking at a member clears "turned critical" for them from the bell.
         from core import insurer_alerts                   # avoid an import cycle
         await insurer_alerts.mark_seen(user, scope, [patient_idx])
+        # The hospital and case manager, not the clinical staff; and the member ID.
+        team = (await hospital.for_insurer({patient_idx: team}))[patient_idx]
     if user["role"] == "pharmacy":
         # A pharmacy: the dispensing facts it already has, and the look is logged.
         from core import pharmacy                         # avoid an import cycle
@@ -198,7 +202,7 @@ async def get_patient_summary(patient_idx: int, user: dict = Depends(actor),
         "prediction": str(doc.get("prediction") or "Unknown"),
         **team,
         "detail_access": state,
-        "reasons": ([{"key": k, "label": v} for k, v in REASONS.items()]
+        "reasons": ([{"key": k, "label": v} for k, v in reasons_for(user).items()]
                     if state == "reason_required" else []),
         "can_assign": user["role"] in ASSIGN_ROLES,
     })}
@@ -218,7 +222,7 @@ async def open_patient(patient_idx: int, req: OpenPatientRequest, user: dict = D
         return {"patient_idx": patient_idx, "detail_access": "open"}
     if overview_only(user):
         raise HTTPException(status_code=403, detail="This account sees the overview of a patient only")
-    if req.reason not in REASONS:
+    if req.reason not in reasons_for(user):
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if not await access_log.has_opened(user, patient_idx):
         await access_log.record(user, patient_idx, await patient_hospital(patient_idx), req.reason)
@@ -234,7 +238,10 @@ async def get_patient(patient_idx: int, user: dict = Depends(actor),
     if doc is None:
         raise HTTPException(status_code=404, detail=f"Patient {patient_idx} not found")
 
-    patient = {**_shape_patient(doc), **(await hospital.care_teams([patient_idx]))[patient_idx]}
+    team = (await hospital.care_teams([patient_idx]))[patient_idx]
+    if user["role"] == "insurer":
+        team = (await hospital.for_insurer({patient_idx: team}))[patient_idx]
+    patient = {**_shape_patient(doc), **team}
 
     shap_drivers = None
     if doc.get("driver_1") is not None:

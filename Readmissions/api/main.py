@@ -879,10 +879,18 @@ def get_patients(request: Request,
     # Who looks after each patient, and who pays - the overview layer, so it is
     # on every row for every role.
     teams = hospital.care_teams(db, [r["id"] for r in data])
-    for r in data:
-        team = teams.get(r["id"], {})
-        r.update({"doctor": team.get("doctor"), "nurses": team.get("nurses", []),
-                  "insurer": team.get("insurer"), "hospital_id": team.get("hospital_id")})
+    if request.state.user["role"] == "insurer":
+        # An insurer: the hospital and member ID, not the clinical staff.
+        teams = hospital.for_insurer(db, teams)
+        for r in data:
+            team = teams.get(r["id"], {})
+            r.update({"hospital": team.get("hospital"), "hospital_id": team.get("hospital_id"),
+                      "member_id": team.get("member_id")})
+    else:
+        for r in data:
+            team = teams.get(r["id"], {})
+            r.update({"doctor": team.get("doctor"), "nurses": team.get("nurses", []),
+                      "insurer": team.get("insurer"), "hospital_id": team.get("hospital_id")})
     if redacted:
         data = [access.redact(r) for r in data]
     return {"page": page, "limit": limit, "total": total, "data": data, "redacted": redacted}
@@ -2955,6 +2963,11 @@ def get_patient_summary(patient_id: str, request: Request):
     state = _detail_access(request, patient_id)
     user = request.state.user
     extra = {}
+    if user["role"] == "insurer":
+        # The hospital and who to contact there, not the clinical staff; and
+        # looking at a member clears "turned high risk" for them from the bell.
+        team = hospital.for_insurer(db, {str(patient_id): team})[str(patient_id)]
+        insurer_alerts.mark_seen(db, user, _scope(request), [str(patient_id)])
     if user["role"] == "pharmacy":
         # A pharmacy: the refill facts its own feed supplies, and the look is logged.
         extra = pharmacy.refill_facts(db, patient_id)
@@ -2970,7 +2983,7 @@ def get_patient_summary(patient_id: str, request: Request):
         "current_band": row.get("current_band") or row.get("risk_band"),
         **team,
         "detail_access": state,
-        "reasons": ([{"key": k, "label": v} for k, v in access.REASONS.items()]
+        "reasons": ([{"key": k, "label": v} for k, v in access.reasons_for(user).items()]
                     if state == "reason_required" else []),
         "can_assign": user["role"] in access.ACTIONS["assign"],
     }
@@ -2990,7 +3003,7 @@ def open_patient(patient_id: str, payload: OpenPatientRequest, request: Request)
         return {"patient_id": patient_id, "detail_access": "open"}
     if access.overview_only(user):
         raise HTTPException(status_code=403, detail="This account sees the overview of a patient only")
-    if payload.reason not in access.REASONS:
+    if payload.reason not in access.reasons_for(user):
         raise HTTPException(status_code=422, detail="Choose one of the listed reasons")
     if str(patient_id) not in _opened(request):
         access_log.record(db, user, access_log.APP, patient_id, _patient_hospital(patient_id),

@@ -64,6 +64,8 @@ export function RoleProvider({ children }) {
       // A pharmacy's staff: their home is the pharmacy page (pages/PharmacyHome.jsx).
       isPharmacy: role === 'pharmacy',
       notPharmacy: role !== 'pharmacy',
+      // The Patients menu item; an insurer has it as "All members".
+      listsPatients: role !== 'pharmacy' && role !== 'insurer',
       // The hospital Overview as the home page: everyone with an Overview except
       // case managers, whose home is "Today" (the Overview moves to /overview).
       hasOverviewHome: OVERVIEW_ROLES.includes(role) && role !== 'case_manager' && role !== 'insurer',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, AlertTriangle, Wallet, TrendingDown, Building2, ChevronRight, CreditCard } from 'lucide-react';
+import { Users, AlertTriangle, Wallet, TrendingDown, Building2, ChevronRight, CreditCard, Activity, Pill, PieChart } from 'lucide-react';
 import { api } from '../data/api';
 import { RiskBadge } from '../components/shared';
 import PageState from '../components/shared/PageState';
@@ -10,11 +10,13 @@ import { InsurerInbox } from '../components/insurance/InsurerFlags';
 const usd = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
 /**
- * An insurer's home (Backend/core/insurer.py): its members on GLP-1 across
- * hospitals, what their drug costs, how much of that is spent on members likely
- * to stop, and who those members are - by member ID, so the payer's own care
- * management can reach them. Overview layer only; a member's clinical details
- * still need a reason. Readmissions has the same page for readmission risk.
+ * An insurer's one Members page (Backend/core/insurer.py): its members on GLP-1
+ * across hospitals, how many take it as prescribed, what their drug costs and
+ * how much of that is spent on members likely to stop - by hospital, by drug
+ * and by behaviour segment - and who the critical-risk members are, by member
+ * ID, so the payer's own care management can reach them. Hospitals' billing
+ * flags sit at the top. Overview layer only; a member's clinical details still
+ * need a reason. Readmissions has the same page for readmission risk.
  */
 export default function InsurerHome() {
   const navigate = useNavigate();
@@ -38,8 +40,10 @@ export default function InsurerHome() {
           </div>
           <MemberLookup />
         </div>
-        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
           <Tile icon={Users} label="Members" value={stats.members.toLocaleString()} color="#1B4F8A" />
+          <Tile icon={Activity} label="Taking it as prescribed" value={`${Math.round((stats.adherent / (stats.members || 1)) * 100)}%`}
+                sub={`${stats.adherent.toLocaleString()} members`} color="#2E7D32" />
           <Tile icon={AlertTriangle} label="Critical risk" value={stats.high_risk.toLocaleString()}
                 sub={`${Math.round(data.high_risk_line * 100)}% or more chance of stopping`} color="#C62828" />
           <Tile icon={Wallet} label="Annual drug spend" value={usd(stats.annual_spend)} color="#2E6DB4" />
@@ -56,7 +60,7 @@ export default function InsurerHome() {
 
       <InsurerInbox />
 
-      <div className="grid gap-5 lg:grid-cols-5">
+      <div className="grid gap-5 lg:grid-cols-5 items-start">
         <section className="card overflow-hidden lg:col-span-3" style={{ padding: 0 }}>
           <div className="px-5 py-4 border-b border-gray-100">
             <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Critical-risk members</h2>
@@ -87,7 +91,8 @@ export default function InsurerHome() {
           )}
         </section>
 
-        <section className="card overflow-hidden lg:col-span-2" style={{ padding: 0 }}>
+        <div className="space-y-5 lg:col-span-2">
+        <section className="card overflow-hidden" style={{ padding: 0 }}>
           <div className="px-5 py-4 border-b border-gray-100">
             <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
               <Building2 size={15} className="text-gray-400" /> By hospital
@@ -108,13 +113,67 @@ export default function InsurerHome() {
               </li>
             ))}
           </ul>
-          <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold" style={{ color: 'var(--color-primary)' }}>
-            <Link to="/overview">Members overview</Link>
+        </section>
+
+        <section className="card overflow-hidden" style={{ padding: 0 }}>
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <Pill size={15} className="text-gray-400" /> By drug
+            </h2>
+          </div>
+          <ul className="px-5 py-3 space-y-2">
+            {data.drug_mix.map((d) => (
+              <li key={d.drug}>
+                <div className="flex items-baseline justify-between gap-3 text-sm">
+                  <span className="text-gray-700">{d.drug}</span>
+                  <span className="text-xs text-gray-500">{d.members.toLocaleString()} · {Math.round((d.members / (stats.members || 1)) * 100)}%</span>
+                </div>
+                <div className="h-1.5 mt-1 rounded-full overflow-hidden" style={{ background: '#EDF2F7' }}>
+                  <div className="h-full rounded-full" style={{ width: `${(d.members / (stats.members || 1)) * 100}%`, background: '#2E6DB4' }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+        </div>
+      </div>
+
+      <section className="card overflow-hidden" style={{ padding: 0 }}>
+        <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <PieChart size={15} className="text-gray-400" /> Where the spend at risk is
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">Your members by behaviour segment: how many take it as prescribed, and the drug spend on those likely to stop.</p>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold" style={{ color: 'var(--color-primary)' }}>
+            <Link to="/segments">Segment Explorer</Link>
             <Link to="/budget">Budget Simulator</Link>
             <Link to="/consequence">Cost of Inaction</Link>
           </div>
-        </section>
-      </div>
+        </div>
+        <ul className="divide-y divide-gray-100">
+          {data.by_segment.map((g) => (
+            <li key={g.cluster} className="px-5 py-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: g.color || '#A0AEC0' }} />
+                  {g.label}
+                </div>
+                <div className="mt-0.5 text-xs text-gray-500">
+                  {g.members.toLocaleString()} members · {Math.round((g.adherence || 0) * 100)}% taking it as prescribed
+                </div>
+              </div>
+              <div className="sm:text-right">
+                <div className="text-sm font-semibold" style={{ color: '#B45309' }}>{usd(g.spend_at_risk)}</div>
+                <div className="h-1.5 mt-1 rounded-full overflow-hidden sm:w-40" style={{ background: '#EDF2F7' }}>
+                  <div className="h-full rounded-full" style={{ width: `${(g.spend_at_risk / (stats.spend_at_risk || 1)) * 100}%`, background: '#B45309' }} />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

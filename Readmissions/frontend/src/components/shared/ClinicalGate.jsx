@@ -11,7 +11,7 @@ import { openPatient } from '../../api';
  * A pharmacy (overviewOnly) gets a note instead: no reason opens the clinical
  * layer for a pharmacy, and the backend refuses it (api/access.py).
  */
-export default function ClinicalGate({ patientId, reasons = [], onOpened, compact = false, overviewOnly = false }) {
+export default function ClinicalGate({ patientId, reasons = [], onOpened, compact = false, overviewOnly = false, insurer = false }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -54,7 +54,7 @@ export default function ClinicalGate({ patientId, reasons = [], onOpened, compac
           <h3 className="font-semibold text-ns-navy">Clinical details</h3>
           <p className="text-sm text-gray-600 mt-0.5">
             Diagnoses, risk drivers, notes and alerts open one patient at a time. Tell us why
-            you need them; the reason is recorded in your hospital&apos;s access log.
+            you need them; the reason is recorded in {insurer ? 'the hospital' : 'your hospital'}&apos;s access log.
           </p>
         </div>
       </div>

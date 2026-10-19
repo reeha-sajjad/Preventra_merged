@@ -76,7 +76,7 @@ def opened(db, user: dict, app: str, session: str) -> set:
 
 def record(db, user: dict, app: str, patient_id, hospital_id: Optional[str],
            reason: str, session: str) -> dict:
-    label = access.LOGGED_REASONS.get(reason) or access.REASONS[reason]
+    label = access.LOGGED_REASONS.get(reason) or access.REASONS.get(reason) or access.PAYER_REASONS[reason]
     entry = {"user_id": str(user["_id"]), "email": user.get("email", ""), "role": user["role"],
              "user_hospital_id": user.get("hospital_id"), "app": app,
              "patient_id": str(patient_id), "hospital_id": hospital_id,

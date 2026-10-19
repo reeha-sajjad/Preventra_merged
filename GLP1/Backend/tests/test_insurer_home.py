@@ -23,3 +23,26 @@ def test_the_insurer_home_is_its_own_members_by_hospital(world):
         assert client(world, email).get("/api/insurer/home").status_code == 403, email
     world["db"].patient_access.update_one({"patient_idx": 4}, {"$unset": {"insurer_member_id": ""}})
     world["db"].patients.update_one({"patient_idx": 4}, {"$set": {"dropout_prob": before}})
+
+
+def test_an_insurer_sees_the_hospital_and_case_manager_not_the_clinical_staff(world):
+    c = client(world, "claims@acme.test")
+    s = c.get("/api/patients/0/summary").json()
+    assert s["viewer"] == "insurer" and "hospital" in s and "member_id" in s
+    assert not {"doctors", "doctor", "nurses", "pharmacy"} & set(s)
+    rows = c.get("/api/patients").json()["patients"]
+    assert rows and all(not {"doctors", "nurses"} & set(r) for r in rows)
+    # A hospital admin still sees the whole care team.
+    assert "doctors" in client(world, "admin@a.test").get("/api/patients/0/summary").json()
+
+
+def test_an_insurer_gives_a_payer_reason(world):
+    c = client(world, "claims@acme.test")
+    keys = [r["key"] for r in c.get("/api/patients/4/summary").json()["reasons"]]
+    assert keys == ["claim_review", "prior_auth_review", "care_management", "quality_review"]
+    assert c.post("/api/patients/4/open", json={"reason": "audit"}).status_code == 422     # the hospital's list
+    assert c.post("/api/patients/4/open", json={"reason": "claim_review"}).status_code == 200
+    detail = c.get("/api/patients/4").json()["patient"]
+    assert detail["viewer"] == "insurer" and "doctors" not in detail
+    admin = client(world, "admin@a.test")
+    assert [r["key"] for r in admin.get("/api/patients/0/summary").json()["reasons"]][0] == "care_coordination"

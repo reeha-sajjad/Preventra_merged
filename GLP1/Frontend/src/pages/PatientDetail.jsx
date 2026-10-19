@@ -148,7 +148,7 @@ function DriverCard({ rank, driver, direction, shap }) {
 export default function PatientDetail() {
   const { id }   = useParams();
   const navigate = useNavigate();
-  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy } = useRole();
+  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy, isInsurer } = useRole();
   const { summary, data: patientData, loading: patientLoading, reload } = usePatientRecord(id);
   const patientList = usePatients();
   const careTeamChanged = () => { reload(); patientList?.reload(); };
@@ -157,7 +157,7 @@ export default function PatientDetail() {
   const backButton = !isPatient && (
     <button onClick={() => navigate('/patients')}
       className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-700 mb-4 transition-colors font-medium">
-      <ArrowLeft size={16} /> Back to patients
+      <ArrowLeft size={16} /> Back to {isInsurer ? "members" : "patients"}
     </button>
   );
 
@@ -173,9 +173,12 @@ export default function PatientDetail() {
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-lg font-bold"
                  style={{ background: 'var(--color-primary)' }}>#{summary.patient_idx}</div>
-            <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
-              Patient #{summary.patient_idx}
-            </h1>
+            <div>
+              <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+                Patient #{summary.patient_idx}
+              </h1>
+              <MemberLine team={summary} />
+            </div>
           </div>
           <div className="flex items-center gap-5">
             <div className="flex flex-col items-center">
@@ -199,7 +202,7 @@ export default function PatientDetail() {
         <InsuranceCard patientIdx={summary.patient_idx} />
         {isPharmacy && <PharmacyPatientCard summary={summary} />}
         <ClinicalGate patientIdx={summary.patient_idx} reasons={summary.reasons} onOpened={reload}
-          overviewOnly={summary.detail_access === 'overview_only'} />
+          overviewOnly={summary.detail_access === 'overview_only'} insurer={isInsurer} />
       </div>
     );
   }
@@ -247,7 +250,7 @@ export default function PatientDetail() {
       {isCareTeam && <EmergencyBanner patientIdx={patient.patient_idx} />}
 
       {/* ── Finance-view context banner ──────────────────────────── */}
-      {isCostView && (
+      {isCostView && !isInsurer && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm font-medium mb-5 animate-fade-up"
           style={{ background: '#EBF4FF', color: '#1B4F8A', border: '1px solid #BFDBFE' }}>
           <span className="flex items-center gap-2.5">
@@ -274,6 +277,7 @@ export default function PatientDetail() {
               <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
                 Patient #{patient.patient_idx}
               </h1>
+              <MemberLine team={patient} />
               <div className="flex items-center gap-3 mt-1">
                 <SegmentDot cluster={patient.cluster} size="sm" />
                 <span className="text-xs text-gray-400">·</span>
@@ -508,6 +512,17 @@ export default function PatientDetail() {
 
       </div>
       )}
+    </div>
+  );
+}
+/** An insurer's line under the patient's name: which hospital, and the member ID. */
+function MemberLine({ team }) {
+  if (team?.viewer !== 'insurer') return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 mt-0.5">
+      <span>{team.hospital || 'No hospital on file'}</span>
+      <span className="text-gray-300">·</span>
+      <span>Member ID <span className="font-mono font-semibold text-gray-700">{team.member_id || '—'}</span></span>
     </div>
   );
 }

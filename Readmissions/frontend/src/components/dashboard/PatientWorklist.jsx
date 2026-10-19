@@ -5,7 +5,7 @@ import ConditionFilter from './ConditionFilter';
 import RiskBadge from '../shared/RiskBadge';
 import TrendStatusBadge from '../shared/TrendStatusBadge';
 import CareTeamDialog from '../shared/CareTeamDialog';
-import { can, ASSIGN_ROLES } from '../../roles';
+import { can, ASSIGN_ROLES, INSURER_ROLES } from '../../roles';
 import { ChevronRight, ChevronLeft, AlertCircle, ArrowUp, ArrowDown, ArrowDownUp,
          Download, Users } from 'lucide-react';
 
@@ -35,6 +35,13 @@ const CSV_COLUMNS = [
   { key: 'nurses', label: 'Hospital nurses', get: (r) => (r.nurses || []).map((n) => n.name).join('; ') },
   { key: 'insurer', label: 'Insurer', get: (r) => r.insurer?.name || '' },
 ];
+// An insurer's export: the hospital and member ID instead of the care team -
+// the server sends no doctors or nurses to an insurer (api/hospital.for_insurer).
+const INSURER_CSV_KEYS = new Set(['doctor', 'nurses', 'insurer']);
+const INSURER_CSV_EXTRA = [
+  { key: 'member_id', label: 'Member ID', get: (r) => r.member_id || '' },
+  { key: 'hospital', label: 'Hospital', get: (r) => r.hospital || '' },
+];
 // Left out of a hospital admin's or insurer's export, as the server leaves them
 // out of their rows: the clinical layer opens one patient at a time.
 const CLINICAL_CSV_KEYS = new Set(['primary_diagnosis', 'other_diagnoses', 'n_diagnoses_coded',
@@ -47,7 +54,10 @@ function escapeCsvField(value) {
 }
 
 function downloadWorklistCsv(rows, redacted) {
-  const columns = CSV_COLUMNS.filter((c) => !redacted || !CLINICAL_CSV_KEYS.has(c.key));
+  const insurer = can(INSURER_ROLES);
+  const columns = [...CSV_COLUMNS.filter((c) => (!redacted || !CLINICAL_CSV_KEYS.has(c.key))
+                                         && !(insurer && INSURER_CSV_KEYS.has(c.key))),
+                   ...(insurer ? INSURER_CSV_EXTRA : [])];
   const header = columns.map((c) => c.label).join(',');
   const lines = rows.map((row) =>
     columns.map((c) => escapeCsvField(c.get ? c.get(row) : row[c.key])).join(','));
@@ -171,6 +181,8 @@ function DeltaCell({ delta }) {
 // Care team
 // ---------------------------------------------------------------------------
 function CareTeamCell({ row }) {
+  // An insurer gets the hospital, not the clinical staff.
+  if (can(INSURER_ROLES)) return <div className="text-sm text-gray-700">{row.hospital || '—'}</div>;
   const nurses = row.nurses || [];
   return (
     <div className="space-y-0.5 text-sm">
@@ -462,7 +474,7 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
               )}
               <div className="mt-2"><CareTeamCell row={row} /></div>
               <div className="mt-1 text-xs text-gray-400">
-                Discharged {row.discharge_date}{row.insurer ? ` · ${row.insurer.name}` : ''}
+                Discharged {row.discharge_date}{row.insurer ? ` · ${row.insurer.name}` : ''}{row.member_id ? ` · ${row.member_id}` : ''}
               </div>
             </button>
           ))
@@ -488,13 +500,13 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
               <SortHeader label="Trend" column="trend" />
               <SortHeader label="Risk Band" column="band" />
               <SortHeader label="Patient ID" column="id" />
-              <th className="px-6 py-4">Care Team</th>
+              <th className="px-6 py-4">{can(INSURER_ROLES) ? 'Hospital' : 'Care Team'}</th>
               {!redacted && <SortHeader label="Diagnoses" column="diagnosis" />}
               {/* Not "Primary": the column now shows one of the patient's top
                   three drivers, not necessarily the highest-ranked one. */}
               {!redacted && <SortHeader label="Key Risk Driver" column="driver" />}
               <SortHeader label="Discharge Date" column="date" />
-              <th className="px-6 py-4">Insurer</th>
+              {!can(INSURER_ROLES) && <th className="px-6 py-4">Insurer</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -536,7 +548,10 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
                   <td className="px-6 py-3">
                     <RiskBadge riskBand={row.risk_band} size="sm" />
                   </td>
-                  <td className="px-6 py-3 font-semibold text-gray-800">{row.id}</td>
+                  <td className="px-6 py-3 font-semibold text-gray-800">
+                    {row.id}
+                    {row.member_id && <div className="text-xs font-mono font-normal text-gray-500">{row.member_id}</div>}
+                  </td>
                   <td className="px-6 py-3"><CareTeamCell row={row} /></td>
                   {!redacted && (
                     <td className="px-6 py-3 max-w-sm text-gray-700">
@@ -547,12 +562,12 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
                     <td className="px-6 py-3 max-w-xs truncate text-gray-600">{row.primary_driver_label}</td>
                   )}
                   <td className="px-6 py-3 text-gray-500">{row.discharge_date}</td>
-                  <td className="px-6 py-3 text-gray-500">{row.insurer?.name || '—'}</td>
+                  {!can(INSURER_ROLES) && <td className="px-6 py-3 text-gray-500">{row.insurer?.name || '—'}</td>}
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={(redacted ? 8 : 10) + (canAssign ? 1 : 0)} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={(redacted ? 8 : 10) + (canAssign ? 1 : 0) - (can(INSURER_ROLES) ? 1 : 0)} className="px-6 py-12 text-center text-gray-500">
                   No patients match the current filters.
                 </td>
               </tr>

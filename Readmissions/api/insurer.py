@@ -17,6 +17,7 @@ The money uses the same figures as the patient page's ROI panel
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
@@ -43,7 +44,7 @@ def home(db, user: dict, scope: Optional[list]) -> dict:
     rows = list(db["patient_worklist"].find(
         {"patient_id": {"$in": access.id_variants(ids)}, "batch_date": batch},
         {"_id": 0, "patient_id": 1, "current_score": 1, "risk_score": 1, "current_band": 1, "risk_band": 1,
-         "discharge_date": 1})) if ids else []
+         "discharge_date": 1, "monitoring_status": 1})) if ids else []
     own = {str(r["patient_id"]): r for r in db["care_actions"].find(
         {"patient_id": {"$in": access.id_variants(ids)}},
         {"_id": 0, "patient_id": 1, "hospital_id": 1, "insurer_member_id": 1})} if ids else {}
@@ -73,8 +74,32 @@ def home(db, user: dict, scope: Optional[list]) -> dict:
                                           (own.get(str(r["patient_id"])) or {}).get("hospital_id")),
                 "risk_score": round(_score(r), 1), "discharge_date": r.get("discharge_date") or None}
                for r in top]
+    # Risk bands now and the change since the previous weekly batch, members
+    # whose risk is rising since discharge, and recent discharges - what the
+    # hospital overview shows, for the insurer's own members only.
+    def band(r):
+        return str(r.get("current_band") or r.get("risk_band") or "").title()
+    bands = {b: sum(1 for r in rows if band(r) == b) for b in ("High", "Medium", "Low")}
+    earlier = sorted(d for d in db["patient_worklist"].distinct("batch_date") if batch and d < batch)
+    high_delta = 0
+    if earlier and ids:
+        before = db["patient_worklist"].count_documents(
+            {"patient_id": {"$in": access.id_variants(ids)}, "batch_date": earlier[-1],
+             "$or": [{"current_band": {"$in": ["High", "high", "HIGH"]}},
+                     {"current_band": {"$exists": False}, "risk_band": {"$in": ["High", "high", "HIGH"]}}]})
+        high_delta = bands["High"] - before
+    try:
+        cutoff = (datetime.strptime(batch, "%Y-%m-%d") - timedelta(days=30)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        cutoff = ""
+
     return {
         "insurer": {"id": user.get("insurer_id"), "name": insurer.get("name") or user.get("insurer_id")},
+        "batch_date": batch,
+        "bands": bands,
+        "high_delta": high_delta,
+        "rising": sum(1 for r in rows if r.get("monitoring_status") in ("action_required", "deteriorating")),
+        "discharged_30d": sum(1 for r in rows if cutoff and str(r.get("discharge_date") or "") >= cutoff),
         "stats": {"members": len(rows), "hospitals": len([h for h in by_hospital if h]),
                   "high_risk": sum(h["high_risk"] for h in by_hospital.values()),
                   "expected_cost": sum(h["expected_cost"] for h in by_hospital.values()),

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Users, AlertTriangle, Wallet, ShieldCheck, Building2, ChevronRight, CreditCard } from 'lucide-react';
+import { Users, AlertTriangle, Wallet, ShieldCheck, Building2, ChevronRight, CreditCard, TrendingUp, ArrowUp, ArrowDown } from 'lucide-react';
 import { getInsurerHome } from '../api';
 import MemberLookup from '../components/insurance/MemberLookup';
 import { InsurerInbox } from '../components/insurance/InsurerFlags';
@@ -9,9 +9,11 @@ const usd = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
 /**
  * An insurer's home in Readmissions (api/insurer.py): its members across
- * hospitals, the readmission cost their current risk carries, how much timely
- * follow-up could avoid, and the highest-risk members by member ID. Overview
- * layer only. GLP-1's twin (GLP1/Frontend/src/pages/InsurerHome.jsx).
+ * hospitals, how their risk is moving week to week, the readmission cost their
+ * current risk carries, how much timely follow-up could avoid, and the
+ * highest-risk members by member ID. The insurer's one Members page (it took in
+ * the old Members overview). Overview layer only. GLP-1's twin
+ * (GLP1/Frontend/src/pages/InsurerHome.jsx).
  */
 export default function InsurerHome() {
   const navigate = useNavigate();
@@ -33,9 +35,17 @@ export default function InsurerHome() {
           </div>
           <MemberLookup />
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Tile icon={Users} label="Members" value={stats.members.toLocaleString()} />
-          <Tile icon={AlertTriangle} label="High readmission risk" value={stats.high_risk.toLocaleString()} tone="text-risk-high" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <Tile icon={Users} label="Members" value={stats.members.toLocaleString()}
+                sub={`${data.discharged_30d.toLocaleString()} went home in the last 30 days`} />
+          <Tile icon={AlertTriangle} label="High readmission risk" value={stats.high_risk.toLocaleString()} tone="text-risk-high"
+                sub={data.high_delta
+                  ? <span className="inline-flex items-center gap-0.5">
+                      {data.high_delta > 0 ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
+                      {Math.abs(data.high_delta)} since last week</span>
+                  : 'no change since last week'} />
+          <Tile icon={TrendingUp} label="Risk rising" value={data.rising.toLocaleString()} tone="text-risk-high"
+                sub="getting worse since discharge" />
           <Tile icon={Wallet} label="Expected readmission cost" value={usd(stats.expected_cost)}
                 sub={`risk × ${usd(stats.readmission_cost)} per readmission`} />
           <Tile icon={ShieldCheck} label="Avoidable with follow-up" value={usd(stats.avoidable)} tone="text-green-800"
@@ -105,11 +115,34 @@ export default function InsurerHome() {
               </li>
             ))}
           </ul>
-          <div className="border-t border-gray-100 px-5 py-3 text-sm font-semibold text-ns-navy">
-            <Link to="/overview">Members overview</Link>
-          </div>
         </section>
       </div>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Risk bands</h2>
+            <p className="mt-0.5 text-xs text-gray-500">Your members' current readmission risk, week of {data.batch_date}</p>
+          </div>
+          <Link to="/patients" className="text-sm font-semibold text-ns-navy hover:underline">All members</Link>
+        </div>
+        <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-gray-100">
+          {[['High', 'bg-risk-high'], ['Medium', 'bg-risk-medium'], ['Low', 'bg-risk-low']].map(([b, c]) => (
+            <div key={b} className={c} style={{ width: `${(data.bands[b] / (stats.members || 1)) * 100}%` }} />
+          ))}
+        </div>
+        <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          {[['High', 'bg-risk-high'], ['Medium', 'bg-risk-medium'], ['Low', 'bg-risk-low']].map(([b, c]) => (
+            <li key={b}>
+              <Link to={`/patients?filter=${b}`} className="flex items-center gap-2 hover:underline">
+                <span className={`h-2.5 w-2.5 rounded-full ${c}`} /> {b}
+                <span className="font-semibold text-gray-900">{data.bands[b].toLocaleString()}</span>
+                <span className="text-gray-400">· {Math.round((data.bands[b] / (stats.members || 1)) * 100)}%</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }

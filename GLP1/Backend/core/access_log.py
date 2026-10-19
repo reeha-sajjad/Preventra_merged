@@ -39,8 +39,8 @@ async def opened(user: dict) -> set:
 
 
 async def record(user: dict, patient_idx: int, hospital_id: Optional[str], reason: str) -> dict:
-    from core.access import REASONS, LOGGED_REASONS     # avoid an import cycle
-    label = LOGGED_REASONS.get(reason) or REASONS[reason]
+    from core.access import PAYER_REASONS, REASONS, LOGGED_REASONS     # avoid an import cycle
+    label = LOGGED_REASONS.get(reason) or REASONS.get(reason) or PAYER_REASONS[reason]
     entry = {"user_id": user["id"], "email": user.get("email", ""), "role": user["role"],
              "user_hospital_id": user.get("hospital_id"), "app": APP,
              "patient_id": str(int(patient_idx)), "hospital_id": hospital_id,

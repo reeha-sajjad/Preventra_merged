@@ -89,6 +89,24 @@ async def care_teams(idxs) -> dict:
     return out
 
 
+async def for_insurer(teams: dict) -> dict:
+    """What an insurer sees of who looks after its members ({patient_idx: team}
+    from care_teams): the hospital, the case manager to contact about billing
+    or care management, and the member ID. Not the doctors, nurses or pharmacy
+    - a payer does not need them (minimum necessary, 45 CFR 164.502(b))."""
+    hids = list({t.get("hospital_id") for t in teams.values() if t.get("hospital_id")})
+    names = {h["_id"]: h.get("name", h["_id"]) for h in await get_shared_identity_db().hospitals.find(
+        {"_id": {"$in": hids}}, {"name": 1}).to_list(length=None)}
+    ids = {int(a["patient_idx"]): a.get("insurer_member_id") for a in await get_db().patient_access.find(
+        {"patient_idx": {"$in": [int(i) for i in teams]}}, {"_id": 0, "patient_idx": 1,
+                                                            "insurer_member_id": 1}).to_list(length=None)}
+    return {idx: {"viewer": "insurer", "hospital_id": t.get("hospital_id"),
+                  "hospital": names.get(t.get("hospital_id"), t.get("hospital_id")),
+                  "case_manager": t.get("case_manager"), "insurer": t.get("insurer"),
+                  "member_id": ids.get(int(idx))}
+            for idx, t in teams.items()}
+
+
 async def care_filter(scope: Optional[list], doctor: Optional[str] = None,
                       nurse: Optional[str] = None, unassigned: Optional[str] = None,
                       case_manager: Optional[str] = None) -> Optional[list]:

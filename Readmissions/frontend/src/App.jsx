@@ -75,7 +75,8 @@ function AppRoutes() {
             : can(MY_PATIENTS_ROLES) ? <MyPatients /> : <Navigate to="/patients" replace />} />
           {/* A pharmacy's patient list is its home page. */}
           <Route path="/patients" element={can(PHARMACY_ROLES) ? <Navigate to="/" replace /> : <Patients />} />
-          {can(INSURER_ROLES) && <Route path="/overview" element={<Overview />} />}
+          {/* An insurer's overview is part of Members now. */}
+          {can(INSURER_ROLES) && <Route path="/overview" element={<Navigate to="/" replace />} />}
           {can(STAFF_ROLES) && <Route path="/staff" element={<Staff />} />}
           {can(FOLLOWUP_HANDLE_ROLES) && <Route path="/follow-ups" element={<FollowUps />} />}
           <Route path="/patients/:id" element={<PatientDetail />} />

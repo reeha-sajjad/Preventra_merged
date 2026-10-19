@@ -108,6 +108,34 @@ def owners(db, patient_ids) -> dict:
     return {str(r["patient_id"]): r for r in rows}
 
 
+def for_insurer(db, teams: dict) -> dict:
+    """What an insurer sees of who looks after its members ({patient_id: team}
+    from care_teams): the hospital, who to contact there - the coordinator
+    assigned to the patient, and the hospital's case managers - and the member
+    ID. Not the doctor or nurses: a payer does not need them (minimum necessary,
+    45 CFR 164.502(b)). GLP-1's twin is GLP1/Backend/core/hospital.for_insurer."""
+    hids = list({t.get("hospital_id") for t in teams.values() if t.get("hospital_id")})
+    names = {h["_id"]: h.get("name", h["_id"]) for h in _identity(db)["hospitals"].find(
+        {"_id": {"$in": hids}}, {"name": 1})}
+    case_managers: dict = {}
+    for u in auth.users(db).find({"role": "case_manager", "status": "active", "hospital_id": {"$in": hids}},
+                                 {"email": 1, "name": 1, "hospital_id": 1}):
+        case_managers.setdefault(u.get("hospital_id"), []).append(_person(u))
+    own = {str(o["patient_id"]): o for o in db["care_actions"].find(
+        {"patient_id": {"$in": access.id_variants([str(p) for p in teams])}},
+        {"_id": 0, "patient_id": 1, "insurer_member_id": 1, "coordinator_name": 1})}
+    out = {}
+    for pid, t in teams.items():
+        o = own.get(str(pid), {})
+        out[pid] = {"viewer": "insurer", "hospital_id": t.get("hospital_id"),
+                    "hospital": names.get(t.get("hospital_id"), t.get("hospital_id")),
+                    "coordinator": o.get("coordinator_name"),
+                    "case_managers": sorted(case_managers.get(t.get("hospital_id"), []),
+                                            key=lambda p: p["name"])[:3],
+                    "insurer": t.get("insurer"), "member_id": o.get("insurer_member_id")}
+    return out
+
+
 def care_teams(db, patient_ids) -> dict:
     """patient_id -> {"doctor", "nurses", "insurer", "hospital_id"}, with names.
 

@@ -153,7 +153,7 @@ export default function PatientDetailPanel({ patientId, onClose, onChanged }) {
               </div>
               <CareTeamCard summary={summary} onChanged={() => { reload(); onChanged?.(); }} />
               <ClinicalGate patientId={summary.id} reasons={summary.reasons} onOpened={reload} compact
-                overviewOnly={summary.detail_access === 'overview_only'} />
+                overviewOnly={summary.detail_access === 'overview_only'} insurer={summary.viewer === 'insurer'} />
             </div>
           )}
 
