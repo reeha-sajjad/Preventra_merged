@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { SectionHeader, CheckpointTable } from '../components/shared';
 import { SEGMENT_COLORS, SEGMENT_LABELS } from '../data/mockData';
+import { useRole } from '../context/RoleContext';
 import { useSurvival } from '../hooks/useSurvival';
 import PageState from '../components/shared/PageState';
 
@@ -25,6 +26,7 @@ function Sparkline({ cluster, color, curves }) {
 
 export default function SurvivalAnalysis() {
   const { data: survivalData, error: survivalError } = useSurvival();
+  const { isInsurer } = useRole();
   const survivalCurves          = survivalData?.curves;
   const survivalCheckpoints     = survivalData?.checkpoints;
   const medianSurvival          = survivalData?.medianSurvival;
@@ -60,7 +62,9 @@ export default function SurvivalAnalysis() {
       <div className="card p-5">
         <SectionHeader
           title="Kaplan-Meier Survival Curves"
-          sub="Probability of remaining on GLP-1 therapy · Log-rank χ² = 2354.82, p < 0.000001" />
+          sub={`Probability of remaining on GLP-1 therapy${survivalData.nPatients ? ` · ${survivalData.nPatients.toLocaleString()} of your ${isInsurer ? 'members' : 'patients'}` : ''}${
+            survivalData.logrank ? ` · Log-rank χ² = ${survivalData.logrank.test_statistic}, ${
+              survivalData.logrank.p_value < 0.000001 ? 'p < 0.000001' : `p = ${survivalData.logrank.p_value.toPrecision(2)}`}` : ''}`} />
 
         <ResponsiveContainer width="100%" height={340}>
           <LineChart data={mergedData} margin={{ top: 8, right: 24, bottom: 28, left: 8 }}>
@@ -186,7 +190,7 @@ export default function SurvivalAnalysis() {
                 <Sparkline cluster={sc.cluster} color={sc.color} curves={survivalCurves} />
               </div>
               <div className="mt-3 text-xs text-gray-500">
-                n={[1902, 2104, 2383, 1177][sc.cluster].toLocaleString()} · {(sc.adherence * 100).toFixed(0)}% adherent
+                n={(sc.n ?? 0).toLocaleString()} · {((sc.adherence ?? 0) * 100).toFixed(0)}% adherent
               </div>
             </div>
           );

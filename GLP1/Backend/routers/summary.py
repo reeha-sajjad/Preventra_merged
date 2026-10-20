@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 import core.model as model
+from core import scoped
 from core.mongo import get_db
 from core.access import COST_VIEW_ROLES, actor, scope_of, scope_query
 
@@ -37,7 +38,7 @@ async def get_summary(scope: Optional[list] = Depends(scope_of), user: dict = De
         _dropouts_by_day(db, 60, mine),
         _dropouts_by_day(db, 90, mine),
         _dropouts_by_day(db, 180, mine),
-        db.cost_effectiveness.find({}, {"_id": 0}).to_list(length=None),
+        scoped.cost_table(scope),          # wasted spend from the caller's own adherence
         db.patients.count_documents(mine),
     )
 

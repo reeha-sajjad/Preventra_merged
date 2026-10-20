@@ -61,11 +61,11 @@ async def _get_summary(ctx: ToolContext, **_: Any) -> Any:
 
 
 async def _get_segments(ctx: ToolContext, **_: Any) -> Any:
-    return await segments_router.get_segments()
+    return await segments_router.get_segments(scope=ctx.scope)
 
 
 async def _get_segment_detail(ctx: ToolContext, *, cluster_id: int) -> Any:
-    return await segments_router.get_segment(int(cluster_id))
+    return await segments_router.get_segment(int(cluster_id), scope=ctx.scope)
 
 
 async def _search_patients(
@@ -111,11 +111,11 @@ async def _get_patient(ctx: ToolContext, *, patient_idx: int) -> Any:
 
 
 async def _get_survival(ctx: ToolContext, **_: Any) -> Any:
-    return survival_router.get_survival()
+    return await survival_router.get_survival(scope=ctx.scope)
 
 
 async def _get_cost_effectiveness(ctx: ToolContext, **_: Any) -> Any:
-    return await cost_router.get_cost_effectiveness()
+    return await cost_router.get_cost_effectiveness(scope=ctx.scope)
 
 
 async def _simulate_budget(
@@ -130,7 +130,7 @@ async def _simulate_budget(
         population_scope_pct=float(population_scope_pct),
         intervention_cost_per_patient=float(intervention_cost_per_patient),
     )
-    return await budget_router.budget_impact(req)
+    return await budget_router.budget_impact(req, mine=ctx.scope)
 
 
 async def _get_downstream_cost(ctx: ToolContext, **_: Any) -> Any:
@@ -153,6 +153,7 @@ async def _get_payer_roi(
     adherence_uplift: float = 0.15,
 ) -> Any:
     return await consequence_router.get_payer_roi(
+        scope=ctx.scope,
         intervention_cost=float(intervention_cost),
         payer_type=str(payer_type),
         adherence_uplift=float(adherence_uplift),
@@ -348,7 +349,7 @@ async def build_snapshot(ctx: ToolContext) -> str:
     try:
         summary, segments, model_info = await asyncio.gather(
             summary_router.get_summary(scope=ctx.scope, user=ctx.user),
-            segments_router.get_segments(),
+            segments_router.get_segments(scope=ctx.scope),
             _get_model_info(),
         )
     except Exception as exc:  # noqa: BLE001

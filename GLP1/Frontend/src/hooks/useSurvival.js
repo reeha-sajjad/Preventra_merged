@@ -16,6 +16,8 @@ export function useSurvival() {
           curves:         res.curves,
           checkpoints:    res.checkpoints,
           medianSurvival: res.median_survival,
+          logrank:        res.logrank,          // fitted on the caller's own patients
+          nPatients:      res.n_patients,
         });
       })
       .catch((err) => { if (live) setError(err); })

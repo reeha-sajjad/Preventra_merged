@@ -4,24 +4,25 @@ then runs the same ROI math the dashboard expects.
 """
 
 from math import ceil
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 
-from core.mongo import get_db
-from core.access import require_cost_view
+from core import scoped
+from core.access import require_cost_view, scope_of
 from schemas.budget import BudgetRequest, BudgetResponse, SegmentImpact
 
 router = APIRouter()
 
 
 @router.post("/budget-impact", dependencies=[Depends(require_cost_view)])
-async def budget_impact(req: BudgetRequest) -> BudgetResponse:
+async def budget_impact(req: BudgetRequest, mine: Optional[list] = Depends(scope_of)) -> BudgetResponse:
     reduction   = req.dropout_reduction_pct / 100
     scope       = req.population_scope_pct / 100
     interv_cost = req.intervention_cost_per_patient
 
-    db = get_db()
-    cea = await db.cost_effectiveness.find({}, {"_id": 0}).sort("cluster", 1).to_list(length=None)
+    # The caller's own patients per segment, and their adherence (core/scoped.py).
+    cea = await scoped.cost_table(mine)
 
     segments_out = []
     total_net = total_waste = total_interv = 0

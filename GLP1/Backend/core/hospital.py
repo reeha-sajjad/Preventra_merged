@@ -315,7 +315,8 @@ async def overview(user: dict, scope: Optional[list]) -> dict:
     # summary does.
     spend = None
     if user["role"] in COST_VIEW_ROLES:
-        cea = await db.cost_effectiveness.find({}, {"_id": 0}).to_list(length=None)
+        from core import scoped                          # the caller's own adherence
+        cea = await scoped.cost_table(scope)
         spend = {
             "annual": round(sum(float(d.get("annual_cost") or 0) * per_cluster.get(int(d["cluster"]), 0)
                                 for d in cea)),

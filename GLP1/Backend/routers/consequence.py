@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from core import scoped
 from core.mongo import get_db
 from core.access import require_cost_view, scope_of, scope_query
 from schemas.consequence import (
@@ -294,6 +295,7 @@ async def get_payer_scenarios() -> dict:
 
 @router.get("/payer-roi", response_model=PayerROIResponse, dependencies=[Depends(require_cost_view)])
 async def get_payer_roi(
+    scope: Optional[list] = Depends(scope_of),
     intervention_cost: float = Query(
         _DEFAULT_INTERVENTION_COST,
         ge=0,
@@ -343,6 +345,10 @@ async def get_payer_roi(
                 status_code=503,
                 detail=f"payer_roi collection has no docs for payer_type='{payer_type}' (or fallback 'current'). Run scripts/migrate_csv_to_mongo.py.",
             )
+    # Per-patient economics stay the segment's; the patient counts (which weight
+    # the population ROI and the totals) are the caller's own (core/scoped.py).
+    own = await scoped.cluster_stats(scope)
+    docs = [{**d, "n_patients": (own.get(int(d["cluster"])) or {}).get("n", 0)} for d in docs]
 
     by_cluster: list[PayerROICluster] = []
     for d in docs:

@@ -1,19 +1,22 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
 import { LayoutGrid, Rows } from 'lucide-react';
 import { SectionHeader, ProgressBar } from '../components/shared';
-import { SEGMENT_COLORS, SEGMENT_LABELS, SEGMENT_SHORT, calcBudgetImpact } from '../data/mockData';
+import { SEGMENT_COLORS, SEGMENT_LABELS, SEGMENT_SHORT } from '../data/mockData';
 import { useSegments } from '../hooks/useSegments';
 import { useRole } from '../context/RoleContext';
 import PageState from '../components/shared/PageState';
 
 const fmt$ = n => `$${n.toLocaleString()}`;
-const fmtNet = n => n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(0)}K` : `$${n}`;
-
-const POP_AVGS = { age: 54.4, bmi: 34.7, hba1c: 6.22, cost_pressure: 31.9, bio_friction: 0.486, comorbidity: 0.97 };
+// The radar's grey outline: the caller's own average across all their patients.
+const AVG_FIELDS = ['age', 'bmi', 'hba1c', 'cost_pressure', 'bio_friction', 'comorbidity'];
+function ownAverages(segments) {
+  const total = segments.reduce((t, s) => t + (s.n || 0), 0) || 1;
+  return Object.fromEntries(AVG_FIELDS.map((k) => [k, segments.reduce((t, s) => t + (s[k] || 0) * (s.n || 0), 0) / total]));
+}
 
 function normalize(seg) {
   return [
@@ -59,11 +62,13 @@ export default function SegmentExplorer() {
   const { segments: segmentProfiles, error: segmentsError } = useSegments();
   const [active, setActive] = useState(0);
   const [mode, setMode]     = useState('single');
-  const [roiPct, setRoiPct] = useState(15);
-
-  const roiResults = useMemo(() => calcBudgetImpact(roiPct, 500, 100), [roiPct]);
 
   if (!segmentProfiles) return <PageState error={segmentsError} label="the segments" />;
+
+  // The caller's own average across segments (the backend counts only their
+  // patients - Backend/core/scoped.py), not a fixed population figure.
+  const totalN = segmentProfiles.reduce((t, s) => t + (s.n || 0), 0);
+  const ownAvg = totalN ? segmentProfiles.reduce((t, s) => t + (s.adherence || 0) * (s.n || 0), 0) / totalN : 0;
 
   const seg   = segmentProfiles[active] ?? segmentProfiles[0];
   const color = SEGMENT_COLORS[active];
@@ -106,16 +111,14 @@ export default function SegmentExplorer() {
 
             {/* Radar */}
             <div className="card p-5">
-              <SectionHeader title="Clinical Profile" sub="vs population average (ghost)" />
+              <SectionHeader title="Clinical Profile" sub={`vs the average of all your ${isInsurer ? 'members' : 'patients'} (grey)`} />
               <ResponsiveContainer width="100%" height={220}>
                 <RadarChart data={normalize(seg)} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
                   <PolarGrid stroke="#E2E8F0" />
                   <PolarAngleAxis dataKey="axis" tick={{ fontSize: 10, fill: '#718096' }} />
                   <Radar name="Segment"       dataKey="value" stroke={color}   fill={color}   fillOpacity={0.25} strokeWidth={2} />
                   <Radar name="Population Avg" dataKey="value"
-                    data={normalize({ age: POP_AVGS.age, bmi: POP_AVGS.bmi, hba1c: POP_AVGS.hba1c,
-                                      cost_pressure: POP_AVGS.cost_pressure, bio_friction: POP_AVGS.bio_friction,
-                                      comorbidity: POP_AVGS.comorbidity })}
+                    data={normalize(ownAverages(segmentProfiles))}
                     stroke="#CBD5E0" fill="#CBD5E0" fillOpacity={0.1} strokeWidth={1.5} strokeDasharray="4 2" />
                 </RadarChart>
               </ResponsiveContainer>
@@ -136,7 +139,7 @@ export default function SegmentExplorer() {
 
             {/* Adherence breakdown + characteristics */}
             <div className="card p-5 space-y-4">
-              <SectionHeader title="Adherence Breakdown" sub="vs population" />
+              <SectionHeader title="Adherence Breakdown" sub={`vs all your ${isInsurer ? 'members' : 'patients'}`} />
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
                   <span className="text-gray-500">This segment</span>
@@ -146,10 +149,10 @@ export default function SegmentExplorer() {
               </div>
               <div>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-gray-500">Population avg</span>
-                  <span className="font-semibold text-gray-600">47.0%</span>
+                  <span className="text-gray-500">{isInsurer ? 'All your members' : 'All your patients'}</span>
+                  <span className="font-semibold text-gray-600">{(ownAvg * 100).toFixed(1)}%</span>
                 </div>
-                <ProgressBar value={0.47} color="#CBD5E0" height={8} />
+                <ProgressBar value={ownAvg} color="#CBD5E0" height={8} />
               </div>
 
               <div className="pt-1 space-y-2">
@@ -215,48 +218,6 @@ export default function SegmentExplorer() {
             </div>
           </div>
 
-          {/* ── Insurer ROI card ────────────────────────────────── */}
-          {isInsurer && (
-            <div className="card p-5">
-              <div className="flex items-start justify-between mb-2">
-                <SectionHeader
-                  title="Segment ROI Analysis"
-                  sub="Model what-if dropout reduction scenarios — assumes $500/patient intervention cost" />
-                <div className="text-right flex-shrink-0">
-                  <div className="text-[10px] text-gray-400 uppercase tracking-wider">Dropout Reduction</div>
-                  <div className="font-display text-xl font-semibold" style={{ color: 'var(--color-primary)' }}>{roiPct}%</div>
-                </div>
-              </div>
-              <input type="range" min={5} max={50} step={5} value={roiPct}
-                onChange={e => setRoiPct(+e.target.value)} className="mb-5" />
-              <div className="flex justify-between text-[10px] text-gray-400 -mt-3 mb-5">
-                <span>5%</span><span>50%</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                {roiResults.map((r, i) => (
-                  <div key={i} className="rounded-xl p-4"
-                       style={{ background: `${SEGMENT_COLORS[i]}0D`, border: `1px solid ${SEGMENT_COLORS[i]}28` }}>
-                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: SEGMENT_COLORS[i] }}>
-                      {SEGMENT_SHORT[i]}
-                    </div>
-                    <div className="text-[11px] text-gray-400 mb-2">n = {r.n.toLocaleString()}</div>
-                    <div className="font-display text-lg font-semibold"
-                         style={{ color: r.roiPositive ? '#1B5E20' : '#B71C1C' }}>
-                      {r.netSaving > 0 ? '+' : ''}{fmtNet(r.netSaving)}
-                    </div>
-                    <div className="text-[10px] text-gray-400 mb-2">Net annual saving</div>
-                    <div className="text-[10px] font-semibold px-2 py-0.5 rounded-full inline-block"
-                         style={{
-                           background: r.roiPositive ? '#E8F5E9' : '#FFEBEE',
-                           color:      r.roiPositive ? '#2E7D32' : '#C62828',
-                         }}>
-                      {r.roiPositive ? 'Positive ROI' : 'Negative ROI'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </>
       ) : (
         /* ── Compare mode ──────────────────────────────────────── */

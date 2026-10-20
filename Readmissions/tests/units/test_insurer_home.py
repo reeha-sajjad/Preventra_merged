@@ -40,3 +40,12 @@ def test_an_insurer_gives_a_payer_reason(main, world):
     assert log is None or log["reason_label"] == "Claim review"
     admin = as_user(main, world, "admin@a.test")
     assert [r["key"] for r in admin.get(f"/api/patients/{A1}/summary").json()["reasons"]][0] == "care_coordination"
+
+
+def test_top_drivers_count_only_the_callers_own_patients(main, world):
+    def cohort(email):
+        rows = as_user(main, world, email).get("/api/analytics/top-drivers?risk_band=High").json()
+        return max((r["count"] for r in rows), default=0)
+    # High is 60+: A3 (60), A4 (70), B1 (80), B2 (90). The insurer's only High member is B1.
+    assert cohort("claims@acme.test") == 1
+    assert cohort("ops@team.test") == 4

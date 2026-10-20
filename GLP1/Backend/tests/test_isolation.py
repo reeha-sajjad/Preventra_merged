@@ -161,12 +161,17 @@ def test_the_summary_counts_only_the_accounts_patients(world):
 
 
 def test_the_superadmin_summary_is_unchanged(world):
-    """Cost figures now use the caller's own per-segment counts; for the
-    superadmin those equal the stored counts, so nothing moves."""
+    """Cost figures use the caller's own per-segment counts and adherence
+    (core/scoped.py); for the superadmin that is every patient - the same
+    figures the stored table was computed from."""
     kpis = client(world, "ops@team.test").get("/api/summary").json()["kpis"]
     cea = list(world["db"].cost_effectiveness.find())
-    expected_avg = sum(d.get("annual_cost", 0) * d.get("n", 0) for d in cea) / ALL
-    expected_waste = sum((d.get("wasted_spend_per_pt") or 0) * (d.get("n") or 0) for d in cea)
+    pts = list(world["db"].patients.find({}, {"cluster": 1, "is_adherent": 1}))
+    n = {c: sum(1 for p in pts if p["cluster"] == c) for c in range(4)}
+    adh = {c: sum(p.get("is_adherent") or 0 for p in pts if p["cluster"] == c) / max(n[c], 1) for c in range(4)}
+    expected_avg = sum(d.get("annual_cost", 0) * n[int(d["cluster"])] for d in cea) / ALL
+    expected_waste = sum(round(d.get("annual_cost", 0) * (1 - round(adh[int(d["cluster"])], 4)), 2) * n[int(d["cluster"])]
+                         for d in cea)
     assert kpis["avg_annual_cost"] == round(expected_avg)
     assert kpis["wasted_spend_annual"] == round(expected_waste)
 

@@ -1925,17 +1925,20 @@ def get_model_metrics():
 
 
 @app.get("/api/analytics/top-drivers")
-def get_top_drivers(risk_band: str = "High", top_n: int = 5):
+def get_top_drivers(request: Request, risk_band: str = "High", top_n: int = 5):
     """
-    Aggregates driver_1 / driver_2 / driver_3 across all patients of the
-    given risk_band in the latest batch and returns the top N labels by frequency.
+    Aggregates driver_1 / driver_2 / driver_3 across the caller's own patients
+    of the given risk_band in the latest batch and returns the top N labels by
+    frequency. Counts only - no patient leaves the server.
     """
     batch_date = get_latest_batch_date(db, "patient_worklist")
     if not batch_date:
         raise HTTPException(status_code=404, detail="Patient worklist data not found")
+    scope = _scope(request)
+    mine = {} if scope is None else {"patient_id": {"$in": access.id_variants([str(p) for p in scope])}}
 
     cursor = db["patient_worklist"].find(
-        {"batch_date": batch_date, "risk_band": {"$regex": f"^{risk_band}$", "$options": "i"}},
+        {**mine, "batch_date": batch_date, "risk_band": {"$regex": f"^{risk_band}$", "$options": "i"}},
         {"_id": 0, "driver_1": 1, "driver_2": 1, "driver_3": 1},
     )
 
