@@ -51,34 +51,45 @@
     const CONFIG = Object.assign({}, FALLBACK_CONFIG, window.__PORTAL_CONFIG__ || {});
   </script>
 
+  <!-- Brand type, self-hosted. This page was on system-ui while the landing
+       page used Sora + IBM Plex, so sign-in did not look like the product it
+       signs you into. -->
+  <link rel="stylesheet" href="preventra-tokens.css">
+
   <style>
     /* Light only, on purpose. The logo is a solid teal mark on white and a demo
      screen should look the same on every machine in the room - no dark-mode
      branch to be surprised by on someone else's laptop. */
     :root {
-      --brand: #3ecfae;
-      /* shield teal, from the logo */
-      --brand-deep: #2bb897;
+      --brand: var(--p-brand);
+      /* shield teal, from the logo - a field only, never text */
+      --brand-deep: var(--p-brand-deep);
       /* hover / pressed */
-      --ink: #0e1b2a;
+      --ink: var(--p-ink);
       /* the navy in the cross */
-      --bg: #f4f7f8;
-      --surface: #ffffff;
-      --border: #dde5e6;
-      --text: #0e1b2a;
-      --muted: #5b6b76;
-      --accent: #0e1b2a;
-      /* buttons: navy on white reads at any size */
-      --accent-ink: #ffffff;
+      --bg: var(--p-canvas);
+      --surface: var(--p-surface);
+      --border: var(--p-line);
+      --text: var(--p-ink);
+      --muted: var(--p-muted);
+      --accent: var(--p-ink);
+      /* buttons: navy on white reads at any size - 17.37:1 */
+      --accent-ink: var(--p-surface);
+      /* The form-error palette stays local: it is this page's only use of it. */
       --danger-bg: #fdf2f2;
       --danger-border: #f3c9c9;
       --danger-text: #8a2020;
-      --radius: 10px;
-      --shadow: 0 1px 2px rgba(14, 27, 42, .05), 0 10px 28px rgba(14, 27, 42, .07);
+      --radius: var(--p-radius);
+      --shadow: var(--p-shadow-raised);
     }
 
     * {
       box-sizing: border-box;
+    }
+
+    h1, h2, h3 {
+      font-family: var(--p-font-display);
+      letter-spacing: -0.01em;
     }
 
     body {
@@ -91,7 +102,7 @@
       padding: 24px;
       background: var(--bg);
       color: var(--text);
-      font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font: 15px/1.55 var(--p-font-body);
     }
 
     .card {
@@ -145,8 +156,8 @@
     }
 
     input:focus-visible, select:focus-visible {
-      outline: 2px solid var(--brand);
-      outline-offset: 1px;
+      outline: 3px solid var(--p-focus);
+      outline-offset: 2px;
     }
 
     button {

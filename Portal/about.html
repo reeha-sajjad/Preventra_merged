@@ -12,26 +12,32 @@
   <meta property="og:site_name" content="Preventra">
   <meta property="og:title" content="About Preventra">
   <link rel="icon" type="image/png" href="logo.png">
+  <link rel="stylesheet" href="preventra-tokens.css">
+
   <style>
     :root {
-      --brand: #3ecfae;
-      --bg: #f4f7f8;
-      --surface: #ffffff;
-      --border: #dde5e6;
-      --text: #0e1b2a;
-      --muted: #5b6b76;
-      --radius: 10px;
-      --shadow: 0 1px 2px rgba(14, 27, 42, .05), 0 10px 28px rgba(14, 27, 42, .07);
+      --brand: var(--p-brand);
+      --bg: var(--p-canvas);
+      --surface: var(--p-surface);
+      --border: var(--p-line);
+      --text: var(--p-ink);
+      --muted: var(--p-muted);
+      --radius: var(--p-radius);
+      --shadow: var(--p-shadow-raised);
     }
 
     * { box-sizing: border-box; }
+
+    h1, h2, h3 { font-family: var(--p-font-display); letter-spacing: -0.01em; }
+
+    :focus-visible { outline: 3px solid var(--p-focus); outline-offset: 3px; border-radius: var(--p-radius-sm); }
 
     body {
       margin: 0;
       padding: 24px;
       background: var(--bg);
       color: var(--text);
-      font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font: 15px/1.6 var(--p-font-body);
     }
 
     .card {

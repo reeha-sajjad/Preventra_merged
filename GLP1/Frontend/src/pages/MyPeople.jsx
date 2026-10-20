@@ -54,7 +54,7 @@ export default function MyPeople() {
     <div className="max-w-[1200px] mx-auto space-y-5 animate-fade-in">
       <div className="card p-5 md:p-6">
         <div className="mb-4">
-          <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
             <HeartHandshake size={17} className="text-gray-400" /> People you care for
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">
@@ -75,7 +75,7 @@ export default function MyPeople() {
 
       <div className="card overflow-hidden" style={{ padding: 0 }}>
         <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             {view === 'critical' ? 'Critical risk' : view === 'dose' ? 'Doses due' : view === 'refill' ? 'Refill problems' : 'Everyone'}
             <span className="ml-2 text-xs font-normal text-gray-400">{shown.length}</span>
           </h2>

@@ -72,7 +72,7 @@ export default function InsuranceCard({ patientIdx, compact = false, className =
   if (compact) return body;
   return (
     <div className={`card p-6 ${className}`}>
-      <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2 mb-3" style={{ fontFamily: 'DM Serif Display, serif' }}>
+      <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2 mb-3" style={{ fontFamily: 'var(--p-font-display)' }}>
         <CreditCard size={16} className="text-gray-400" /> Insurance
       </h2>
       {body}

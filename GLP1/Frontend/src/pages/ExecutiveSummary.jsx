@@ -49,7 +49,7 @@ function SegmentCard({ seg, delay, showCost }) {
 
         {/* Adherence Percentage */}
         <div className="mt-3 mb-2">
-          <span className="text-2xl font-bold" style={{ color: barColor, fontFamily: 'DM Serif Display, serif' }}>
+          <span className="text-2xl font-bold" style={{ color: barColor, fontFamily: 'var(--p-font-display)' }}>
             {seg.adherencePct}%
           </span>
           <span className="text-xs text-gray-400 ml-1.5">adherent</span>
@@ -296,7 +296,7 @@ export default function ExecutiveSummary() {
       <div className="card p-5 md:p-6 animate-fade-up stagger-3">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-5">
           <div>
-            <h2 className="font-display text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="font-display text-lg font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
               Who's dropping out, and why
             </h2>
             <p className="text-xs text-gray-400 mt-0.5">

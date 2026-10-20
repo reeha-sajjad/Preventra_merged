@@ -20,7 +20,7 @@ Three design languages, not one drifting:
 | | Portal | GLP-1 | Readmissions |
 |---|---|---|---|
 | Brand colour | teal `#3ecfae` + navy `#0e1b2a` | blue `#1B4F8A`, sidebar `#0F2D4F` | navy `#0F2A4A`, amber accent |
-| Type | Sora + IBM Plex Sans, loaded | Arial, plus 47 `DM Serif Display` refs that never load | system `font-sans` |
+| Type | Sora + IBM Plex Sans on the landing page only — `signin.html` and `about.html` were on `system-ui` | Arial, plus 47 `DM Serif Display` refs that never load | system `font-sans` |
 | Tailwind | none, hand CSS | v3 (`tailwind.config.js`) | v4 (`@theme` in `index.css`) |
 | Style authoring | hand CSS | 483 inline `style={{}}`, 102 distinct hex | utilities, 32 distinct hex |
 | Footer | yes, 3 pages | none | none |
@@ -63,9 +63,12 @@ GLP-1's worklist sorting, and keeping red for the top band only means red still 
 *red*. Values are re-tuned below because the originals fail AA.
 
 **3. Sora for headings, IBM Plex Sans for body — exactly what the Portal loads.**
-This retires all 47 phantom serif references. No separate mono face: numbers use IBM Plex
-Sans with `font-variant-numeric: tabular-nums`, which is what the 94 `font-mono` uses were
-reaching for.
+This retires all 47 phantom serif references. No mono *webfont*, but a system mono stack
+is kept: reading all 94 `font-mono` sites in phase 1 showed the class carries three
+different intents, not one — identifiers (member IDs, patient IDs, emails), code and
+credentials (a `<code>` block, a CSV textarea, a temporary password), and numeric metrics
+(percentages, currency, counts). The first two genuinely want mono; a temporary password
+in a proportional face is worse to read, not better.
 
 ---
 
@@ -160,10 +163,15 @@ Two rules:
 
 - **11px is the floor.** `text-[9px]` and `text-[8px]` (4 uses in GLP-1) go. `text-[10px]`
   becomes `micro`.
-- **Numbers never change face.** Tabular figures come from
-  `font-variant-numeric: tabular-nums` on IBM Plex Sans, not a mono family. This is what
-  GLP-1's 72 Arial-mapped `font-mono` uses and Readmissions' 22 real-mono uses both wanted,
-  and it makes a column of risk percentages line up identically in both apps.
+- **`font-mono` means one thing in both apps.** It was GLP-1's biggest silent
+  divergence: its v3 config mapped `mono` to Arial, so 72 uses did nothing, while the
+  same class in Readmissions got real mono. Both now resolve to `--p-font-mono`, a system
+  stack — no third webfont. Reserve it for identifiers, code and credentials.
+- **Numeric metrics move to tabular figures, not mono.** A risk percentage or a currency
+  column wants `font-variant-numeric: tabular-nums` on the body face, so numbers align
+  without looking like code. Deciding which of the 94 sites is a metric and which is an
+  identifier is per-screen judgment, so that sweep rides along with phase 4 rather than
+  being guessed in bulk. Mono digits already align, so nothing is misaligned meanwhile.
 
 Fonts are **self-hosted** in each app's `public/`, not pulled from `fonts.googleapis.com`.
 The Portal may call a CDN; a clinical app behind a hospital proxy should not depend on one,
@@ -218,7 +226,8 @@ Spacing is Tailwind's 4px scale. Card padding is 20px (`p-5`) for dense cards an
 |---|---|---|---|
 | Load Sora + IBM Plex, self-hosted | new | new | switch CDN → self-host |
 | Retire phantom serif | 47 refs, 22 files | — | — |
-| `font-mono` → tabular-nums | 72 | 22 | — |
+| `font-mono` → one real stack | 72 (were Arial) | 22 (unchanged) | — |
+| Metric sites → `tabular-nums` | phase 4 | phase 4 | — |
 | Brand colour shift | `#1B4F8A` → `--p-info`, 43 uses | `#0F2A4A` → `--p-ink` | none |
 | Risk band tokens | 4 bands re-tuned | 3 bands → 4 | — |
 | `gray-400` text → `gray-500` | 249 | 193 | — |
@@ -245,8 +254,15 @@ Spacing is Tailwind's 4px scale. Card padding is 20px (`p-5`) for dense cards an
 ## Phases
 
 - **Phase 0 — this file.** Palette, type and risk bands decided and verified. ✅
-- **Phase 1** — token file as twin copies, font loading, the serif and `font-mono` fixes,
-  v3/v4 theme mapping onto tokens.
+- **Phase 1 — the token foundation.** ✅ `preventra-tokens.css` as three byte-identical
+  copies (GLP-1, Readmissions, Portal); Sora + IBM Plex self-hosted as variable fonts
+  (2 files, ~70KB per surface); the 47 phantom serif references repointed at
+  `--p-font-display`; `font-mono` fixed to mean one thing in both apps; GLP-1's
+  `tailwind.config.js` and `index.css` and Readmissions' `@theme inline` block both
+  mapped onto the tokens; focus rings added to both apps and fixed on all three Portal
+  pages. Both apps build; the contrast gate passes. The legacy variable names in GLP-1's
+  `:root` are kept as a seam so its 483 inline styles keep working while the palette
+  moves underneath them.
 - **Phase 2** — chrome: sidebar, header, and the footer neither app has.
 - **Phase 3** — named primitives: `Card`, `Button`, `Badge`, `DataTable`, `Dialog`, `EmptyState`.
 - **Phase 4** — migrate screens, retiring inline styles app by app.

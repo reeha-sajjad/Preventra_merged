@@ -152,7 +152,7 @@ export function InsurerInbox() {
   return (
     <section className="card overflow-hidden" style={{ padding: 0 }}>
       <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+        <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
           <Receipt size={15} className="text-gray-400" /> From hospitals
         </h2>
         <p className="text-xs text-gray-400 mt-0.5">Billing questions, prior authorisations and coverage checks waiting on you.</p>

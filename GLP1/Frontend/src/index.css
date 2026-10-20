@@ -1,38 +1,62 @@
+/* The shared design tokens. Must precede the @tailwind directives so the
+   :root mapping below can reference them. See DESIGN.md. */
+@import './styles/preventra-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Legacy variable names, canonical values ──────────────────────────────────
+ * 483 inline `style={{}}` blocks in this app read these names. Rather than
+ * touch all of them in one pass, each name now points at a `--p-*` token, so
+ * the palette moves here and the call sites keep working. Phase 4 retires the
+ * inline styles; until then this is the seam.
+ *
+ * The risk names map to the `-ink` tokens because that is what they are used
+ * for — text and badge labels. That alone fixes --risk-high, which was
+ * #EF6C00 at 3.08:1 on white and 2.81:1 on its own badge. Where a bar or dot
+ * wants the saturated hue, use --p-risk-*-fill directly.
+ */
 :root {
-  --color-primary: #1B4F8A;
-  --color-primary-light: #2E6DB4;
-  --color-primary-dark: #0F2D4F;
+  --color-primary: var(--p-ink);
+  --color-primary-light: var(--p-ink-soft);
+  --color-primary-dark: var(--p-ink);
+  /* Segment colours are the chart palette, which DESIGN.md leaves to phase 3. */
   --seg-0: #EF5350; --seg-1: #FF7043; --seg-2: #43A047; --seg-3: #1E88E5;
-  --risk-critical: #C62828; --risk-high: #EF6C00; --risk-medium: #B45309; --risk-low: #2E7D32;
-  --color-positive: #2E7D32; --color-negative: #C62828; --color-warning: #E65100;
-  --bg-canvas: #F0F4F8; --bg-surface: #FFFFFF; --bg-sidebar: #0F2D4F;
-  --border: #E2E8F0; --text-primary: #1A202C; --text-secondary: #718096;
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-  --shadow-hover: 0 4px 12px rgba(27,79,138,0.12), 0 8px 28px rgba(0,0,0,0.08);
-  --sidebar-w: 240px; --topnav-h: 60px;
+  --risk-critical: var(--p-risk-critical-ink); --risk-high: var(--p-risk-high-ink);
+  --risk-medium: var(--p-risk-medium-ink); --risk-low: var(--p-risk-low-ink);
+  --color-positive: var(--p-positive); --color-negative: var(--p-negative); --color-warning: var(--p-warning);
+  --bg-canvas: var(--p-canvas); --bg-surface: var(--p-surface); --bg-sidebar: var(--p-ink);
+  --border: var(--p-line); --text-primary: var(--p-ink); --text-secondary: var(--p-muted);
+  --shadow-card: var(--p-shadow-card);
+  --shadow-hover: var(--p-shadow-raised);
+  --sidebar-w: var(--p-sidebar-w); --topnav-h: var(--p-topnav-h);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--bg-canvas); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+body { margin: 0; font-family: var(--p-font-body); font-size: var(--p-text-body); line-height: var(--p-leading-body); background: var(--bg-canvas); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4 { font-family: var(--p-font-display); letter-spacing: -0.01em; }
+
+/* Visible focus on every interactive surface. The Portal rang in teal at
+   1.96:1, under the 3:1 non-text gate; --p-focus clears it at 4.63:1. */
+:focus-visible { outline: 3px solid var(--p-focus); outline-offset: 3px; border-radius: var(--p-radius-sm); }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #CBD5E0; border-radius: 3px; }
 
-.card { background: var(--bg-surface); border-radius: 12px; box-shadow: var(--shadow-card); border: 1px solid var(--border); transition: box-shadow 0.2s ease; }
+.card { background: var(--bg-surface); border-radius: var(--p-radius-lg); box-shadow: var(--shadow-card); border: 1px solid var(--border); transition: box-shadow 0.2s ease; }
 .card-hover:hover { box-shadow: var(--shadow-hover); }
 
 .seg-bg-0 { background-color: var(--seg-0); } .seg-bg-1 { background-color: var(--seg-1); } .seg-bg-2 { background-color: var(--seg-2); } .seg-bg-3 { background-color: var(--seg-3); }
 .seg-text-0 { color: var(--seg-0); } .seg-text-1 { color: var(--seg-1); } .seg-text-2 { color: var(--seg-2); } .seg-text-3 { color: var(--seg-3); }
 .seg-border-0 { border-left-color: var(--seg-0) !important; } .seg-border-1 { border-left-color: var(--seg-1) !important; } .seg-border-2 { border-left-color: var(--seg-2) !important; } .seg-border-3 { border-left-color: var(--seg-3) !important; }
 
-.risk-critical { background:#FFEBEE; color:var(--risk-critical); border:1px solid #FFCDD2; }
-.risk-high { background:#FFF3E0; color:var(--risk-high); border:1px solid #FFE0B2; }
-.risk-medium { background:#FFFDE7; color:#92400E; border:1px solid #FEF3C7; }
-.risk-low { background:#E8F5E9; color:var(--risk-low); border:1px solid #C8E6C9; }
+/* Ink on its own tint, every pair >= 4.5:1. The badge keeps its word beside
+   the colour: adjacent bands are as close as 1.00:1 in luminance. */
+.risk-critical { background:var(--p-risk-critical-tint); color:var(--p-risk-critical-ink); border:1px solid #FFCDD2; }
+.risk-high { background:var(--p-risk-high-tint); color:var(--p-risk-high-ink); border:1px solid #FFE0B2; }
+.risk-medium { background:var(--p-risk-medium-tint); color:var(--p-risk-medium-ink); border:1px solid #FEF3C7; }
+.risk-low { background:var(--p-risk-low-tint); color:var(--p-risk-low-ink); border:1px solid #C8E6C9; }
 
 .nav-link { display:flex; align-items:center; gap:10px; padding:9px 14px; border-radius:8px; color:rgba(255,255,255,0.65); font-size:13.5px; font-weight:500; cursor:pointer; transition:background 0.15s,color 0.15s; text-decoration:none; }
 .nav-link:hover { background:rgba(255,255,255,0.08); color:#fff; }
@@ -56,7 +80,7 @@ body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: var(--b
 .stagger-1 { animation-delay:0.05s; } .stagger-2 { animation-delay:0.1s; } .stagger-3 { animation-delay:0.15s; } .stagger-4 { animation-delay:0.2s; } .stagger-5 { animation-delay:0.25s; } .stagger-6 { animation-delay:0.3s; }
 
 input[type=range] { -webkit-appearance:none; width:100%; height:4px; border-radius:2px; background:var(--border); outline:none; }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:var(--color-primary); cursor:pointer; box-shadow:0 1px 4px rgba(27,79,138,0.3); transition:transform 0.15s; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; border-radius:50%; background:var(--color-primary); cursor:pointer; box-shadow:0 1px 4px rgba(14,27,42,0.3); transition:transform 0.15s; }
 input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.15); }
 
 /* ── Executive Summary Page ────────────────────────────────────────── */

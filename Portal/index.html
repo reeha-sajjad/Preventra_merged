@@ -39,28 +39,33 @@
     })();
   </script>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Self-hosted: a sign-in page for a clinical product should not need a
+       third-party request to render, and the token file is the same one both
+       apps use. See DESIGN.md. -->
+  <link rel="stylesheet" href="preventra-tokens.css">
 
   <style>
+    /* The local names stay so no rule below changes; the values now come from
+       the shared tokens, which this page is the origin of. */
     :root {
-      --teal: #3ecfae;
-      --teal-deep: #1f9e83;
-      --teal-wash: #e4f7f2;
-      --navy: #0e1b2a;
-      --navy-soft: #1d3046;
-      --mist: #f3f7f8;
-      --line: #dfe7e9;
-      --muted: #5a6b78;
-      --white: #ffffff;
-      --display: "Sora", system-ui, sans-serif;
-      --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --teal: var(--p-brand);
+      --teal-deep: var(--p-brand-deep);
+      --teal-wash: var(--p-brand-wash);
+      --navy: var(--p-ink);
+      --navy-soft: var(--p-ink-soft);
+      --mist: var(--p-canvas);
+      --line: var(--p-line);
+      --muted: var(--p-muted);
+      --white: var(--p-surface);
+      --display: var(--p-font-display);
+      --body: var(--p-font-body);
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--white); color: var(--navy); font: 17px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
     a { color: inherit; }
-    :focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; border-radius: 6px; }
+    /* Teal rings at 1.96:1 on white, under the 3:1 non-text gate; --p-focus
+       clears it at 4.63:1. */
+    :focus-visible { outline: 3px solid var(--p-focus); outline-offset: 3px; border-radius: var(--p-radius-sm); }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
     h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; margin: 0; font-weight: 600; }
     p { margin: 0; }

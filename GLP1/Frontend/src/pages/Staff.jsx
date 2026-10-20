@@ -45,7 +45,7 @@ export default function Staff() {
     <div className="card overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-4 border-b border-gray-100">
         <Icon size={16} className="text-gray-400" />
-        <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>{title}</h2>
+        <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>{title}</h2>
       </div>
       <div className="overflow-x-auto">
         <table className="data-table">
@@ -87,7 +87,7 @@ export default function Staff() {
     <div className="max-w-[1100px] mx-auto space-y-5 animate-fade-in">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Staff</h1>
+          <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>Staff</h1>
           <p className="text-xs text-gray-400 mt-0.5">
             {data.hospital ? data.hospital.name : 'All hospitals'} · click someone to see their patients
           </p>

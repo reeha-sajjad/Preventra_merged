@@ -30,7 +30,7 @@ export default function CareTeamCard({ team, patientIdx, canAssign, onChanged })
     <div className="card p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2"
-            style={{ fontFamily: 'DM Serif Display, serif' }}>
+            style={{ fontFamily: 'var(--p-font-display)' }}>
           <Users size={16} className="text-gray-400" /> Care team
         </h2>
         {canAssign && (
@@ -66,7 +66,7 @@ function HospitalContact({ team }) {
   return (
     <div className="card p-6">
       <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2 mb-4"
-          style={{ fontFamily: 'DM Serif Display, serif' }}>
+          style={{ fontFamily: 'var(--p-font-display)' }}>
         <Building2 size={16} className="text-gray-400" /> Hospital contact
       </h2>
       <div className="grid gap-4 sm:grid-cols-2">

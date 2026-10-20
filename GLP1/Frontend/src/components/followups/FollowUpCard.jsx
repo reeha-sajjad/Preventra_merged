@@ -63,7 +63,7 @@ export default function FollowUpCard({ patientIdx }) {
             <CalendarClock size={16} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Follow-up</h2>
+            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>Follow-up</h2>
             <p className="text-xs text-gray-400">
               {isCareTeam ? 'Ask a case manager to contact this patient and book them in.'
                 : 'Requests from this patient’s doctors and nurses.'}

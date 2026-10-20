@@ -55,7 +55,7 @@ export default function PatientHome() {
   if (!data.linked && caretaker) {
     return (
       <div className="max-w-xl mx-auto card p-8 text-center animate-fade-in">
-        <h1 className="text-xl text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+        <h1 className="text-xl text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
           {greeting()}{first ? `, ${first}` : ''}
         </h1>
         <p className="mt-3 text-sm text-gray-600 leading-relaxed">
@@ -68,7 +68,7 @@ export default function PatientHome() {
   if (!data.linked) {
     return (
       <div className="max-w-xl mx-auto card p-8 text-center animate-fade-in">
-        <h1 className="text-xl text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+        <h1 className="text-xl text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
           {greeting()}{first ? `, ${first}` : ''}
         </h1>
         <p className="mt-3 text-sm text-gray-600 leading-relaxed">
@@ -121,7 +121,7 @@ export default function PatientHome() {
                aria-labelledby="status-title">
         {!caretaker && <p className="text-sm text-gray-600">{greeting()}{first ? `, ${first}` : ''}</p>}
         <h1 id="status-title" className="mt-2 text-[28px] md:text-[34px] leading-tight max-w-[30ch]"
-            style={{ fontFamily: 'DM Serif Display, serif', color: tone.fg }}>
+            style={{ fontFamily: 'var(--p-font-display)', color: tone.fg }}>
           {data.status.title}
         </h1>
         <p className="mt-3 text-[15px] leading-relaxed text-gray-700 max-w-[62ch]">{data.status.text}</p>
@@ -146,7 +146,7 @@ export default function PatientHome() {
               </p>
             ) : (
               <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-2">
-                <div className="text-2xl text-gray-900" style={{ fontFamily: 'DM Serif Display, serif' }}>{medicine.label}</div>
+                <div className="text-2xl text-gray-900" style={{ fontFamily: 'var(--p-font-display)' }}>{medicine.label}</div>
                 {medicine.schedule && (
                   <div className="flex items-center gap-1.5 text-sm text-gray-600">
                     <Clock size={14} className="text-gray-400" /> {medicine.schedule}
@@ -198,7 +198,7 @@ export default function PatientHome() {
               {data.profile.map((p) => (
                 <div key={p.key} className="rounded-xl border border-gray-100 p-4">
                   <dt className="text-xs text-gray-500">{p.label}</dt>
-                  <dd className="mt-1 text-2xl text-gray-900" style={{ fontFamily: 'DM Serif Display, serif' }}>{p.value}</dd>
+                  <dd className="mt-1 text-2xl text-gray-900" style={{ fontFamily: 'var(--p-font-display)' }}>{p.value}</dd>
                   {p.note && <dd className="mt-0.5 text-xs text-gray-600">{p.note}</dd>}
                 </div>
               ))}
