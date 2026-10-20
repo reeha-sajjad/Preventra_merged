@@ -45,7 +45,7 @@ from api import model_studio
 from api.db_utils import get_latest_batch_date
 from api.worklist_summary import refresh as refresh_summaries
 from features.weekly_rows import model_rows, to_observations
-from ingestion import canonical
+from ingestion import canonical, schema
 from models.icd_groups import classify, classify_all, monitoring_groups
 from models.monitoring_rules import CARRY, red_flags, score_week, variant_for
 
@@ -61,6 +61,12 @@ def _now() -> str:
 
 def _day(value) -> str:
     return pd.Timestamp(value).strftime("%Y-%m-%d") if value is not None and not pd.isna(value) else ""
+
+
+def _number(value, shape):
+    """A feature value for the dashboard, or None when it is unknown (a stay
+    without dates has no length of stay)."""
+    return None if value is None or pd.isna(value) else shape(float(value))
 
 
 def _band(score: float, bands: dict) -> str:
@@ -121,6 +127,46 @@ def _studio_scores(db, model: dict, frame: pd.DataFrame, targets: pd.Series) -> 
                  for e in explained.get(int(pos), [])]
         out.append({"score": round(float(scores[pos]), 1), "drivers": (lines + ["", "", ""])[:3]})
     return out
+
+
+def deployed_fingerprint(db, hospital_id: str) -> str:
+    """Which discharge and weekly models are deployed for the hospital now.
+    Every worklist row records the fingerprint it was scored under
+    (`scored_for`); a row whose fingerprint differs was scored before the
+    latest deployment and is due a re-score. Recorded even when the deployed
+    model could not be used and the built-in one stood in, so such a row is
+    not re-scored every night for nothing."""
+    discharge = model_studio.active_model_for(db, hospital_id, "discharge")
+    weekly = model_studio.active_model_for(db, hospital_id, "weekly")
+    return (f"{discharge['model_id'] if discharge else model_studio.BUILTIN_MIMIC}|"
+            f"{weekly['model_id'] if weekly else model_studio.BUILTIN_RULES}")
+
+
+def _ingested(hospital_id: str) -> dict:
+    return {"hospital_id": hospital_id, "source": SOURCE}
+
+
+def due_for_rescore(db, hospital_id: str) -> list:
+    """The latest discharge of every ingested patient of this hospital whose
+    worklist row was scored under other models than the ones deployed now."""
+    fingerprint = deployed_fingerprint(db, hospital_id)
+    rows = db["patient_worklist"].find({**_ingested(hospital_id), "scored_for": {"$ne": fingerprint}},
+                                       {"encounter_key": 1})
+    return list(dict.fromkeys(str(r["encounter_key"]) for r in rows if r.get("encounter_key")))
+
+
+def rescore_status(db, hospital_id: str) -> dict:
+    """For the Data page: what is deployed, and how many patients wait for it."""
+    models = {}
+    for target in ("discharge", "weekly"):
+        m = model_studio.active_model_for(db, hospital_id, target)
+        models[target] = {"model_id": m["model_id"], "name": m.get("name"), "builtin": bool(m.get("builtin"))} \
+            if m else None
+    fingerprint = deployed_fingerprint(db, hospital_id)
+    return {"models": models,
+            "patients": db["patient_worklist"].count_documents(_ingested(hospital_id)),
+            "due": db["patient_worklist"].count_documents({**_ingested(hospital_id),
+                                                           "scored_for": {"$ne": fingerprint}})}
 
 
 def _choose_model(db, hospital_id: str, rows: pd.DataFrame) -> tuple:
@@ -191,8 +237,20 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
     if not scorable.any():
         return {"scored": 0, "not_scored": not_scored}
 
+    fingerprint = deployed_fingerprint(db, hospital_id)
     model, note = _choose_model(db, hospital_id, feats)
     if model is None:
+        # The built-in model reads only what it was trained on: a stay without
+        # those fields (or a child's) waits for the hospital's own model.
+        lacking = {k: schema.missing_for_builtin(targets[k]) for k in feats.loc[scorable, "encounter_key"]}
+        for key, missing in lacking.items():
+            if missing:
+                not_scored.append({"encounter_key": key, "reason": (
+                    "the built-in model needs " + ", ".join(m.replace("_", " ") for m in missing)
+                    + "; train a model on your own data to score it")})
+        scorable = scorable & ~feats["encounter_key"].isin([k for k, m in lacking.items() if m])
+        if not scorable.any():
+            return {"scored": 0, "not_scored": not_scored, **({"note": note} if note else {})}
         results = _builtin_scores(feats[scorable])
         version, bands = BUILTIN_VERSION, model_studio._mimic_bands()
     else:
@@ -209,7 +267,7 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
     for (_, row), result in zip(feats[scorable].iterrows(), results):
         stay = targets[row["encounter_key"]]
         _write_discharge(db, hospital_id, stay, row, result, version, bands, batch,
-                         is_latest=row["encounter_key"] in latest)
+                         is_latest=row["encounter_key"] in latest, scored_for=fingerprint)
         touched.append(stay["patient_id"])
     _write_summary(db, batch)
     refresh_summaries(db, batch, touched)
@@ -222,7 +280,7 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
 
 
 def _write_discharge(db, hospital_id: str, stay: dict, row: pd.Series, result: dict, version: str,
-                     bands: dict, batch: str, is_latest: bool) -> None:
+                     bands: dict, batch: str, is_latest: bool, scored_for: str = "") -> None:
     pid, enc = stay["patient_id"], stay["encounter"]
     code, title, sec_titles, sec_codes, n_dx = _diagnoses(stay)
     grp = classify(code, title, sec_titles, sec_codes)
@@ -234,8 +292,8 @@ def _write_discharge(db, hospital_id: str, stay: dict, row: pd.Series, result: d
               "driver_1": drivers[0], "driver_2": drivers[1], "driver_3": drivers[2],
               "admit_date": _day(enc["admit_datetime"]), "discharge_date": _day(enc["discharge_datetime"]),
               "primary_diagnosis": title, "primary_icd_code": code, "n_diagnoses_coded": n_dx,
-              "los_days": round(max(float(row["los_days"]), 0.0), 1),
-              "n_prior_adm": int(row["n_prior_adm"]), "model_version": version,
+              "los_days": _number(row["los_days"], lambda v: round(max(v, 0.0), 1)),
+              "n_prior_adm": _number(row["n_prior_adm"], int), "model_version": version,
               "hospital_id": hospital_id, "encounter_key": stay["encounter_key"], "source": SOURCE}
 
     db["risk_registry"].update_one(
@@ -258,12 +316,13 @@ def _write_discharge(db, hospital_id: str, stay: dict, row: pd.Series, result: d
     db["patient_worklist"].update_one(
         {"patient_id": pid, "batch_date": batch},
         {"$set": {**common, "batch_date": batch, "secondary_diagnoses": sec_titles,
-                  "anchor_age": int(enc["age_years"]),
+                  "anchor_age": int(enc["age_years"]) if enc.get("age_years") is not None else None,
                   "gender": (stay.get("patient") or {}).get("sex"),
                   "clinical_group": grp["group"], "group_label": grp["label"],
                   "group_evidence": grp["evidence"], "group_confidence": grp["confidence"],
                   "clinical_groups": [m["group"] for m in matches] or ["general"],
-                  "group_matches": matches, "stage": stay.get("stage", "final"), "raw_inputs": {}}},
+                  "group_matches": matches, "stage": stay.get("stage", "final"), "raw_inputs": {},
+                  "scored_for": scored_for, "scored_at": _now()}},
         upsert=True)
 
     # A new discharge starts a new monitoring series.

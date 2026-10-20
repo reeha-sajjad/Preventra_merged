@@ -1,33 +1,30 @@
 """
-Gemini's part in Model Studio: reading a dataset's profile, writing its
+The language model's part in Model Studio - whichever model serves the
+"studio" feature (api/llm.py): reading a dataset's profile, writing its
 pipeline code, and explaining the verdict.
 
-What Gemini is shown is the column profile only - names, types, missing rates,
+What the model is shown is the column profile only - names, types, missing rates,
 numeric ranges and the values of low-cardinality columns - never a patient
 row. The profile is built in api/model_studio.profile_dataframe, which is the
 one place that decides what leaves the building.
 
-What Gemini decides is advisory everywhere except the code, and the code is
+What the model decides is advisory everywhere except the code, and the code is
 checked (api/studio_guard) and sandboxed (api/studio_runner) before it runs.
 The split, the metrics and the deploy recommendation are computed by our own
-code; Gemini only puts the recommendation into words.
+code; the model only puts the recommendation into words.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-import time
 
+from api import llm
 from api.studio_templates import ALGORITHMS, STANDARD_PIPELINE
 
-# Code writing benefits from a stronger model than the chatbot's routing; both
-# are overridable. If the studio model is unavailable on this key the chatbot's
-# model is used instead.
-STUDIO_MODEL = os.environ.get("STUDIO_GEMINI_MODEL", "gemini-flash-latest")
-FALLBACK_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
-_TIMEOUT_MS = int(os.environ.get("STUDIO_GEMINI_TIMEOUT_MS", "180000"))
+# Which model writes the plan and the code is the "studio" feature's choice on
+# Settings -> AI (api/llm.py); code writing benefits from a stronger model than
+# the chatbot's routing, so the two are chosen separately.
 
 TARGETS = {
     "discharge": (
@@ -48,47 +45,19 @@ TARGETS = {
 
 
 def available() -> bool:
-    return bool(os.environ.get("GEMINI_API_KEY"))
+    return llm.available("studio")
 
 
 def _generate(prompt: str, system: str, json_mode: bool, notify=None) -> str:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
-                          http_options=types.HttpOptions(timeout=_TIMEOUT_MS))
-    config = types.GenerateContentConfig(
-        system_instruction=system, temperature=0.2,
-        response_mime_type="application/json" if json_mode else "text/plain")
-    # Overload (503) and rate limits (429) are routine and pass within seconds,
-    # so each model gets a few tries with backoff; a missing or still-overloaded
-    # model hands over to the other one. Anything else is a real error.
-    last = None
-    for model in dict.fromkeys((STUDIO_MODEL, FALLBACK_MODEL)):
-        for wait in (0, 4, 10):
-            time.sleep(wait)
-            try:
-                response = client.models.generate_content(model=model, contents=prompt,
-                                                          config=config)
-                return response.text or ""
-            except Exception as exc:
-                last, text = exc, str(exc)
-                if "NOT_FOUND" in text or "404" in text:
-                    break  # this model name is not available on the key; try the other
-                if not any(code in text for code in ("503", "UNAVAILABLE", "429",
-                                                     "RESOURCE_EXHAUSTED", "500", "INTERNAL")):
-                    raise
-                if notify:
-                    notify(f"Gemini ({model}) is busy ({text[:40].strip()}…); retrying.")
-    raise last
+    # Overload and rate limits are routine and pass within seconds, so a busy
+    # provider is tried again a few times (api/llm.complete), saying so in the
+    # job's log. Anything else is a real error.
+    return llm.complete("studio", system=system, prompt=prompt, json_schema=True if json_mode else None,
+                        temperature=0.2, retries=3, on_retry=notify).text
 
 
 def _json(text: str):
-    text = text.strip()
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
-    if fenced:
-        text = fenced.group(1)
-    return json.loads(text)
+    return llm.parse_json(text)
 
 
 # ---------------------------------------------------------------- 1. analysis

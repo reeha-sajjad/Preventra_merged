@@ -1,34 +1,29 @@
 """
-Gemini function-calling wiring for the dashboard chatbot.
+Function calling for the dashboard chatbot, with whichever model serves the
+"chatbot" feature (api/llm.py: Gemini, Claude, OpenAI or a local model).
 
-Gemini never touches MongoDB directly and never generates query syntax. It is
-only allowed to pick one of the predefined function names below and supply
-arguments for it; the backend (chatbot_service.py) executes the actual query
-and feeds the result back to Gemini to phrase a natural-language answer.
+The model never touches the database directly and never generates query
+syntax. It is only allowed to pick one of the predefined function names below
+and supply arguments for it; the backend (chatbot_service.py) executes the
+actual query and feeds the result back to the model to phrase a
+natural-language answer.
 
 The recent transcript is sent alongside the question so follow-ups resolve
 ("and their diagnoses?"), but it arrives from the browser and is therefore
 untrusted input. Only the system instruction and this file's function list are
 authoritative: whatever a transcript claims, the model can still only call a
 function declared here, and the backend still executes it.
+
+The functions are declared in google-genai's types, which read well and were
+here first; llm.tool_spec turns them into the plain JSON Schema every provider
+takes.
 """
 
-import os
 from typing import Optional
 
-from google import genai
 from google.genai import types
 
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
-
-# The SDK retries with exponential backoff by default, which can turn a rate
-# limit or transient error into a multi-minute hang. A single attempt with a
-# short timeout lets the caller fail fast and respond gracefully instead.
-_REQUEST_TIMEOUT_MS = 15_000
-_HTTP_OPTIONS = types.HttpOptions(
-    timeout=_REQUEST_TIMEOUT_MS,
-    retry_options=types.HttpRetryOptions(attempts=1),
-)
+from api import llm
 
 _RISK_BAND_ENUM = ["low", "medium", "high"]
 _OPERATOR_ENUM = ["gt", "gte", "lt", "lte", "eq"]
@@ -428,7 +423,7 @@ FUNCTION_DECLARATIONS += [
     ),
 ]
 
-_TOOLS = [types.Tool(function_declarations=FUNCTION_DECLARATIONS)]
+TOOL_SPECS = [llm.tool_spec(d) for d in FUNCTION_DECLARATIONS]
 
 # Three outcomes, not two. A question the data can answer becomes a function
 # call. A question about medicine or about the dashboard itself has no data to
@@ -547,38 +542,30 @@ _GENERAL_SYSTEM_INSTRUCTION = (
 MAX_HISTORY_MESSAGES = 8
 
 
-def _history_contents(history: Optional[list]) -> list:
+def _history(history: Optional[list]) -> list:
     """
-    Render the prior transcript as Gemini turns.
+    Render the prior transcript as conversation turns.
 
     The transcript is replayed from the browser, so it is user-controlled input
     even where it claims to be the assistant speaking. It is passed as
     conversation content and never as instruction; the system instruction and
     the function whitelist are what actually bound this model.
     """
-    contents = []
+    turns = []
     for message in (history or [])[-MAX_HISTORY_MESSAGES:]:
         text = str(message.get("text") or "").strip()
         if not text:
             continue
-        role = "user" if message.get("role") == "user" else "model"
-        contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
-    return contents
-
-
-def _client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
-    return genai.Client(api_key=api_key, http_options=_HTTP_OPTIONS)
+        turns.append({"role": "user" if message.get("role") == "user" else "assistant", "content": text})
+    return turns
 
 
 def select_function_call(question: str, history: Optional[list] = None,
                          vocabularies: Optional[str] = None,
                          correction: Optional[dict] = None):
     """
-    Sends the question to Gemini with the tool definitions and asks it to pick
-    one function + arguments.
+    Sends the question to the model with the tool definitions and asks it to
+    pick one function + arguments.
 
     `vocabularies` is the catalog of values each categorical field actually
     holds, read from the data and injected here rather than hard-coded in the
@@ -598,69 +585,40 @@ def select_function_call(question: str, history: Optional[list] = None,
             "\n\nThe categorical fields hold exactly these values. Use them verbatim; "
             "a value outside this list matches nothing:\n" + vocabularies)
 
-    contents = _history_contents(history) + [
-        types.Content(role="user", parts=[types.Part(text=question)])]
+    turns = _history(history) + [{"role": "user", "content": question}]
     if correction:
-        contents.append(types.Content(role="user", parts=[types.Part(text=(
+        turns.append({"role": "user", "content": (
             f"Your previous attempt called {correction['name']} with "
             f"{correction['args']} and it was rejected: {correction['error']}\n"
             "Call the correct function with corrected arguments now. Do not "
-            "repeat the rejected call."))]))
+            "repeat the rejected call.")})
 
-    client = _client()
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=instruction,
-            tools=_TOOLS,
-            tool_config=types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(mode="AUTO")
-            ),
-        ),
-    )
-
-    candidates = response.candidates or []
-    if not candidates:
-        return None
-
-    for part in candidates[0].content.parts or []:
-        if part.function_call:
-            return {"name": part.function_call.name, "args": dict(part.function_call.args or {})}
+    # One attempt: a chat answer that waits through retries feels broken, and
+    # the service tells the user to try again in a moment instead.
+    reply = llm.complete("chatbot", system=instruction, messages=turns, tools=TOOL_SPECS, retries=0)
+    if reply.tool_call:
+        return reply.tool_call
 
     # No function: the model was asked to say which of the two non-data
     # outcomes applies. Anything it says other than a clear NONE is treated as
     # a general question, because a stray word should not become a refusal.
-    reply = (response.text or "").strip().upper()
-    return None if reply.startswith("NONE") else GENERAL_QUESTION
+    return None if (reply.text or "").strip().upper().startswith("NONE") else GENERAL_QUESTION
 
 
 def generate_natural_language_answer(question: str, function_name: str, function_result,
                                      history: Optional[list] = None) -> str:
-    """Passes the function result back to Gemini to phrase a natural-language answer."""
-    client = _client()
+    """Passes the function result back to the model to phrase a natural-language answer."""
     prompt = (
         f"User question: {question}\n\n"
         f"Function called: {function_name}\n"
         f"Function result (JSON): {function_result}\n\n"
         "Write the answer for the user now."
     )
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=_history_contents(history) + [
-            types.Content(role="user", parts=[types.Part(text=prompt)])],
-        config=types.GenerateContentConfig(system_instruction=_ANSWER_SYSTEM_INSTRUCTION),
-    )
-    return (response.text or "").strip()
+    return llm.complete("chatbot", system=_ANSWER_SYSTEM_INSTRUCTION, retries=0,
+                        messages=_history(history) + [{"role": "user", "content": prompt}]).text
 
 
 def generate_general_answer(question: str, history: Optional[list] = None) -> str:
     """Answers a question that has no database query behind it, from knowledge."""
-    client = _client()
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=_history_contents(history) + [
-            types.Content(role="user", parts=[types.Part(text=question)])],
-        config=types.GenerateContentConfig(system_instruction=_GENERAL_SYSTEM_INSTRUCTION),
-    )
-    return (response.text or "").strip()
+    return llm.complete("chatbot", system=_GENERAL_SYSTEM_INSTRUCTION, retries=0,
+                        messages=_history(history) + [{"role": "user", "content": question}]).text

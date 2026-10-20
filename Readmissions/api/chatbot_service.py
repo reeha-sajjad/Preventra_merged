@@ -19,7 +19,8 @@ import re
 
 from api import chatbot_queries
 from api.chatbot_links import extract_entities
-from api.chatbot_gemini import (
+from api.llm import LLMUnavailable
+from api.chatbot_llm import (
     GENERAL_QUESTION,
     generate_general_answer,
     generate_natural_language_answer,
@@ -58,6 +59,7 @@ RATE_LIMITED_MESSAGE = (
     "I'm being rate-limited right now — too many questions in a short window. "
     "Wait about a minute and ask again."
 )
+UNAVAILABLE_MESSAGE = "The assistant is switched off. Ask your administrator to choose an AI model in Settings."
 
 
 def _llm_error_message(exc: Exception) -> str:
@@ -68,6 +70,8 @@ def _llm_error_message(exc: Exception) -> str:
     exhaust a per-minute quota. Reporting that as a generic failure sends the
     user hunting for a bug that will clear itself in sixty seconds.
     """
+    if isinstance(exc, LLMUnavailable):
+        return UNAVAILABLE_MESSAGE
     text = str(exc)
     if "RESOURCE_EXHAUSTED" in text or "429" in text:
         return RATE_LIMITED_MESSAGE

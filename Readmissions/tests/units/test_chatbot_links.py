@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from api import chatbot_service
 from api.chatbot_links import extract_entities
-from api.chatbot_gemini import GENERAL_QUESTION
+from api.chatbot_llm import GENERAL_QUESTION
 
 
 def _by_kind(entities, kind):

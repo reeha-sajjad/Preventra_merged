@@ -3,12 +3,15 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopNav from './TopNav';
 import Chatbot from './Chatbot';
+import { aiOn, useAiStatus } from '../hooks/useAiStatus';
 
 export default function Layout() {
   const [navOpen, setNavOpen] = useState(false);
   // Stable identity: Sidebar closes itself on every navigation via an effect,
   // and a fresh function each render would re-fire that effect constantly.
   const closeNav = useCallback(() => setNavOpen(false), []);
+  // The assistant only shows while a model may serve it (Settings -> AI).
+  const ai = useAiStatus();
 
   return (
     <div className="flex h-dvh overflow-hidden bg-gray-50">
@@ -19,7 +22,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
-      <Chatbot />
+      {aiOn(ai, 'chatbot') && <Chatbot />}
     </div>
   );
 }

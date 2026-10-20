@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getPatientTrend, getWeekNarrative } from '../../api';
+import { aiOn, useAiStatus } from '../../hooks/useAiStatus';
 import TrendStatusBadge, { trendStatusConfig } from '../shared/TrendStatusBadge';
 import RiskBadge from '../shared/RiskBadge';
 import BulletList from '../shared/BulletList';
@@ -84,6 +85,7 @@ function DeltaIndicator({ delta }) {
 }
 
 function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus }) {
+  const explains = aiOn(useAiStatus(), 'insights');
   const [narrative, setNarrative] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -218,7 +220,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
       )}
 
       <div className="mt-3 pt-3 border-t border-gray-100">
-        {!narrative && !loading && (
+        {explains && !narrative && !loading && (
           <button
             type="button"
             onClick={handleExplain}

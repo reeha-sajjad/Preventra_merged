@@ -3,10 +3,12 @@ import { API_BASE_URL } from '../api';
 import { getToken, readClaims } from '../api/auth';
 import UserManagement from '../components/shared/UserManagement';
 import { AccountCard, PasswordCard } from '../components/settings/AccountCards';
+import AiSettings from '../components/settings/AiSettings';
 
 // Everyone's own account and password first - the same as GLP-1's Settings.
 // Below that, for hospital admins and the superadmin, User Management: accounts
-// are shared by both apps, and GLP-1 shows the same component.
+// are shared by both apps, and GLP-1 shows the same component. For the
+// superadmin, the AI models of this app.
 export default function Settings() {
   const me = readClaims();
   const isManager = me?.role === 'superadmin' || me?.role === 'hospital_admin';
@@ -20,6 +22,7 @@ export default function Settings() {
       {isManager && (
         <UserManagement authBaseUrl={API_BASE_URL} getToken={getToken} me={me} />
       )}
+      {me?.role === 'superadmin' && <AiSettings />}
     </div>
   );
 }

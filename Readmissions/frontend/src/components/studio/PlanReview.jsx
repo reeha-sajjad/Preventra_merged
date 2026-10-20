@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Sparkles, AlertTriangle, ListChecks, Loader2, ArrowRight, Info, History } from 'lucide-react';
 import { scanStudioJob } from '../../api';
 import { Card } from './StudioParts';
-import { fmt } from './studioFormat';
+import { fmt, isAi } from './studioFormat';
 
 const ROLE_LABEL = { numeric: 'Number', categorical: 'Category', drop: 'Leave out' };
 
@@ -15,7 +15,7 @@ function defaultRole(profileCol) {
 /**
  * The plan a person approves before anything trains: which column is the
  * outcome, which identifies the patient, which orders time, and what every
- * other column is. Gemini (or the name/type rules) proposed it; nothing here is
+ * other column is. The AI model (or the name/type rules) proposed it; nothing here is
  * applied until "Train with this plan".
  */
 export default function PlanReview({ job, onConfirm, busy, error }) {
@@ -105,8 +105,8 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
   return (
     <div className="space-y-5">
       <Card title="Proposed plan" icon={<Sparkles size={18} />}
-        right={<span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${job.plan_source === 'gemini' ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
-          {job.plan_source === 'gemini' ? 'Proposed by Gemini' : 'Proposed from column names and types'}
+        right={<span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${isAi(job.plan_source) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+          {isAi(job.plan_source) ? 'Proposed by the AI model' : 'Proposed from column names and types'}
         </span>}>
         {plan.summary && <p className="mb-4 text-sm text-gray-700">{plan.summary}</p>}
         <div className="grid gap-4 md:grid-cols-4">
@@ -253,7 +253,7 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
-          <Info size={14} /> Gemini writes the pipeline next. It sees the column statistics above, never patient rows.
+          <Info size={14} /> The AI model writes the pipeline next. It sees the column statistics above, never patient rows.
         </p>
         <button type="button" onClick={submit}
           disabled={busy || !label || (weekly && !idCol) || !features.length

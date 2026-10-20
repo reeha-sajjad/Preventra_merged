@@ -12,8 +12,9 @@ code that is neither is an error, never a guess.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -37,13 +38,16 @@ class _In(BaseModel):
 
 
 class Encounter(_In):
+    """Only the two keys are required. Whatever else a hospital has is taken;
+    a stay without the fields the built-in model needs is stored as
+    incomplete (see COMPLETE_FIELDS) and scored by the hospital's own model."""
     encounter_key: str = Field(min_length=1, max_length=100)
     patient_key: str = Field(min_length=1, max_length=100)
-    admit_datetime: datetime
-    discharge_datetime: datetime
-    age_years: int = Field(ge=18, le=130)
-    admission_type: str = Field(min_length=1, max_length=60)
-    discharge_disposition: str = Field(min_length=1, max_length=60)
+    admit_datetime: Optional[datetime] = None
+    discharge_datetime: Optional[datetime] = None
+    age_years: Optional[int] = Field(default=None, ge=0, le=130)
+    admission_type: Optional[str] = Field(default=None, max_length=60)
+    discharge_disposition: Optional[str] = Field(default=None, max_length=60)
     died_in_hospital: bool = False
     payer_class: Optional[str] = Field(default=None, max_length=60)
     ed_arrival_datetime: Optional[datetime] = None
@@ -56,17 +60,18 @@ class Encounter(_In):
 
     @model_validator(mode="after")
     def _in_order(self):
-        if self.discharge_datetime < self.admit_datetime:
+        if self.admit_datetime and self.discharge_datetime and self.discharge_datetime < self.admit_datetime:
             raise ValueError("discharge_datetime is before admit_datetime")
         if (self.ed_arrival_datetime and self.ed_departure_datetime
                 and self.ed_departure_datetime < self.ed_arrival_datetime):
             raise ValueError("ed_departure_datetime is before ed_arrival_datetime")
-        self.age_years = min(self.age_years, MAX_AGE)
+        if self.age_years is not None:
+            self.age_years = min(self.age_years, MAX_AGE)
         return self
 
 
 class PatientIn(_In):
-    sex: str = Field(min_length=1, max_length=30)
+    sex: Optional[str] = Field(default=None, max_length=30)
     marital_status: Optional[str] = Field(default=None, max_length=60)
     race_ethnicity: Optional[str] = Field(default=None, max_length=80)
     death_date: Optional[date] = None
@@ -126,18 +131,47 @@ class DischargeVitals(_In):
 
 
 PERSON_FIELDS = ("sex", "marital_status", "race_ethnicity")
+MAX_EXTRAS = 150
+# What the built-in model needs of a stay (besides diagnoses, labs and the
+# rest, which it reads when they are there). A stay without any of these is
+# stored as incomplete: the hospital's own Model Studio model can score it, the
+# built-in model does not.
+COMPLETE_FIELDS = ("admit_datetime", "discharge_datetime", "age_years", "admission_type",
+                   "discharge_disposition")
+ADULT_AGE = 18
+_EXTRA_NAME = re.compile(r"^[a-z0-9_]{1,40}$")
 
 
 class Bundle(_In):
     stage: Literal["provisional", "final"] = "final"
     encounter: Encounter
-    patient: PatientIn
+    patient: PatientIn = Field(default_factory=PatientIn)
     diagnoses: list[Diagnosis] = Field(default_factory=list, max_length=200)
     labs: list[Lab] = Field(default_factory=list, max_length=5000)
     medications: list[Medication] = Field(default_factory=list, max_length=2000)
     procedures: list[Procedure] = Field(default_factory=list, max_length=300)
     drg: Optional[Drg] = None
     discharge_vitals: Optional[DischargeVitals] = None
+    # The 30-day outcome as the hospital recorded it, when its file has one
+    # (a "readmitted" column). Preferred to the one worked out from dates.
+    reported_outcome: Optional[bool] = None
+    # The hospital's own columns, kept for its own Model Studio model
+    # (ingestion/profile.py). One value per discharge; never read by the
+    # built-in model.
+    extras: dict[str, Union[float, int, bool, str, None]] = Field(default_factory=dict)
+
+    @field_validator("extras")
+    @classmethod
+    def _extras(cls, value: dict) -> dict:
+        if len(value) > MAX_EXTRAS:
+            raise ValueError(f"at most {MAX_EXTRAS} extra fields")
+        bad = [k for k in value if not _EXTRA_NAME.match(k)]
+        if bad:
+            raise ValueError(f"extra field names must be lower case letters, digits and _: {', '.join(bad[:5])}")
+        too_long = [k for k, v in value.items() if isinstance(v, str) and len(v) > 200]
+        if too_long:
+            raise ValueError(f"extra values must be at most 200 characters: {', '.join(too_long[:5])}")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -189,9 +223,11 @@ class Readings(_In):
 
 class WeekIn(_In):
     patient_key: str = Field(min_length=1, max_length=100)
-    encounter_key: str = Field(min_length=1, max_length=100)      # the discharge it follows
+    # The discharge it follows; without it, the patient's latest one on or
+    # before week_date (api/ingest.take_weeks).
+    encounter_key: Optional[str] = Field(default=None, min_length=1, max_length=100)
     week_date: date
-    source: Literal["device", "nurse_call", "patient_app", "pharmacy", "clinic"]
+    source: Literal["device", "nurse_call", "patient_app", "pharmacy", "clinic"] = "clinic"
     readings: Readings
     note: Optional[str] = Field(default=None, max_length=500)
 
@@ -212,39 +248,49 @@ def translate(field: str, value, mapping: dict) -> tuple:
     mapped = {str(k).strip().lower(): v for k, v in (mapping.get(field) or {}).items()}.get(text.lower())
     if mapped in allowed:
         return mapped, None
-    return None, (f"{field}: '{text}' is not a value we know. Send one of {', '.join(allowed)}, "
-                  f"or add it to your hospital's code mapping")
+    return None, (f"{field}: '{text}' is not a value we know, so it is left empty. Map it on the "
+                  f"Data page (Mapping, Codes) to one of {', '.join(allowed)}")
+
+
+def missing_for_builtin(stay: dict) -> list:
+    """The fields the built-in model needs that this stay lacks - empty when it
+    is complete. A child is never scored by the adult-trained model."""
+    enc = stay.get("encounter") or {}
+    missing = [f for f in COMPLETE_FIELDS if enc.get(f) in (None, "")]
+    if enc.get("age_years") is not None and enc["age_years"] < ADULT_AGE:
+        missing.append("adult age")
+    return missing
 
 
 def check_bundle(raw: dict, mapping: dict) -> tuple:
     """One discharge as sent -> (canonical stay, errors, warnings).
 
-    The stay is None when there are errors. Warnings are kept with the stay:
-    lab results that cannot be read (an unknown unit) are left out of scoring
+    The stay is None when there are errors - malformed values, impossible
+    dates. Anything that only stops the built-in model from scoring it (a
+    code the hospital has not mapped yet, a missing date) is a warning: the
+    stay is kept, marked incomplete, and its own model can still use it.
+    Lab results that cannot be read (an unknown unit) are left out of scoring
     and reported, rather than the whole discharge refused for one result."""
     try:
         bundle = Bundle.model_validate(raw)
     except ValidationError as exc:
         return None, _errors(exc), []
     stay = bundle.model_dump(mode="python")
-    errors = []
+    warnings = []
     enc, pat = stay["encounter"], stay["patient"]
-    for field, holder, required in (("admission_type", enc, True), ("discharge_disposition", enc, True),
-                                    ("payer_class", enc, False), ("sex", pat, True),
-                                    ("marital_status", pat, False), ("race_ethnicity", pat, False)):
+    for field, holder in (("admission_type", enc), ("discharge_disposition", enc), ("payer_class", enc),
+                          ("sex", pat), ("marital_status", pat), ("race_ethnicity", pat)):
         value, error = translate(field, holder.get(field), mapping)
         if error:
-            errors.append(error)
+            warnings.append(error)
         holder[field] = value
-    if errors:
-        return None, errors, []
-    warnings = []
     for lab in stay["labs"]:
         key = vocab.lab_key(lab.get("loinc_code"), lab.get("test_name"))
         if key:
             _, problem = vocab.convert_lab(key, lab["value"], lab.get("unit"))
             if problem:
                 warnings.append(f"lab result left out: {problem}")
+    stay["complete"] = not missing_for_builtin(stay)
     return stay, [], warnings
 
 

@@ -19,6 +19,8 @@ model trained on this file reads exactly the columns live scoring produces:
                           Blank while a discharge's 30 days have not yet
                           passed; Model Studio leaves those rows out.
     ...                   the 94 inputs, in the built-in model's order
+    x_...                 the hospital's own extra columns, when its data
+                          profile keeps any (ingestion/profile.py)
 
     .venv/bin/python scripts/export_discharge_training_csv.py --hospital <hospital_id>
     .venv/bin/python scripts/export_discharge_training_csv.py --hospital <id> --out /tmp/d.csv
@@ -38,7 +40,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from api.db_utils import get_db_name, get_mongo_client
-from features.discharge_features import OUTCOME, feature_names
+from features.discharge_features import OUTCOME
 from ingestion import canonical
 
 STAYS = "ingest_stays"
@@ -46,12 +48,7 @@ STAYS = "ingest_stays"
 
 def table(db, hospital_id: str, as_of=None) -> pd.DataFrame:
     """The hospital's scorable discharges with their outcome as far as known."""
-    stays = list(db[STAYS].find({"hospital_id": hospital_id}, {"_id": 0}))
-    if not stays:
-        return pd.DataFrame(columns=["patient_key", "discharge_datetime", OUTCOME] + feature_names())
-    feats = canonical.features(stays, as_of=pd.Timestamp(as_of) if as_of else pd.Timestamp.now(),
-                               include_excluded=False)
-    return feats[["patient_key", "discharge_datetime", OUTCOME] + feature_names()].reset_index(drop=True)
+    return canonical.training_table(list(db[STAYS].find({"hospital_id": hospital_id}, {"_id": 0})), as_of)
 
 
 def main() -> None:

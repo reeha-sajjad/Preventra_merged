@@ -4,7 +4,7 @@ import {
   Card, Metric, CheckIcon, VerdictBadge, RocChart, CalibrationChart, HistogramChart,
   ImportanceBars,
 } from './StudioParts';
-import { fmt, pct } from './studioFormat';
+import { fmt, isAi, pct } from './studioFormat';
 
 /**
  * What a trained model achieved on rows it never saw, against the alternatives,
@@ -144,9 +144,9 @@ function VerdictCard({ verdict, explanation }) {
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <VerdictBadge verdict={verdict} size="md" />
         <span className="text-xs text-gray-500">Decided by fixed rules; explained by{' '}
-          {explanation?.source === 'gemini' ? 'Gemini' : 'the rules themselves'}</span>
+          {isAi(explanation?.source) ? 'the AI model' : 'the rules themselves'}</span>
       </div>
-      {explanation?.bullets?.length > 0 && explanation.source === 'gemini' && (
+      {explanation?.bullets?.length > 0 && isAi(explanation.source) && (
         <div className="mb-4 rounded-lg border border-white/60 bg-white/70 p-3">
           <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-indigo-700">
             <Sparkles size={13} /> In plain words

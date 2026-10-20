@@ -6,6 +6,10 @@ export const TARGET_LABELS = {
   weekly: 'Weekly monitoring',
 };
 
+// Written or proposed by the AI model. Models saved before other providers
+// were possible say 'gemini'; newer ones say 'ai'.
+export const isAi = (source) => source === 'ai' || source === 'gemini';
+
 export const fmt = (v, digits = 3) => (v == null || Number.isNaN(v) ? '—' : Number(v).toFixed(digits));
 export const pct = (v, digits = 1) => (v == null ? '—' : `${(Number(v) * 100).toFixed(digits)}%`);
 

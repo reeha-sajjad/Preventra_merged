@@ -95,7 +95,7 @@ export default function TrainSetup({ overview, models, preset, onStarted, onOpen
                   ))}
                 </select>
                 <p className="mt-1.5 text-xs text-gray-500">
-                  Gemini starts from that model's pipeline and adapts it to the new file; the result is
+                  The AI model starts from that model's pipeline and adapts it to the new file; the result is
                   compared with it on the same new test patients.
                 </p>
               </div>
@@ -159,13 +159,13 @@ export default function TrainSetup({ overview, models, preset, onStarted, onOpen
         <Card title="How a run works" icon={<ShieldCheck size={18} />}>
           <ol className="list-decimal space-y-1.5 pl-4 text-sm text-gray-700">
             <li>The file is profiled: types, missing values, ranges.</li>
-            <li>{overview?.llm_available ? 'Gemini proposes' : 'Name and type rules propose'} the outcome, patient id and feature roles. <b>You review and edit the plan.</b></li>
-            <li>{overview?.llm_available ? 'Gemini writes' : 'The standard pipeline provides'} the preprocessing, transformation and training code. It is checked, then run in an isolated process.</li>
+            <li>{overview?.llm_available ? 'The AI model proposes' : 'Name and type rules propose'} the outcome, patient id and feature roles. <b>You review and edit the plan.</b></li>
+            <li>{overview?.llm_available ? 'The AI model writes' : 'The standard pipeline provides'} the preprocessing, transformation and training code. It is checked, then run in an isolated process.</li>
             <li>Whole patients are held out for testing (the newest ones, if there is a date).</li>
             <li>Metrics, comparisons and fairness checks are computed independently of the generated code, and fixed rules recommend whether to deploy.</li>
           </ol>
           <p className="mt-3 rounded-lg bg-indigo-50 p-2.5 text-xs text-indigo-800">
-            Gemini sees column statistics only, never patient rows.
+            The AI model sees column statistics only, never patient rows.
           </p>
         </Card>
         {overview?.jobs?.length > 0 && (
