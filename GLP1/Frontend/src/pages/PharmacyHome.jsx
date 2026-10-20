@@ -128,7 +128,14 @@ export default function PharmacyHome() {
                   <td className="text-xs" style={{ color: p.case_manager ? '#2D3748' : '#A0AEC0' }}>
                     {p.case_manager || 'Hospital case managers'}
                   </td>
-                  <td>{p.open_followup ? <ReportStatus f={p.open_followup} /> : <span className="text-xs text-gray-300">—</span>}</td>
+                  <td>{p.open_followup ? <ReportStatus f={p.open_followup} />
+                    : p.last_done ? (
+                      // Dealt with recently: the outcome and when, so it isn't reported twice.
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                            style={{ background: '#E8F5E9', color: '#2E7D32' }}>
+                        {p.last_done.outcome_label} · {ago(p.last_done.done_at)}
+                      </span>
+                    ) : <span className="text-xs text-gray-300">—</span>}</td>
                   <td className="text-right whitespace-nowrap">
                     <button type="button" onClick={() => setReporting(p)}
                       className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">

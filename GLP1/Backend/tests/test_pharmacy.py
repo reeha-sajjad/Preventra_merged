@@ -93,6 +93,15 @@ def test_a_report_becomes_a_request_for_the_case_manager(world, clean):
     # The pharmacy sees it on its home page.
     home = rx(world).get("/api/pharmacy/home").json()
     assert home["stats"]["open_reports"] == 1 and home["reports"][0]["by_us"]
+    row = next(p for p in home["patients"] if p["patient_idx"] == 1)
+    assert row["open_followup"] and row["last_done"] is None
+    # Once the case manager books it, the pharmacy sees the outcome beside the patient.
+    fid = str(doc["_id"])
+    cm = client(world, "cm@a.test")
+    assert cm.post(f"/api/followups/{fid}/done", json={"outcome": "booked", "note": "Seen Friday"}).status_code == 200
+    row = next(p for p in rx(world).get("/api/pharmacy/home").json()["patients"] if p["patient_idx"] == 1)
+    assert row["open_followup"] is None and row["last_done"]["outcome_label"] == "Booked"
+    assert "Seen Friday" not in str(row)
 
 
 def test_with_a_request_already_open_the_report_is_added_to_it(world, clean):

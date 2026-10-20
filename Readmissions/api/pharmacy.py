@@ -14,12 +14,15 @@ necessary). Opening one patient's page is logged under DISPENSING_REASON
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException
 from pymongo import DESCENDING
 
 from api import access, auth, followups
+
+RECENT_DAYS = 30            # how long a finished follow-up shows beside the patient
 
 HIGH = "High"
 RECENT_WEEKS = 4            # "missed refills" counts the last four monitoring weeks
@@ -69,6 +72,17 @@ def home(db, user: dict, scope: Optional[list]) -> dict:
     open_for = {str(d["patient_id"]): followups.pharmacy_view(d, user)
                 for d in db[followups.COLLECTION].find({"active_patient": {"$in": ids}})}
     reports = followups.pharmacy_reports(db, user)
+    # The latest finished follow-up of the last RECENT_DAYS, so the pharmacy sees
+    # beside each patient that it was dealt with (the outcome only, never notes)
+    # and does not report the same thing again. GLP-1 does the same.
+    since = datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)
+    last_done = {}
+    for d in db[followups.COLLECTION].find({"patient_id": {"$in": access.id_variants(ids)}, "status": "done",
+                                            "done_at": {"$gte": since}},
+                                           {"patient_id": 1, "outcome": 1, "done_at": 1}).sort("done_at", 1):
+        at = d["done_at"] if d["done_at"].tzinfo else d["done_at"].replace(tzinfo=timezone.utc)
+        last_done[str(d["patient_id"])] = {"outcome_label": followups.OUTCOMES.get(d.get("outcome"), "Done"),
+                                           "done_at": at.isoformat()}
 
     patients = []
     for pid in ids:
@@ -82,6 +96,7 @@ def home(db, user: dict, scope: Optional[list]) -> dict:
             "refill_latest": refill.get("latest"), "refill_week": refill.get("week"),
             "missed_recent": refill.get("missed_recent", 0),
             "open_followup": open_for.get(pid),
+            "last_done": None if pid in open_for else last_done.get(pid),
         })
     patients.sort(key=lambda p: (-p["missed_recent"], -p["risk_score"], p["id"]))
     return {

@@ -130,6 +130,12 @@ def test_a_report_becomes_a_request_for_the_case_managers(main, world):
     assert "by" not in item["pharmacy_reports"][0]
     home = rx(main, world).get("/api/pharmacy/home").json()
     assert home["stats"]["open_reports"] == 1 and home["reports"][0]["by_us"]
+    # Once the case manager books it, the pharmacy sees the outcome beside the patient.
+    cm = as_user(main, world, "cm@a.test")
+    assert cm.post(f"/api/followups/{doc['_id']}/done", json={"outcome": "booked", "note": "Seen Friday"}).status_code == 200
+    row = next(p for p in rx(main, world).get("/api/pharmacy/home").json()["patients"] if p["id"] == A2)
+    assert row["open_followup"] is None and row["last_done"]["outcome_label"] == "Booked"
+    assert "Seen Friday" not in str(row)
 
 
 def test_with_a_request_already_open_the_report_is_added_and_notes_stay_hidden(main, world):

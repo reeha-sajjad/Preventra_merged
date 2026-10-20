@@ -10,6 +10,7 @@ risk drivers, notes or costs (45 CFR 164.502(b), minimum necessary). Opening
 one patient's page is logged, once per sign-in, under DISPENSING_REASON
 (routers/patients.get_patient_summary), as every other role's look is.
 """
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from bson import ObjectId
@@ -19,6 +20,8 @@ from fastapi import HTTPException
 from core import followups
 from core.access import scope_query
 from core.mongo import get_db, get_shared_identity_db
+
+RECENT_DAYS = 30            # how long a finished follow-up shows beside the patient
 
 CRITICAL = 0.75
 HIGH = 0.50
@@ -78,6 +81,17 @@ async def home(user: dict, scope: Optional[list]) -> dict:
     open_for = {}
     for doc in await db[followups.COLLECTION].find({"active_patient": {"$in": idxs}}).to_list(length=None):
         open_for[int(doc["patient_idx"])] = followups.pharmacy_view(doc, user)
+    # The latest finished follow-up of the last RECENT_DAYS, so the pharmacy sees
+    # beside each patient that it was dealt with (the outcome only, never notes)
+    # and does not report the same thing again.
+    since = datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)
+    last_done = {}
+    async for doc in db[followups.COLLECTION].find(
+            {"patient_idx": {"$in": idxs}, "status": "done", "done_at": {"$gte": since}},
+            {"patient_idx": 1, "outcome": 1, "done_at": 1}).sort("done_at", 1):
+        at = doc["done_at"] if doc["done_at"].tzinfo else doc["done_at"].replace(tzinfo=timezone.utc)
+        last_done[int(doc["patient_idx"])] = {"outcome_label": followups.OUTCOMES.get(doc.get("outcome"), "Done"),
+                                              "done_at": at.isoformat()}
 
     patients = []
     for r in rows:
@@ -91,6 +105,7 @@ async def home(user: dict, scope: Optional[list]) -> dict:
             "hospital": hospitals.get(a.get("hospital_id"), a.get("hospital_id")),
             "case_manager": managers.get(str(a.get("case_manager_id") or "")),
             "open_followup": open_for.get(idx),
+            "last_done": None if idx in open_for else last_done.get(idx),
         })
     patients.sort(key=lambda p: (-p["dropout_prob"], p["patient_idx"]))
     return {

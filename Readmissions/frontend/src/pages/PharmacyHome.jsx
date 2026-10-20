@@ -125,7 +125,14 @@ export default function PharmacyHome() {
                     <td className={`px-5 py-3 font-mono text-sm ${p.missed_recent ? 'font-semibold text-risk-high' : 'text-gray-400'}`}>{p.missed_recent}</td>
                     <td className="px-5 py-3 text-xs text-gray-500">{p.hospital || '—'}</td>
                     <td className="whitespace-nowrap px-5 py-3 text-xs text-gray-500">{p.discharge_date || '—'}</td>
-                    <td className="px-5 py-3">{p.open_followup ? <ReportStatus f={p.open_followup} /> : <span className="text-xs text-gray-300">—</span>}</td>
+                    <td className="px-5 py-3">{p.open_followup ? <ReportStatus f={p.open_followup} />
+                    : p.last_done ? (
+                      // Dealt with recently: the outcome and when, so it isn't reported twice.
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                            style={{ background: '#E8F5E9', color: '#2E7D32' }}>
+                        {p.last_done.outcome_label} · {ago(p.last_done.done_at)}
+                      </span>
+                    ) : <span className="text-xs text-gray-300">—</span>}</td>
                     <td className="whitespace-nowrap px-5 py-3 text-right">
                       <button type="button" onClick={() => setReporting(p)}
                         className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">
