@@ -11,7 +11,12 @@ whose latest weekly score
                              not distinguishable from week-to-week noise
     moved up a risk band     Low -> Medium, Medium -> High
 
-A red flag, or a rise that ends in High, is "urgent"; anything else "rising".
+or whose latest weeks went without contact after a Medium or High week (or a
+red flag) - the score is only held then, so no rise can fire, and that is when
+someone should be calling (models/monitoring_rules.contact_gap).
+
+A red flag, a rise that ends in High, or silence after High is "urgent";
+anything else "rising".
 Red flags first, then other urgent rises, then the rest; biggest rise first.
 
 Computed from weekly_monitoring on every call rather than stored as alerts:
@@ -24,7 +29,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from models.monitoring_rules import RED_FLAGS
+from models.monitoring_rules import RED_FLAGS, contact_gap
 
 RISE_POINTS = 5.0
 BAND_RANK = {"Low": 1, "Medium": 2, "High": 3}
@@ -43,6 +48,25 @@ def assess(weeks: list):
     if len(weeks) < 2:
         return None
     latest, prev = weeks[-1], weeks[-2]
+    # Silence after warning signs: the score is only held, so a rise rule can
+    # never fire on it - and that is exactly when someone should be calling.
+    gap = contact_gap([{"week_number": w.get("week"), "observed": w.get("observed", True),
+                        "risk_band": w.get("band"), "red_flags": w.get("flags")} for w in weeks])
+    if gap["overdue"]:
+        n, since = gap["weeks_without_contact"], gap["last_contact_week"]
+        band = gap["last_contact_band"] or "flagged"
+        score = _float(latest.get("score"))
+        return {
+            "severity": "urgent" if band == "High" else "rising",
+            "week_number": latest.get("week"),
+            "week_date": latest.get("date") or "",
+            "risk_score": score, "risk_band": latest.get("band") or "Low",
+            "previous_score": score, "previous_band": prev.get("band") or "Low",
+            "delta": 0.0, "red_flags": [],
+            "reasons": [f"No readings for {n} week{'s' if n != 1 else ''} since "
+                        + ("discharge" if since == 0 else f"week {since}")
+                        + f" while {band} - contact the patient"],
+        }
     score, before = _float(latest.get("score")), _float(prev.get("score"))
     delta = round(score - before, 1)
     band, band_before = latest.get("band") or "Low", prev.get("band") or "Low"
@@ -79,6 +103,7 @@ def watchlist(view, db, user: dict, limit: int = 50) -> dict:
             "score": {"$ifNull": ["$risk_score", 0]},
             "band": {"$ifNull": ["$risk_band", "Low"]},
             "flags": {"$ifNull": ["$red_flags", []]},
+            "observed": {"$ifNull": ["$observed", True]},
             "date": {"$ifNull": ["$week_date", ""]}}}}},
     ])
     items = []

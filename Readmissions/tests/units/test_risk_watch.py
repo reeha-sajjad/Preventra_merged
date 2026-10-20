@@ -80,6 +80,17 @@ def test_seen_takes_a_patient_off_the_bell_until_a_newer_week_rises(main, world,
     assert {p["patient_id"]: p["seen"] for p in body["patients"]}[A1] is False
 
 
+def test_silence_after_a_medium_week_is_on_the_list_but_not_after_a_low_one():
+    from api.risk_watch import assess
+    medium = [{"week": 0, "score": 25.0, "band": "Medium"}, {"week": 1, "score": 34.2, "band": "Medium"},
+              {"week": 2, "score": 34.2, "band": "Medium", "observed": False}]
+    entry = assess(medium)
+    assert entry["severity"] == "rising" and entry["delta"] == 0.0
+    assert entry["reasons"] == ["No readings for 1 week since week 1 while Medium - contact the patient"]
+    low = [{**w, "band": "Low"} for w in medium]
+    assert assess(low) is None
+
+
 def test_a_patient_outside_the_scope_cannot_be_marked(main, world, weeks):
     r = as_user(main, world, "doc.a@a.test").post(f"/api/rising-risk/{B1}/seen",
                                                   json={"week_number": 1})

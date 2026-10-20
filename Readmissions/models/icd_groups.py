@@ -225,8 +225,13 @@ _HISTORICAL_TITLE = re.compile(r"\b(personal|family) history of\b", re.I)
 # Applied to the clause running up to the keyword, so that a negation later in
 # the title cannot cancel a condition stated before it: "Diabetes mellitus
 # without mention of complication" is still diabetes.
+#
+# Exposure, contact, carrier and immunisation titles (Z20, Z22, Z23 - "Contact
+# with and (suspected) exposure to COVID-19") name a disease the patient does
+# NOT have, and once put a GI-bleed admission on the infection plan.
 _CLAUSE_NEGATION = re.compile(
-    r"\b(without|history of|screening for|no evidence of|ruled out|at risk (for|of))\b", re.I)
+    r"\b(without|history of|screening for|no evidence of|ruled out|at risk (for|of)|"
+    r"exposure to|contact with|carrier of|immuni[sz]ation against|vaccination against)\b", re.I)
 
 
 def _negated(text: str, start: int) -> bool:

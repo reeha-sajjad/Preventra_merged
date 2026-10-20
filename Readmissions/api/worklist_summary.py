@@ -27,11 +27,15 @@ def summaries(db, patient_ids: Optional[list] = None) -> dict:
     """{patient_id: summary} from the weekly monitoring series."""
     from api.main import _classify_trend_status        # one definition, shared with the API
     from api.access import id_variants
+    from models.monitoring_rules import contact_gap
     pipeline = ([{"$match": {"patient_id": {"$in": id_variants(patient_ids)}}}] if patient_ids is not None
                 else []) + [
         {"$sort": {"week_number": 1}},
         {"$group": {"_id": "$patient_id", "scores": {"$push": "$risk_score"},
-                    "bands": {"$push": "$risk_band"}, "flags": {"$push": "$red_flags"}}},
+                    "bands": {"$push": "$risk_band"}, "flags": {"$push": "$red_flags"},
+                    "weeks": {"$push": {"week_number": "$week_number",
+                                        "observed": {"$ifNull": ["$observed", True]},
+                                        "risk_band": "$risk_band", "red_flags": "$red_flags"}}}},
     ]
     out = {}
     for doc in db[WEEKLY_COLLECTION].aggregate(pipeline):
@@ -45,14 +49,16 @@ def summaries(db, patient_ids: Optional[list] = None) -> dict:
             continue
         bands = doc.get("bands") or []
         gaps = [None] + [7] * (len(scores) - 1)
+        # A red flag in the latest week overrides the trend (see
+        # models/monitoring_rules.RED_FLAGS), and so does going without contact
+        # after warning signs, so the worklist agrees with the patient's page.
+        overdue = contact_gap(doc.get("weeks") or [])["overdue"]
         out[str(doc["_id"])] = {
             "discharge_score": scores[0],
             "current_score": scores[-1],
             "current_band": bands[-1] if bands else None,
             "trend_delta": round(scores[-1] - scores[0], 1),
-            # A red flag in the latest week overrides the trend: see
-            # models/monitoring_rules.RED_FLAGS.
-            "monitoring_status": ("action_required" if (doc.get("flags") or [None])[-1]
+            "monitoring_status": ("action_required" if (doc.get("flags") or [None])[-1] or overdue
                                   else _classify_trend_status(scores, gaps)),
             "weeks_tracked": len(scores),
         }

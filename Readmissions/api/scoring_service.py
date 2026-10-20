@@ -427,7 +427,8 @@ def scored_weeks(db, hospital_id: str, stay: dict, week0: dict) -> list:
         n = int(wk["week_number"])
         obs = to_observations(wk.get("readings") or {}, week0.get("discharge_baseline"))
         score, adj, contribs = score_week(base, obs, CARRY * prev_adj, variant=variant_for(pid, n),
-                                          group=group, groups=groups, prev_score=prev_score)
+                                          group=group, groups=groups, prev_score=prev_score,
+                                          flag_floor=bands["low_score_threshold"])
         lines = ([d for _, d in contribs[:3]] + ["", "", ""])[:3]
         docs.append({"patient_id": pid, "week_number": n,
                      "days_after_discharge": int((pd.Timestamp(wk["week_date"]) - discharge).days),
