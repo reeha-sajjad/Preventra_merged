@@ -261,7 +261,83 @@ def list_users(db, actor: dict, hospital_id: Optional[str] = None,
         query["role"] = role
     accounts = list(auth.users(db).find(query, {"password_hash": 0}).sort("created_at", -1))
     insurance = patient_insurers(db, accounts)
-    return [{**admin_view(u), "patient_insurer_id": insurance.get(str(u["_id"]))} for u in accounts]
+    links = patient_records(db, accounts)
+    return [{**admin_view(u), "patient_insurer_id": insurance.get(str(u["_id"])),
+             **({"patient_records": links.get(str(u["_id"]), {"readmissions": None, "glp1": None})}
+                if u.get("role") == "patient" else {})} for u in accounts]
+
+
+# ------------------------------------------------------- patient records
+# A patient login opens one patient record in each app: the record whose
+# patient_account_id is the login's id (care_actions in Readmissions,
+# glp1_analytics.patient_access in GLP-1). Until a hospital admin (or the
+# superadmin) links it, the login sees "not linked yet". Only the link is
+# written - never the dataset - and every change is kept in the record's
+# patient_account_history.
+LINK_APPS = ("readmissions", "glp1")
+
+
+def patient_records(db, accounts: list) -> dict:
+    """account id -> {"readmissions": patient_id | None, "glp1": patient_idx | None}."""
+    ids = [str(a["_id"]) for a in accounts if a.get("role") == "patient"]
+    if not ids:
+        return {}
+    out = {i: {"readmissions": None, "glp1": None} for i in ids}
+    for rec in db["care_actions"].find({"patient_account_id": {"$in": ids}},
+                                       {"patient_id": 1, "patient_account_id": 1}):
+        out[str(rec["patient_account_id"])]["readmissions"] = str(rec["patient_id"])
+    for rec in db.client[GLP1_DB]["patient_access"].find({"patient_account_id": {"$in": ids}},
+                                                         {"patient_idx": 1, "patient_account_id": 1}):
+        out[str(rec["patient_account_id"])]["glp1"] = int(rec["patient_idx"])
+    return out
+
+
+def link_patient_record(db, actor: dict, user_id: str, app: str, patient) -> dict:
+    """Link a patient login to its record in one app, or unlink it (patient
+    empty). The record must be in the login's own hospital and not already
+    another login's."""
+    require_manager(actor)
+    target = _load_target(db, actor, user_id)
+    if target["role"] != "patient":
+        raise HTTPException(status_code=409, detail="Only a patient login is linked to a patient record")
+    if target["status"] != "active" or not target.get("hospital_id"):
+        raise HTTPException(status_code=409, detail="Approve the patient into a hospital first")
+    if app not in LINK_APPS:
+        raise HTTPException(status_code=422, detail="Choose Readmissions or GLP-1")
+    uid = str(target["_id"])
+    if app == "readmissions":
+        from api import access                            # avoid an import cycle
+        col = db["care_actions"]
+        raw = str(patient).strip() if patient not in (None, "") else None
+        query = {"patient_id": {"$in": access.id_variants([raw])}} if raw else None
+    else:
+        col = db.client[GLP1_DB]["patient_access"]
+        try:
+            raw = int(str(patient).strip().lstrip("#")) if patient not in (None, "") else None
+        except ValueError:
+            raise HTTPException(status_code=422, detail="A GLP-1 patient number, like 1968")
+        query = {"patient_idx": raw} if raw is not None else None
+    current = col.find_one({"patient_account_id": uid})
+    record = col.find_one(query) if query else None
+    if query and not record:
+        raise HTTPException(status_code=404, detail="No patient record with that number")
+    if record and record.get("hospital_id") != target["hospital_id"]:
+        # The same answer as a missing record: a hospital admin learns nothing
+        # about another hospital's patients.
+        raise HTTPException(status_code=404, detail="No patient record with that number")
+    if record and record.get("patient_account_id") and str(record["patient_account_id"]) != uid:
+        raise HTTPException(status_code=409, detail="That record is already linked to another login")
+    now = auth._now()
+    by = {"id": str(actor["_id"]), "role": actor["role"]}
+    if current and (not record or current["_id"] != record["_id"]):
+        col.update_one({"_id": current["_id"]},
+                       {"$unset": {"patient_account_id": ""},
+                        "$push": {"patient_account_history": {"from": uid, "to": None, "by": by, "at": now}}})
+    if record and (not current or current["_id"] != record["_id"]):
+        col.update_one({"_id": record["_id"]},
+                       {"$set": {"patient_account_id": uid},
+                        "$push": {"patient_account_history": {"from": None, "to": uid, "by": by, "at": now}}})
+    return patient_records(db, [target])[uid]
 
 
 def patient_insurers(db, accounts: list) -> dict:

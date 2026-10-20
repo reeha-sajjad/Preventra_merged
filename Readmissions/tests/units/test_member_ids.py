@@ -20,6 +20,10 @@ def test_member_ids_are_unique_per_insurer_and_medicare_is_checked(main, world):
     assert cm.post(f"/api/patients/{A3}/insurance", json={"member_id": "ACM004277"}).status_code == 422
     assert cm.post(f"/api/patients/{A3}/insurance", json={"member_id": "1EG4-TE5-MK73"}).status_code == 200
     assert cm.post(f"/api/patients/{A2}/insurance", json={"member_id": "ABC123"}).status_code == 409   # no insurer
+    # Once on file it can't be changed or cleared.
+    assert cm.post(f"/api/patients/{A1}/insurance", json={"member_id": "ACM999"}).status_code == 409
+    assert cm.post(f"/api/patients/{A1}/insurance", json={"member_id": ""}).status_code == 409
+    assert cm.get(f"/api/patients/{A1}/insurance").json()["can_edit"] is False
 
 
 def test_who_sees_and_finds_member_ids(main, world):

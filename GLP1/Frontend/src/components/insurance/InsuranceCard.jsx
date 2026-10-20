@@ -61,7 +61,7 @@ export default function InsuranceCard({ patientIdx, compact = false, className =
           {data.can_edit && (
             <button type="button" onClick={() => { setValue(data.member_id || ''); setEditing(true); }}
               className="inline-flex items-center gap-1 text-xs font-medium" style={{ color: 'var(--color-primary)' }}>
-              <Pencil size={11} /> {data.member_id ? 'Change' : 'Add member ID'}
+              <Pencil size={11} /> Add member ID
             </button>
           )}
         </div>

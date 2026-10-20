@@ -30,7 +30,8 @@ def test_the_mbi_format():
 def test_billing_staff_record_a_member_id_and_it_is_unique_per_insurer(world, insurers):
     cm = client(world, "cm@a.test")
     body = cm.post("/api/patients/0/insurance", json={"member_id": "acm 0042-77"}).json()
-    assert body["member_id"] == "ACM004277" and body["insurer"]["name"] == "Acme Health" and body["can_edit"]
+    assert body["member_id"] == "ACM004277" and body["insurer"]["name"] == "Acme Health"
+    assert body["can_edit"] is False                     # on file now: it can't be changed
     # The same ID for another acme member is refused (patient 4 is hospital B's, so ask as superadmin).
     ops = client(world, "ops@team.test")
     assert ops.post("/api/patients/4/insurance", json={"member_id": "ACM004277"}).status_code == 409
@@ -40,9 +41,12 @@ def test_billing_staff_record_a_member_id_and_it_is_unique_per_insurer(world, in
     assert cm.post("/api/patients/2/insurance", json={"member_id": "1EG4-TE5-MK73"}).status_code == 200
     # No insurer on file: nothing to attach it to.
     assert cm.post("/api/patients/1/insurance", json={"member_id": "ABC123"}).status_code == 409
-    # Clearing it.
-    assert cm.post("/api/patients/0/insurance", json={"member_id": ""}).json()["member_id"] is None
-    assert len(world["db"].patient_access.find_one({"patient_idx": 0})["insurer_member_id_history"]) == 2
+    # Once on file it can't be changed or cleared, by anyone.
+    for who in (cm, ops):
+        assert who.post("/api/patients/0/insurance", json={"member_id": "ACM999"}).status_code == 409
+        assert who.post("/api/patients/0/insurance", json={"member_id": ""}).status_code == 409
+    assert world["db"].patient_access.find_one({"patient_idx": 0})["insurer_member_id"] == "ACM004277"
+    assert len(world["db"].patient_access.find_one({"patient_idx": 0})["insurer_member_id_history"]) == 1
 
 
 def test_who_sees_member_ids(world, insurers):

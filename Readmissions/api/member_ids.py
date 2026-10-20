@@ -97,7 +97,8 @@ def insurance(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
             "insurer": {"id": ins["id"], "name": ins["name"]} if ins else None,
             "member_id": doc.get("insurer_member_id"),
             "format": (ins or {}).get("format"),
-            "can_edit": user["role"] in EDIT_ROLES and ins is not None}
+            # Billing staff add it once, when none is on file yet.
+            "can_edit": user["role"] in EDIT_ROLES and ins is not None and not doc.get("insurer_member_id")}
 
 
 def set_member_id(db, user: dict, scope: Optional[list], patient_id: str, raw: Optional[str]) -> dict:
@@ -110,6 +111,12 @@ def set_member_id(db, user: dict, scope: Optional[list], patient_id: str, raw: O
     if not doc or not ins:
         raise HTTPException(status_code=409, detail="Set the patient's insurer first")
     member_id = normalise(raw)
+    if doc.get("insurer_member_id"):
+        # Once on file it stays: it is the insurer's identifier, copied from the
+        # card. A wrong one is corrected by the superadmin in the database.
+        raise HTTPException(status_code=409, detail="This patient's member ID is already on file and can't be changed")
+    if not member_id:
+        raise HTTPException(status_code=422, detail="Enter the member ID from the insurance card")
     if member_id:
         check(member_id, ins["format"])
         if db["care_actions"].find_one({"insurer_id": ins["id"], "insurer_member_id": member_id,

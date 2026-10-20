@@ -190,7 +190,9 @@ export default function UserManagement({ authBaseUrl, getToken, me }) {
                          assignable={assignable} hospitals={hospitals} insurers={insurers}
                          pharmacies={pharmacies} hospitalName={hospitalName} busy={busy}
                          onSave={(body) => run(() => request(`/auth/admin/users/${u.sub}`, { method: 'PATCH', body }))}
-                         onDecline={() => run(() => request(`/auth/admin/users/${u.sub}/decline`, { method: 'POST' }))} />
+                         onDecline={() => run(() => request(`/auth/admin/users/${u.sub}/decline`, { method: 'POST' }))}
+                         onLink={(app, patient) => run(() => request(`/auth/admin/users/${u.sub}/patient-record`,
+                                                                     { method: 'POST', body: { app, patient } }))} />
               ))}
               {!users.length && (
                 <tr><td colSpan={isSuper ? 7 : 5} className="py-6 text-center text-gray-400">No accounts match.</td></tr>
@@ -433,7 +435,7 @@ function canManage(user, me, myId, isSuper) {
 }
 
 function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, pharmacies = [], hospitalName, busy,
-                  onSave, onDecline }) {
+                  onSave, onDecline, onLink }) {
   const [role, setRole] = useState(user.role);
   // A sign-up starts on the hospital it asked to join, so approving it is one click.
   const startingHospital = user.hospital_id || user.requested_hospital_id || '';
@@ -462,6 +464,11 @@ function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, pha
             Signed up as {ROLE_LABELS[user.requested_role] || user.requested_role}
             {user.requested_hospital_id && <> for {hospitalName(user.requested_hospital_id)}</>}
           </div>
+        )}
+        {/* A patient login opens nothing until it is linked to the patient's
+            record in each app (api/user_admin.link_patient_record). */}
+        {editable && user.role === 'patient' && user.status === 'active' && user.hospital_id && user.patient_records && (
+          <PatientRecords records={user.patient_records} busy={busy} onLink={onLink} />
         )}
         {isSignup(user) && user.declined && isSuper && (
           <div className="mt-0.5 text-xs text-gray-500">
@@ -539,6 +546,44 @@ function UserRow({ user, me, myId, isSuper, assignable, hospitals, insurers, pha
         )}
       </td>
     </tr>
+  );
+}
+
+const LINK_APPS = [['readmissions', 'Readmissions', 'e.g. MIMIC-1101'], ['glp1', 'GLP-1', 'e.g. 1968']];
+
+function PatientRecords({ records, busy, onLink }) {
+  const [editing, setEditing] = useState(null);
+  const [value, setValue] = useState('');
+  return (
+    <div className="mt-1 space-y-0.5 text-xs">
+      {LINK_APPS.map(([app, label, hint]) => (
+        <div key={app} className="flex flex-wrap items-center gap-1.5">
+          <span className="text-gray-500">{label} record:</span>
+          {editing === app ? (
+            <form className="flex items-center gap-1"
+                  onSubmit={(e) => { e.preventDefault(); onLink(app, value.trim()); setEditing(null); }}>
+              <input className="w-36 rounded border border-gray-200 px-1.5 py-0.5 text-xs" autoFocus
+                     value={value} placeholder={hint} onChange={(e) => setValue(e.target.value)}
+                     aria-label={`${label} patient record`} />
+              <button className="font-semibold text-blue-700 disabled:opacity-50" disabled={busy}>Save</button>
+              <button type="button" className="text-gray-500" onClick={() => setEditing(null)}>Cancel</button>
+            </form>
+          ) : (<>
+            {records[app] != null
+              ? <span className="font-mono font-medium text-gray-800">{app === 'glp1' ? `#${records[app]}` : records[app]}</span>
+              : <span className="font-medium text-amber-700">not linked</span>}
+            <button type="button" className="font-semibold text-blue-700"
+                    onClick={() => { setValue(records[app] != null ? String(records[app]) : ''); setEditing(app); }}>
+              {records[app] != null ? 'Change' : 'Link'}
+            </button>
+            {records[app] != null && (
+              <button type="button" className="text-gray-500" disabled={busy}
+                      onClick={() => onLink(app, '')}>Unlink</button>
+            )}
+          </>)}
+        </div>
+      ))}
+    </div>
   );
 }
 

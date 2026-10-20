@@ -312,6 +312,18 @@ def admin_update_user(user_id: str, body: UpdateUserRequest,
                                   body.hospital_id, body.insurer_id, body.name, body.pharmacy_id)
 
 
+class PatientLinkRequest(BaseModel):
+    app: str                                    # "readmissions" | "glp1"
+    patient: Optional[str] = None               # empty unlinks
+
+
+@app.post("/auth/admin/users/{user_id}/patient-record")
+def admin_link_patient_record(user_id: str, body: PatientLinkRequest,
+                              actor: dict = Depends(require_manager)):
+    """Link a patient login to its patient record in one app (or unlink it)."""
+    return user_admin.link_patient_record(db, actor, user_id, body.app, body.patient)
+
+
 @app.post("/auth/admin/users/{user_id}/decline")
 def admin_decline_signup(user_id: str, actor: dict = Depends(require_manager)):
     """Turn down a sign-up's request to join the admin's hospital."""
