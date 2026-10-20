@@ -9,8 +9,11 @@ Two products plus one shared sign-in page. One account, one token, two apps.
 | `Portal/` | Shared sign-in / sign-up page that hands a token to either app | Static `index.html` + a `build.js` that injects per-env URLs |
 
 Root `README.md` is the long-form setup/deploy runbook. `ACCESS_CONTROL.md` is the
-role-and-permissions narrative. This file is the orientation layer; the skills under
-`.claude/skills/` carry task-specific procedure.
+role-and-permissions narrative. `DESIGN.md` is the design-language decision record —
+the shared palette, type ramp and risk-band tokens both frontends and the Portal are
+converging on, with the verified contrast ratios; read it before changing any styling.
+This file is the orientation layer; the skills under `.claude/skills/` carry
+task-specific procedure.
 
 ---
 
