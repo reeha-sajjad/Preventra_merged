@@ -8,3 +8,7 @@ node_modules/
 .claude/
 DEPLOYMENT.md
 .vibe-wise/
+
+# Rendered video/VO audio — re-renderable from the scripts in */docs/, too big to version
+*.wav
+*.mp3

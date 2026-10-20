@@ -1,0 +1,95 @@
+1
+00:00:00,600 --> 00:00:01,901
+Jen is fifty-three.
+
+2
+00:00:01,961 --> 00:00:04,169
+Today she starts GLP-1 therapy.
+
+3
+00:00:04,229 --> 00:00:07,609
+On paper, everything is in place — a prescription,
+
+4
+00:00:07,669 --> 00:00:10,430
+a plan, and a follow-up in twelve weeks.
+
+5
+00:00:10,740 --> 00:00:13,695
+But therapy isn’t won or lost in the clinic.
+
+6
+00:00:13,755 --> 00:00:17,330
+It’s won or lost in the ten weeks nobody is watching.
+
+7
+00:00:17,740 --> 00:00:20,038
+A copay higher than she expected.
+
+8
+00:00:20,098 --> 00:00:23,530
+A side effect she doesn’t want to make a fuss about.
+
+9
+00:00:23,590 --> 00:00:26,150
+A refill she keeps meaning to pick up.
+
+10
+00:00:26,510 --> 00:00:29,083
+None of it reaches her care team.
+
+11
+00:00:29,143 --> 00:00:29,690
+Not yet.
+
+12
+00:00:31,150 --> 00:00:36,168
+Preventra reads the signals already in her utilization data — and helps
+
+13
+00:00:36,228 --> 00:00:41,318
+identify patients who may be at elevated risk of discontinuing therapy.
+
+14
+00:00:41,378 --> 00:00:43,810
+Weeks before the next appointment.
+
+15
+00:00:44,170 --> 00:00:46,104
+It doesn’t stop at the flag.
+
+16
+00:00:46,164 --> 00:00:52,267
+It surfaces the likely drivers behind it — cost pressure, a disrupted appointment,
+
+17
+00:00:52,327 --> 00:00:58,730
+friction with side effects — so the team knows what to address, not just who to call.
+
+18
+00:00:59,090 --> 00:01:03,636
+So the conversation happens now, while there’s still time to act.
+
+19
+00:01:03,696 --> 00:01:07,710
+The decision stays where it belongs — with Jen’s care team.
+
+20
+00:01:08,120 --> 00:01:10,467
+And the same intelligence scales.
+
+21
+00:01:10,527 --> 00:01:17,183
+Across a population, Preventra gives providers and payers visibility into adherence patterns,
+
+22
+00:01:17,243 --> 00:01:24,910
+intervention priority, and downstream cost exposure — so attention reaches the patients who need it first.
+
+23
+00:01:25,370 --> 00:01:27,332
+Preventra GLP-1 Intelligence.
+
+24
+00:01:27,392 --> 00:01:30,730
+From GLP-1 utilization to treatment intelligence.
