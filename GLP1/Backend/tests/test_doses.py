@@ -45,7 +45,7 @@ def test_a_caretaker_ticks_doses_and_the_care_team_sees_them(world, clean):
     # A hospital admin needs a reason first; someone outside the hospital gets nothing.
     assert client(world, "admin@a.test").get("/api/patients/3/doses").status_code == 403
     assert client(world, "admin@b.test").get("/api/patients/3/doses").status_code == 404
-    assert carer.get("/api/patients/3/doses").status_code == 403                 # caretakers: summary only
+    assert carer.get("/api/patients/3/doses").status_code == 200                 # their own people's record
     # Undo a mis-tap: only the person who recorded it.
     did = body["entries"][0]["id"]
     assert me.delete(f"/api/zoe/doses/{did}").status_code == 403

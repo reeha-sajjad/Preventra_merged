@@ -148,16 +148,16 @@ function DriverCard({ rank, driver, direction, shap }) {
 export default function PatientDetail() {
   const { id }   = useParams();
   const navigate = useNavigate();
-  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy, isInsurer } = useRole();
+  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy, isInsurer, isCaretaker } = useRole();
   const { summary, data: patientData, loading: patientLoading, reload } = usePatientRecord(id);
   const patientList = usePatients();
   const careTeamChanged = () => { reload(); patientList?.reload(); };
   const { data: survivalData } = useSurvival();
 
   const backButton = !isPatient && (
-    <button onClick={() => navigate('/patients')}
+    <button onClick={() => navigate(isCaretaker ? '/' : '/patients')}
       className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-700 mb-4 transition-colors font-medium">
-      <ArrowLeft size={16} /> Back to {isInsurer ? "members" : "patients"}
+      <ArrowLeft size={16} /> Back to {isCaretaker ? 'the people you care for' : isInsurer ? "members" : "patients"}
     </button>
   );
 

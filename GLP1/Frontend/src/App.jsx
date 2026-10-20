@@ -57,6 +57,7 @@ function RoleRoutes() {
       <Routes>
         <Route path="/"             element={<MyPeople />} />
         <Route path="/person/:idx"  element={<PatientHome />} />
+        <Route path="/patients/:id" element={<PatientDetail />} />
         <Route path="/settings"     element={<Settings />} />
         <Route path="*"             element={<Navigate to="/" replace />} />
       </Routes>

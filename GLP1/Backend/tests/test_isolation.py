@@ -147,9 +147,10 @@ def test_single_patient_routes_hide_everyone_else(world, email):
     for idx in allowed(email):
         # Hospital admins and insurers open the clinical layer with a reason
         # (tests/test_hospital_pages.py); for them the record is there, but
-        # behind the prompt. A pharmacy or a caretaker never gets it
-        # (tests/test_pharmacy.py, tests/test_caretakers.py).
-        expected = 403 if ACCOUNTS[email][0] in ("hospital_admin", "insurer", "pharmacy", "caretaker") else 200
+        # behind the prompt. A pharmacy never gets it (tests/test_pharmacy.py);
+        # a caretaker does, for the patients who linked them, logged
+        # (tests/test_caretakers.py).
+        expected = 403 if ACCOUNTS[email][0] in ("hospital_admin", "insurer", "pharmacy") else 200
         assert c.get(f"/api/patients/{idx}").status_code == expected
 
 

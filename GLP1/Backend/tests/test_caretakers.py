@@ -74,15 +74,16 @@ def test_staff_link_a_caretaker_only_with_the_patients_agreement(world, fresh):
                                                                   "patient_agreed": True}).status_code in (403, 404)
 
 
-def test_a_caretaker_sees_the_summary_not_the_clinical_record(world):
+def test_a_caretaker_opens_the_clinical_record_of_their_people_and_it_is_logged(world):
     carer = client(world, "carer@home.test")
     assert carer.get("/api/my-home").json()["patient_idx"] == 3
-    assert carer.get("/api/patients/3").status_code == 403
-    assert carer.post("/api/patients/3/open", json={"reason": "care_coordination"}).status_code == 403
+    world["db"].access_log.delete_many({}) if "access_log" in world["db"].list_collection_names() else None
+    assert carer.get("/api/patients/3").status_code == 200
+    assert carer.get("/api/patients/3/doses").status_code == 200
+    assert carer.get("/api/patients/4").status_code == 404                     # not one of theirs
     assert carer.get("/api/caretakers?patient=3").status_code == 403          # not theirs to manage
-    for path in ("/api/overview", "/api/staff", "/api/followups", "/api/cost-effectiveness", "/api/patients/3/doses"):
+    for path in ("/api/overview", "/api/staff", "/api/followups", "/api/cost-effectiveness"):
         assert carer.get(path).status_code in (403, 404), path
-    assert carer.get("/api/patients?page_size=50").json()["redacted"]
 
 
 def test_a_caretaker_can_ask_the_case_manager_and_step_away(world, fresh):

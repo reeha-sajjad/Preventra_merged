@@ -70,7 +70,10 @@ REASON_ROLES = ("hospital_admin", "insurer")
 # the patient's plain-words home page (core/patient_home.py), which is what is
 # relevant to helping with their care (45 CFR 164.510(b)), not the clinical
 # layer.
-OVERVIEW_ONLY_ROLES = ("pharmacy", "caretaker")
+# A caretaker opens the clinical layer of the patients who linked them - the
+# patient agreed to involve them in their care (45 CFR 164.510(b)) - and every
+# first look is logged as CARETAKER_REASON (AUTOMATIC_REASONS).
+OVERVIEW_ONLY_ROLES = ("pharmacy",)
 
 # Must match REASONS in Readmissions/api/access.py: one access log, one list.
 REASONS = {
@@ -107,7 +110,8 @@ CARE_TEAM_ROLES = ("doctor", "nurse")
 TREATMENT_REASON = "treatment"
 COORDINATION_REASON = "case_management"
 AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,
-                     "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON}
+                     "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON,
+                     "caretaker": "caretaker"}       # = CARETAKER_REASON, defined below
 # Emergency access ("break the glass", core/emergency.py): a doctor or nurse
 # opening a patient of their hospital who is not on their care team, with a
 # reason and a note, for EMERGENCY_HOURS. Logged under its own reason, and
