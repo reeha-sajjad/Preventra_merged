@@ -38,7 +38,7 @@ export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overv
           <Lock size={16} />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             Clinical details are not shared with pharmacies
           </h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -58,7 +58,7 @@ export default function ClinicalGate({ patientIdx, reasons = [], onOpened, overv
           <Lock size={16} />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             Clinical details
           </h2>
           <p className="text-sm text-gray-500 mt-0.5">

@@ -174,7 +174,7 @@ export default function PatientDetail() {
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-lg font-bold"
                  style={{ background: 'var(--color-primary)' }}>#{summary.patient_idx}</div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
                 Patient #{summary.patient_idx}
               </h1>
               <MemberLine team={summary} />
@@ -274,7 +274,7 @@ export default function PatientDetail() {
               #{patient.patient_idx}
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
                 Patient #{patient.patient_idx}
               </h1>
               <MemberLine team={patient} />
@@ -355,7 +355,7 @@ export default function PatientDetail() {
 
           {/* Clinical Profile */}
           <div className="card p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'var(--p-font-display)' }}>
               Clinical Profile
             </h2>
             <div className="detail-stats-grid">
@@ -372,7 +372,7 @@ export default function PatientDetail() {
 
           {/* Financial & Medication */}
           <div className="card p-6">
-            <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'var(--p-font-display)' }}>
               Financial & Medication
             </h2>
             <div className="detail-stats-grid">
@@ -407,7 +407,7 @@ export default function PatientDetail() {
 
         {/* Right: Top Dropout Drivers */}
         <div className="card p-6 h-full flex flex-col">
-          <h2 className="text-base font-semibold text-gray-800 mb-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800 mb-2" style={{ fontFamily: 'var(--p-font-display)' }}>
             Top Dropout Drivers
           </h2>
           <p className="text-xs text-gray-400 mb-5">
@@ -444,7 +444,7 @@ export default function PatientDetail() {
 
         {/* Survival Curve */}
         <div className="card p-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800 mb-2" style={{ fontFamily: 'var(--p-font-display)' }}>
             Segment Survival Curve
           </h2>
           <p className="text-xs text-gray-400 mb-4">
@@ -474,7 +474,7 @@ export default function PatientDetail() {
 
         {/* Dropout Checkpoints */}
         <div className="card p-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800 mb-5" style={{ fontFamily: 'var(--p-font-display)' }}>
             Segment Dropout Checkpoints
           </h2>
           <div className="space-y-4">

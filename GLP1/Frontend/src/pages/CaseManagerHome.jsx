@@ -58,7 +58,7 @@ export default function CaseManagerHome() {
       <div className="card p-5 md:p-6 animate-fade-up">
         <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <Building2 size={17} className="text-gray-400" />
               {data.hospital?.name || 'Your hospital'}
             </h2>
@@ -182,7 +182,7 @@ export default function CaseManagerHome() {
               <ShieldQuestion size={16} style={{ color: unattended.total ? '#C62828' : '#2E7D32' }} />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <h2 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
                 Critical risk, no follow-up
               </h2>
               <p className="text-xs text-gray-400 mt-0.5 max-w-2xl">
@@ -253,7 +253,7 @@ function Heading({ icon: Icon, title, sub, action }) {
           <Icon size={16} style={{ color: 'var(--color-primary)' }} />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>{title}</h2>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>{title}</h2>
           <p className="text-xs text-gray-400">{sub}</p>
         </div>
       </div>

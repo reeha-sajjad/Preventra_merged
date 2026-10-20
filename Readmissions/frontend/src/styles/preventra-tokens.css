@@ -1,0 +1,146 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Preventra design tokens — the shared layer.
+ *
+ * TWIN FILE. Byte-identical copies live at:
+ *   GLP1/Frontend/src/styles/preventra-tokens.css
+ *   Readmissions/frontend/src/styles/preventra-tokens.css
+ *   Portal/preventra-tokens.css
+ * The two services deploy separately and cannot import each other, so this is
+ * duplicated rather than shared — the same rule the parity map in CLAUDE.md
+ * applies to every other shared concept. Edit all three or none; `diff` them.
+ *
+ * Plain custom properties on purpose: they behave identically under Tailwind v3
+ * (GLP-1), Tailwind v4 (Readmissions) and no Tailwind at all (the Portal), so
+ * this file needs no build integration and cannot break a bundle.
+ *
+ * Every value here is decided in DESIGN.md and its contrast is verified by
+ * `python scripts/check_contrast.py`. Do not edit a colour here without
+ * re-running that check — it also asserts that the pairings DESIGN.md forbids
+ * still fail, so it catches a token drifting out from under the prose.
+ * ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Typefaces ───────────────────────────────────────────────────────────────
+ * Self-hosted, not pulled from fonts.googleapis.com: a clinical app behind a
+ * hospital proxy should not depend on a CDN, and it keeps a third party out of
+ * the request path on pages showing patient data.
+ *
+ * Both are variable fonts, so one file covers every weight we use. Latin
+ * subset only (~25KB + ~45KB); anything outside the range below falls back to
+ * the next family in the stack per-glyph.
+ */
+@font-face {
+  font-family: 'Sora';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('/fonts/sora-latin-var.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-var.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* ── Brand ─────────────────────────────────────────────────────────────────
+   * Teal is a FIELD, never an inkwell. #3ecfae is 1.96:1 on white and 1.96:1
+   * under white text, so it can carry text in neither direction. It works as a
+   * field with navy on top (8.89:1). Primary buttons are navy with a white
+   * label (17.37:1) — the conclusion the Portal's own CSS already reached.
+   */
+  --p-brand: #3ecfae;        /* teal fields, active indicators            */
+  --p-brand-deep: #1f9e83;   /* hover / pressed on a teal field           */
+  --p-brand-ink: #21836d;    /* teal TEXT and links on white — 4.63:1     */
+  --p-brand-icon: #29a68a;   /* teal icons and >=24px text — 3.04:1       */
+  --p-brand-wash: #e4f7f2;   /* teal tint behind a section                */
+
+  /* ── Ink and surfaces ──────────────────────────────────────────────────── */
+  --p-ink: #0e1b2a;          /* primary text, sidebar field, button fills */
+  --p-ink-soft: #1d3046;     /* secondary navy surfaces                   */
+  --p-muted: #5a6b78;        /* secondary text — 5.51:1                   */
+  --p-canvas: #f3f7f8;       /* page background                           */
+  --p-surface: #ffffff;      /* card background                           */
+  --p-line: #dfe7e9;         /* decorative dividers and card borders      */
+  --p-line-strong: #789aa2;  /* borders that alone identify a control     */
+  --p-focus: #21836d;        /* focus ring — 3px, 3px offset              */
+
+  /* ── Clinical risk bands ───────────────────────────────────────────────────
+   * Three tokens per band, because one value cannot serve a bar, a label and a
+   * badge at once — which is exactly how risk-high ended up at 3.08:1 on white
+   * and 2.81:1 on its own badge. -fill is judged at 3:1 (graphical objects),
+   * -ink at 4.5:1 (text), on white and on the band's own -tint.
+   *
+   * COLOUR NEVER CARRIES A BAND ALONE. Adjacent fills sit 1.82:1, 1.00:1 and
+   * 1.67:1 apart — high and medium are identical in luminance and differ only
+   * in hue, so they merge for a colourblind or greyscale reader. Every band
+   * renders its word (Critical / High / Medium / Low) or an icon.
+   */
+  --p-risk-critical-fill: #c62828;
+  --p-risk-critical-ink: #c62828;
+  --p-risk-critical-tint: #ffebee;
+
+  --p-risk-high-fill: #ef6c00;
+  --p-risk-high-ink: #b65200;
+  --p-risk-high-tint: #fff3e0;
+
+  --p-risk-medium-fill: #c58700;
+  --p-risk-medium-ink: #92400e;
+  --p-risk-medium-tint: #fffde7;
+
+  --p-risk-low-fill: #2e7d32;
+  --p-risk-low-ink: #2e7d32;
+  --p-risk-low-tint: #e8f5e9;
+
+  /* ── Status, non-clinical ──────────────────────────────────────────────────
+   * Deliberately the same values as the risk inks: a saved-successfully tick
+   * and a low-risk badge should not be two different greens. --p-info is where
+   * GLP-1's old primary blue retires to, as a data colour.
+   */
+  --p-positive: #2e7d32;
+  --p-negative: #c62828;
+  --p-warning: #92400e;
+  --p-info: #1b4f8a;
+
+  /* ── Type ──────────────────────────────────────────────────────────────────
+   * Sora for headings, IBM Plex Sans for body. Mono is a system stack, kept
+   * for identifiers, code and credentials — a temporary password or a member
+   * ID in a proportional face is genuinely worse to read. Numeric METRICS get
+   * `tabular-nums` on the body face instead; that migration is per-screen and
+   * lands in phase 4.
+   */
+  --p-font-display: 'Sora', 'Segoe UI', system-ui, sans-serif;
+  --p-font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --p-font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* 11px is the floor; nothing smaller is legible on a clinical screen. */
+  --p-text-display: 28px;  --p-leading-display: 1.2;
+  --p-text-h1: 20px;       --p-leading-h1: 1.3;
+  --p-text-h2: 16px;       --p-leading-h2: 1.4;
+  --p-text-h3: 14px;       --p-leading-h3: 1.4;
+  --p-text-body: 14px;     --p-leading-body: 1.55;
+  --p-text-body-sm: 13px;  --p-leading-body-sm: 1.5;
+  --p-text-label: 12px;    --p-leading-label: 1.4;
+  --p-text-micro: 11px;    --p-leading-micro: 1.3;
+  --p-tracking-micro: 0.06em;
+
+  /* ── Geometry ──────────────────────────────────────────────────────────────
+   * These codify what both apps already do rather than changing it: both land
+   * on the same radius steps, and on a 12px-radius white card.
+   */
+  --p-radius-sm: 6px;
+  --p-radius: 8px;
+  --p-radius-lg: 12px;      /* the card */
+  --p-radius-pill: 9999px;
+
+  --p-shadow-card: 0 1px 3px rgba(14, 27, 42, .06), 0 4px 16px rgba(14, 27, 42, .04);
+  --p-shadow-raised: 0 4px 12px rgba(14, 27, 42, .10), 0 8px 28px rgba(14, 27, 42, .07);
+
+  --p-sidebar-w: 240px;
+  --p-sidebar-w-collapsed: 68px;
+  --p-topnav-h: 60px;
+}

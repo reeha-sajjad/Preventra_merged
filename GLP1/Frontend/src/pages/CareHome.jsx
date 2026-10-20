@@ -72,7 +72,7 @@ export default function CareHome() {
           <div className="w-11 h-11 rounded-xl mx-auto flex items-center justify-center" style={{ background: '#EBF4FF' }}>
             <Users size={20} style={{ color: 'var(--color-primary)' }} />
           </div>
-          <h2 className="mt-4 text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="mt-4 text-lg font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             No patients assigned to you yet
           </h2>
           <p className="mt-1 text-sm text-gray-500 max-w-md mx-auto">
@@ -95,7 +95,7 @@ export default function CareHome() {
       <div className="card p-5 md:p-6 animate-fade-up">
         <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <Stethoscope size={17} className="text-gray-400" />
               Your patients
             </h2>
@@ -167,7 +167,7 @@ export default function CareHome() {
               <Bell size={16} style={{ color: critical.n ? '#C62828' : '#2E7D32' }} />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+              <h2 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
                 Needs attention
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">

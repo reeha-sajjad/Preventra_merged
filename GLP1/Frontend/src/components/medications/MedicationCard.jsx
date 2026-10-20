@@ -48,7 +48,7 @@ export default function MedicationCard({ patientIdx }) {
             <Pill size={16} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Medication</h2>
+            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>Medication</h2>
             <p className="text-xs text-gray-400">The GLP-1 drug this patient is on, and any changes.</p>
           </div>
         </div>

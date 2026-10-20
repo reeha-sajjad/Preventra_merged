@@ -29,7 +29,7 @@ export default function LoadingScreen({ progress = 0, status = 'Loading…' }) {
         <div className="text-center">
           <h1
             className="text-white text-2xl font-semibold tracking-tight"
-            style={{ fontFamily: 'DM Serif Display, serif' }}
+            style={{ fontFamily: 'var(--p-font-display)' }}
           >
             GLP-1 Analytics
           </h1>

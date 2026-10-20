@@ -1,15 +1,77 @@
 @import "tailwindcss";
 
-@theme {
-  --color-risk-high: #C0392B;
-  --color-risk-medium: #F0A500;
-  --color-risk-low: #1E7D44;
-  --color-ns-navy: #0F2A4A;
-  --color-trend-improving: #2563EB;
+/* The shared design tokens — a byte-identical twin of the file in GLP-1 and the
+   Portal. The two services deploy separately and cannot import each other, so
+   it is duplicated on purpose. See DESIGN.md. */
+@import "./styles/preventra-tokens.css";
+
+/* `inline` matters: it makes Tailwind emit the referenced custom property into
+   each utility (`color: var(--p-risk-high-ink)`) instead of re-exporting a new
+   variable, which is what lets a v4 theme point at the shared tokens at all.
+   GLP-1 reaches the same place through `var()` values in tailwind.config.js. */
+@theme inline {
+  --font-sans: var(--p-font-body);
+  --font-display: var(--p-font-display);
+  --font-mono: var(--p-font-mono);
+
+  /* Risk bands map to the `-ink` tokens because that is how they are used here:
+     text (41 + 22 + 17 uses) and badge fills carrying white labels (19 + 10 +
+     10). White on the old #C0392B/#F0A500 did not clear 4.5:1; the inks do.
+     `critical` is new — Readmissions had three bands, the canon has four. */
+  --color-risk-critical: var(--p-risk-critical-ink);
+  --color-risk-high: var(--p-risk-high-ink);
+  --color-risk-medium: var(--p-risk-medium-ink);
+  --color-risk-low: var(--p-risk-low-ink);
+
+  /* The saturated hues, for bars, dots and chart series — graphical objects at
+     the 3:1 gate rather than text at 4.5:1. */
+  --color-risk-critical-fill: var(--p-risk-critical-fill);
+  --color-risk-high-fill: var(--p-risk-high-fill);
+  --color-risk-medium-fill: var(--p-risk-medium-fill);
+  --color-risk-low-fill: var(--p-risk-low-fill);
+
+  --color-risk-critical-tint: var(--p-risk-critical-tint);
+  --color-risk-high-tint: var(--p-risk-high-tint);
+  --color-risk-medium-tint: var(--p-risk-medium-tint);
+  --color-risk-low-tint: var(--p-risk-low-tint);
+
+  /* #0F2A4A folds into the canonical navy — a 2-point shift across 137 text,
+     54 background and 27 border uses. The name stays so no call site changes. */
+  --color-ns-navy: var(--p-ink);
+  --color-ns-navy-soft: var(--p-ink-soft);
+
+  --color-brand: var(--p-brand);
+  --color-brand-deep: var(--p-brand-deep);
+  --color-brand-ink: var(--p-brand-ink);
+  --color-brand-wash: var(--p-brand-wash);
+
+  --color-trend-improving: var(--p-info);
+  --color-positive: var(--p-positive);
+  --color-negative: var(--p-negative);
+  --color-warning: var(--p-warning);
+  --color-canvas: var(--p-canvas);
+  --color-surface: var(--p-surface);
+  --color-line: var(--p-line);
+  --color-line-strong: var(--p-line-strong);
 }
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 m-0 p-0 font-sans;
+    @apply m-0 p-0 font-sans text-gray-900;
+    background: var(--p-canvas);
+    font-size: var(--p-text-body);
+    line-height: var(--p-leading-body);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--p-font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Visible focus on every interactive surface — neither app had one. */
+  :focus-visible {
+    outline: 3px solid var(--p-focus);
+    outline-offset: 3px;
+    border-radius: var(--p-radius-sm);
   }
 }

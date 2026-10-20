@@ -73,7 +73,7 @@ export default function FollowUps() {
       <div className="card p-5 md:p-6 animate-fade-up">
         <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <CalendarClock size={17} className="text-gray-400" /> Follow-up requests
             </h2>
             <p className="text-xs text-gray-400 mt-0.5 max-w-xl">

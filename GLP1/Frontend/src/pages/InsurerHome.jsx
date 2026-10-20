@@ -31,7 +31,7 @@ export default function InsurerHome() {
       <div className="card p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
-            <h1 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h1 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
               {data.insurer.name}
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
@@ -63,7 +63,7 @@ export default function InsurerHome() {
       <div className="grid gap-5 lg:grid-cols-5 items-start">
         <section className="card overflow-hidden lg:col-span-3" style={{ padding: 0 }}>
           <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Critical-risk members</h2>
+            <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>Critical-risk members</h2>
             <p className="text-xs text-gray-400 mt-0.5">Most likely to stop first. Their clinical details need a reason to open.</p>
           </div>
           {data.high_risk_members.length === 0 ? (
@@ -94,7 +94,7 @@ export default function InsurerHome() {
         <div className="space-y-5 lg:col-span-2">
         <section className="card overflow-hidden" style={{ padding: 0 }}>
           <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <Building2 size={15} className="text-gray-400" /> By hospital
             </h2>
           </div>
@@ -117,7 +117,7 @@ export default function InsurerHome() {
 
         <section className="card overflow-hidden" style={{ padding: 0 }}>
           <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <Pill size={15} className="text-gray-400" /> By drug
             </h2>
           </div>
@@ -141,7 +141,7 @@ export default function InsurerHome() {
       <section className="card overflow-hidden" style={{ padding: 0 }}>
         <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <PieChart size={15} className="text-gray-400" /> Where the spend at risk is
             </h2>
             <p className="text-xs text-gray-400 mt-0.5">Your members by behaviour segment: how many take it as prescribed, and the drug spend on those likely to stop.</p>

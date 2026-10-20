@@ -27,7 +27,7 @@ export default function PharmacyPatientCard({ summary }) {
   return (
     <div className="card p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+        <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
           <Pill size={16} className="text-gray-400" /> Dispensing
         </h2>
         <button type="button" onClick={() => setReporting(true)} disabled={!followup}

@@ -439,7 +439,7 @@ export default function PatientRiskPanel() {
       {/* ── Top bar: title + search + settings ──────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-          <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h1 className="text-xl font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             {isInsurer ? 'All members' : 'Patients'}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">

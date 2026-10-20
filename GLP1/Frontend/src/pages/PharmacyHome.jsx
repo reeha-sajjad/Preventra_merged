@@ -60,7 +60,7 @@ export default function PharmacyHome() {
       <div className="card p-5 md:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div>
-            <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'DM Serif Display, serif' }}>
+            <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2" style={{ fontFamily: 'var(--p-font-display)' }}>
               <Pill size={17} className="text-gray-400" /> {data.pharmacy?.name || 'Your pharmacy'}
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
@@ -90,7 +90,7 @@ export default function PharmacyHome() {
 
       <div className="card overflow-hidden" style={{ padding: 0 }}>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>
             {view === 'critical' ? 'Critical risk' : view === 'low_refill' ? 'Low refill reliability' : 'All patients'}
             <span className="ml-2 text-xs font-normal text-gray-400">{shown.length.toLocaleString()}</span>
           </h2>
@@ -163,7 +163,7 @@ export default function PharmacyHome() {
 
       <div className="card overflow-hidden" style={{ padding: 0 }}>
         <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>Your reports</h2>
+          <h2 className="text-base font-semibold text-gray-800" style={{ fontFamily: 'var(--p-font-display)' }}>Your reports</h2>
           <p className="text-xs text-gray-400 mt-0.5">Open ones, and those finished in the last 30 days.</p>
         </div>
         {data.reports.length === 0 ? (

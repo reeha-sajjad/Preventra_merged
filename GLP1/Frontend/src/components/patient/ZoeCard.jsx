@@ -85,7 +85,7 @@ export default function ZoeCard({ patientIdx = null, patientName = null }) {
     <section className="card p-6" aria-labelledby="zoe-title">
       <div className="flex items-start gap-3">
         <div aria-hidden="true" className="w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center text-white text-lg"
-             style={{ background: 'linear-gradient(140deg, #2E6DB4, #1B4F8A)', fontFamily: 'DM Serif Display, serif' }}>Z</div>
+             style={{ background: 'linear-gradient(140deg, #2E6DB4, #1B4F8A)', fontFamily: 'var(--p-font-display)' }}>Z</div>
         <div className="min-w-0 flex-1">
           <h2 id="zoe-title" className="text-base font-semibold text-gray-800">Zoe</h2>
           <p className="text-xs text-gray-500">
