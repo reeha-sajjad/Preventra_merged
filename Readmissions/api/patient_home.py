@@ -148,4 +148,9 @@ def home(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None
                      "can_ask": bool(team.get("hospital_id"))},
         "safety": SAFETY,
         "viewer": user["role"], "caring_for": caring_for,
+        # A caretaker helps manage the recovery, so they see the care team's
+        # score too; the patient reads it in words only (status).
+        **({"risk": {"score": round(float(row.get("current_score", row.get("risk_score", 0)) or 0), 1),
+                     "band": str(row.get("current_band") or row.get("risk_band") or "").title() or None}}
+           if user["role"] == "caretaker" else {}),
     }

@@ -38,6 +38,7 @@ from api import caretakers
 from api import medicines_given
 from api import member_ids
 from api import insurer_alerts
+from api import caretaker_home
 from api import insurer as insurer_home_page
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
@@ -2663,9 +2664,17 @@ def followups_bell(request: Request):
     """Follow-up news for the bell: pharmacy reports on requests a case manager
     holds, or a pharmacy's reports that are done. An insurer: hospitals' billing
     flags and members who turned high risk (api/insurer_alerts.py)."""
-    if request.state.user["role"] == "insurer":
-        return {"items": insurer_alerts.bell(db, request.state.user, _scope(request))}
-    return {"items": followups.bell(db, request.state.user)}
+    user = request.state.user
+    if user["role"] == "insurer":
+        return {"items": insurer_alerts.bell(db, user, _scope(request))}
+    if user["role"] == "caretaker":
+        # Refill problems, medicines due and appointments booked (api/caretaker_home.py).
+        return {"items": caretaker_home.bell(db, user, _scope(request))}
+    items = followups.bell(db, user)
+    if user["role"] == "case_manager":
+        # Patients whose caretaker has stopped logging medicines.
+        items = items + caretaker_home.dose_missed_items(db, _scope(request))
+    return {"items": items}
 
 
 @app.post("/api/followups/reports-seen")
@@ -2822,6 +2831,18 @@ def my_home(request: Request, patient: Optional[str] = None):
     """The caller's own record in plain words - or, for a caretaker, that of a
     patient who linked them (`patient` picks which)."""
     return patient_home.home(db, request.state.user, _scope(request), patient, request.state.session)
+
+
+@app.get("/api/my-people")
+def my_people(request: Request):
+    """A caretaker's patients: risk, medicines logged and what needs them."""
+    return caretaker_home.people(db, request.state.user, _scope(request))
+
+
+@app.post("/api/my-people/seen")
+def my_people_seen(request: Request):
+    """'Mark all as read' on a caretaker's bell."""
+    return caretaker_home.mark_seen(db, request.state.user)
 
 
 @app.post("/api/my-home/ask", status_code=201)

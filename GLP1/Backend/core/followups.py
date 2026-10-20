@@ -620,6 +620,8 @@ async def notifies(user: dict) -> bool:
         return bool(user.get("pharmacy_id"))
     if user["role"] == "insurer":
         return bool(user.get("insurer_id"))                 # core/insurer_alerts.py
+    if user["role"] == "caretaker":
+        return True                                         # core/caretaker_home.py
     if user["role"] == "case_manager":
         return bool(user.get("hospital_id"))
     if user["role"] == "hospital_admin":

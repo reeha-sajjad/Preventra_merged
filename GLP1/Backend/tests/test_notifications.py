@@ -147,5 +147,6 @@ def test_counts_and_order(world):
     assert [i["patient_idx"] for i in body["items"]] == [1, 3, 0]       # risen, new, unreviewed
     assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0, "followup_handed": 0,
                                                  "followup_report": 0, "report_done": 0, "insurer_flag": 0,
-                                                 "turned_critical": 0}
+                                                 "turned_critical": 0, "refill_problem": 0, "dose_due": 0,
+                                                 "booked": 0, "dose_missed": 0}
     assert not {"name", "email", "BMXBMI"} & set().union(*body["items"])

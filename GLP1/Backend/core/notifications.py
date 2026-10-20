@@ -45,7 +45,8 @@ RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
 KIND_ORDER = {"followup_handed": 0, "followup_report": 1, "followup_new": 2, "risk_up": 3,
               "followup_done": 4, "report_done": 5, "new": 6, "unreviewed": 7,
-              "insurer_flag": 8, "turned_critical": 9}
+              "insurer_flag": 8, "turned_critical": 9,
+              "refill_problem": 10, "dose_due": 11, "booked": 12, "dose_missed": 13}
 MAX_ITEMS = 50
 
 
@@ -120,8 +121,17 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
         # Hospitals' billing flags and members turned critical (core/insurer_alerts.py).
         from core import insurer_alerts                   # avoid an import cycle
         return await insurer_alerts.bell_items(user, scope)
+    if user["role"] == "caretaker":
+        # Refill problems, doses due and appointments booked (core/caretaker_home.py).
+        from core import caretaker_home                   # avoid an import cycle
+        return await caretaker_home.bell_items(user, scope)
     if user["role"] not in CARE_TEAM_ROLES:
-        return await _followup_requests(user) if await followups.notifies(user) else []
+        items = await _followup_requests(user) if await followups.notifies(user) else []
+        if user["role"] == "case_manager" and items is not None:
+            # Patients whose caretaker has stopped logging doses.
+            from core import caretaker_home               # avoid an import cycle
+            items = items + await caretaker_home.dose_missed_items(scope)
+        return items
     db = get_db()
     mine = scope_query(scope)
     patients = await db.patients.find(mine, {"_id": 0, "patient_idx": 1, "dropout_prob": 1,

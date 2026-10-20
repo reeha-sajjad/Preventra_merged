@@ -223,6 +223,11 @@ async def home(user: dict, scope: Optional[list], patient_idx: Optional[int] = N
         "followup": {"active": follow["active"], "recent": follow["recent"], "reasons": follow["reasons"],
                      "can_ask": bool(team.get("hospital_id"))},
         "viewer": user["role"], "caring_for": caring_for,
+        # A caretaker helps manage the treatment, so they see the care team's
+        # estimate too; the patient reads it in words only (status).
+        **({"risk": {"prob": round(prob, 4), "band": ("Critical" if prob >= 0.75 else "High" if prob >= 0.5
+                                                      else "Medium" if prob >= 0.25 else "Low")}}
+           if user["role"] == "caretaker" else {}),
         "safety": SAFETY,
         "data_as_of": "May 2026",
     }

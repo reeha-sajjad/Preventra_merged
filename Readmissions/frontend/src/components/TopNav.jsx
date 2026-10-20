@@ -14,6 +14,7 @@ export default function TopNav({ onMenuClick = () => {} }) {
       : readClaims()?.role === 'caretaker' ? 'People I care for'
       : readClaims()?.role === 'insurer' ? 'Members'
       : can(PHARMACY_ROLES) ? 'Pharmacy' : can(MY_PATIENTS_ROLES) ? 'My patients' : 'Overview';
+    if (path.startsWith('/person/')) return 'Their summary';
     if (path === '/patients' && can(INSURER_ROLES)) return 'All members';
     if (path === '/patients') return 'Patients';
     if (path.startsWith('/patients/')) return can(INSURER_ROLES) ? 'Member Detail' : 'Patient Detail';

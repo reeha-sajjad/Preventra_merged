@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill, Receipt, Siren } from 'lucide-react';
+import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill, Receipt, Siren, PackageX, Syringe } from 'lucide-react';
 import { api } from '../../data/api';
 import { RiskBadge } from '../shared';
 
@@ -29,6 +29,16 @@ const KINDS = {
   turned_critical: { icon: Siren, color: '#C62828', label: () => 'turned critical', text: (i) =>
     i.previous_prob == null ? 'New member, already at critical risk'
       : `Turned critical · was ${Math.round(i.previous_prob * 100)}%` },
+  // A caretaker's bell (Backend/core/caretaker_home.py).
+  refill_problem: { icon: PackageX, color: '#C62828', label: (n) => `refill problem${n === 1 ? '' : 's'}`,
+    text: (i) => `Pharmacy: ${i.refill_label}` },
+  dose_due: { icon: Syringe, color: '#B45309', label: (n) => `dose${n === 1 ? '' : 's'} due`,
+    text: (i) => (i.dose_state === 'overdue' ? 'Dose overdue - log it once given' : 'Dose due today') },
+  booked: { icon: CalendarCheck, color: '#2E7D32', label: () => 'booked',
+    text: () => 'The case manager booked an appointment' },
+  // A case manager's: a caretaker has stopped logging doses.
+  dose_missed: { icon: Syringe, color: '#B45309', label: (n) => `no dose${n === 1 ? '' : 's'} logged`,
+    text: (i) => `No dose logged in ${i.days_since_dose} days (last by ${i.last_dose_by})` },
 };
 
 /**
@@ -83,11 +93,13 @@ export default function NotificationBell() {
 
   const isInsurerBell = items.some((i) => i.kinds.includes('insurer_flag') || i.kinds.includes('turned_critical'));
   const flagsOnly = items.length > 0 && items.every((i) => i.kinds.includes('insurer_flag'));
+  const isCarerBell = items.some((i) => i.patient_name !== undefined);
 
   const markAll = async () => {
     setBusy(true);
     try {
-      if (isInsurerBell) await api.markInsurerAlertsSeen();
+      if (isCarerBell) await api.markCaretakerSeen();
+      else if (isInsurerBell) await api.markInsurerAlertsSeen();
       else await api.markNotificationsSeen({ all: true });
       load();
     } finally {
@@ -106,6 +118,7 @@ export default function NotificationBell() {
                  counts: { ...d.counts, followup_handed: 0, followup_report: 0 } };
       });
     }
+    if (item.patient_name !== undefined) { navigate(`/person/${item.patient_idx}`); return; }
     navigate(clearsOnFollowUps(item) ? '/follow-ups?mine=1'
       : item.kinds.includes('followup_new') ? '/follow-ups'
       : item.kinds.includes('report_done') || item.kinds.includes('insurer_flag') ? '/'
@@ -137,7 +150,9 @@ export default function NotificationBell() {
             <div>
               <div className="font-semibold text-gray-800 text-sm">Notifications</div>
               <div className="text-xs text-gray-400 mt-0.5">
-                {!total ? 'Your patients' : isInsurerBell
+                {!total ? 'Your patients' : isCarerBell
+                  ? `${total.toLocaleString()} ${total === 1 ? 'person needs' : 'people need'} you`
+                  : isInsurerBell
                   ? `${total.toLocaleString()} for your members`
                   : reportsOnly
                   ? `${total.toLocaleString()} of your report${total === 1 ? '' : 's'} done`
@@ -190,7 +205,7 @@ export default function NotificationBell() {
                       : <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: '#1B4F8A14', color: '#1B4F8A' }}>Billing</span>}</div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-gray-800 font-mono">
-                        {isInsurerBell && i.member_id ? `Member ${i.member_id}` : `Patient #${i.patient_idx}`}
+                        {i.patient_name ?? (isInsurerBell && i.member_id ? `Member ${i.member_id}` : `Patient #${i.patient_idx}`)}
                       </div>
                       {i.kinds.map((kind) => {
                         const k = KINDS[kind];

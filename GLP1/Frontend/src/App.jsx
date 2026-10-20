@@ -20,6 +20,7 @@ import BudgetSimulator from './pages/BudgetSimulator';
 import CostOfInaction from './pages/CostOfInaction';
 import Settings from './pages/Settings';
 import PatientHome from './pages/PatientHome';
+import MyPeople from './pages/MyPeople';
 import InsurerHome from './pages/InsurerHome';
 import Staff from './pages/Staff';
 import FollowUps from './pages/FollowUps';
@@ -50,8 +51,20 @@ function AuthenticatedApp() {
 function RoleRoutes() {
   const { isCostView, isPatient, isCaretaker, hasOverview, hasStaff, isCareTeam, handlesFollowUps, isCaseManager, isPharmacy, isInsurer } = useRole();
 
-  // Patients, and caretakers looking after them, get the plain-words home page.
-  if (isPatient || isCaretaker) {
+  // A caretaker: everyone they look after, then one person's summary.
+  if (isCaretaker) {
+    return (
+      <Routes>
+        <Route path="/"             element={<MyPeople />} />
+        <Route path="/person/:idx"  element={<PatientHome />} />
+        <Route path="/settings"     element={<Settings />} />
+        <Route path="*"             element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
+
+  // Patients get the plain-words home page.
+  if (isPatient) {
     return (
       <Routes>
         {/* A patient's home is their own record in plain words. The

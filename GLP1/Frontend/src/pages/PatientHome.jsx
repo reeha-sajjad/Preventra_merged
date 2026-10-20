@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pill, Stethoscope, HeartPulse, UserRound, Store, Building2, CheckCircle2, Eye, PhoneCall, ShieldAlert, Clock, CreditCard } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, Gauge, Pill, Stethoscope, HeartPulse, UserRound, Store, Building2, CheckCircle2, Eye, PhoneCall, ShieldAlert, Clock, CreditCard } from 'lucide-react';
 import { api } from '../data/api';
 import PageState from '../components/shared/PageState';
 import AskDialog from '../components/patient/AskDialog';
@@ -15,6 +16,8 @@ const TONE = {
   watch:    { fg: '#94520A', bg: '#FDF4E7', ring: '#F3D9AE' },
   support:  { fg: '#1B4F8A', bg: '#EBF3FC', ring: '#C4DAF3' },
 };
+
+const RISK_COLOR = { Critical: '#C62828', High: '#B45309', Medium: '#94520A', Low: '#1E6B34' };
 
 function greeting() {
   const h = new Date().getHours();
@@ -36,8 +39,9 @@ export default function PatientHome() {
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(null);
-  // A caretaker looking after several people picks whose summary to see.
-  const [who, setWho] = useState(null);
+  // A caretaker opens one of their people from My people (/person/:idx).
+  const { idx } = useParams();
+  const who = idx != null ? Number(idx) : null;
 
   const load = useCallback(() => {
     api.getMyHome(who).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
@@ -88,13 +92,22 @@ export default function PatientHome() {
             {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
             summary as their caretaker. It’s written to them.
           </p>
-          {data.caring_for.people.length > 1 && (
-            <label className="text-sm text-gray-600 flex items-center gap-2">Show
-              <select value={data.patient_idx} onChange={(e) => { setSent(null); setWho(Number(e.target.value)); }}
-                className="text-sm rounded-lg border border-gray-200 px-2.5 py-1.5">
-                {data.caring_for.people.map((p) => <option key={p.patient_idx} value={p.patient_idx}>{p.name}</option>)}
-              </select>
-            </label>
+          <Link to="/" className="inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
+            <ArrowLeft size={14} /> All my people
+          </Link>
+          {/* The care team's estimate, for the carer who helps manage the treatment. */}
+          {data.risk && (
+            <div className="w-full flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
+              <Gauge size={16} className="text-gray-400" />
+              <span className="text-sm text-gray-600">Chance of stopping treatment, as the care team sees it:</span>
+              <span className="text-lg font-semibold" style={{ color: RISK_COLOR[data.risk.band] }}>
+                {Math.round(data.risk.prob * 100)}%
+              </span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ color: RISK_COLOR[data.risk.band], background: `${RISK_COLOR[data.risk.band]}14` }}>
+                {data.risk.band}
+              </span>
+            </div>
           )}
         </div>
       )}

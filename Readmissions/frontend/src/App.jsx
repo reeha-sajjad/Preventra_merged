@@ -14,6 +14,7 @@ import About from './pages/About';
 import Settings from './pages/Settings';
 import TestComponents from './pages/TestComponents';
 import PatientHome from './pages/PatientHome';
+import MyPeople from './pages/MyPeople';
 import InsurerHome from './pages/InsurerHome';
 import ModelStudio from './pages/ModelStudio';
 import MyPatients from './pages/MyPatients';
@@ -48,8 +49,24 @@ function App() {
 }
 
 function AppRoutes() {
-  // Patients, and caretakers looking after them, get the plain-words home page.
-  if (['patient', 'caretaker'].includes(readClaims()?.role)) {
+  // A caretaker: everyone they look after, then one person's summary.
+  if (readClaims()?.role === 'caretaker') {
+    return (
+      <Router>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<MyPeople />} />
+            <Route path="/person/:pid" element={<PatientHome />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </Router>
+    );
+  }
+
+  // Patients get the plain-words home page.
+  if (readClaims()?.role === 'patient') {
     return (
       <Router>
         <Routes>

@@ -189,6 +189,9 @@ export const api = {
   getInsurerFlags:      (status = 'open') => get(`/api/insurer/flags?status=${status}`),
   /** { status: received | approved | needs_info, note? } */
   replyInsurerFlag:     (id, body) => post(`/api/insurer/flags/${id}/reply`, body),
+  // A caretaker's people and bell - Backend/core/caretaker_home.py
+  getMyPeople:          () => get('/api/my-people'),
+  markCaretakerSeen:    () => post('/api/my-people/seen', {}),
   markInsurerAlertsSeen: (patientIds) => post('/api/insurer/alerts/seen', { patient_ids: patientIds ?? null }),
   // Caretakers a patient links - Backend/core/caretakers.py
   getCaretakers:        (patient) => get(`/api/caretakers${patient != null ? `?patient=${patient}` : ''}`),

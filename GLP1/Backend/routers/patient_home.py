@@ -153,3 +153,19 @@ async def patient_doses(patient_idx: int, user: dict = Depends(actor), scope: Op
     clinical layer, so the same rule as the rest of it."""
     await require_detail(user, scope, patient_idx)
     return await doses.log(patient_idx, None, await zoe.frequency(user, patient_idx))
+
+
+# ------------------------------------- a caretaker's people (core/caretaker_home.py)
+from core import caretaker_home  # noqa: E402
+
+
+@router.get("/my-people")
+async def my_people(user: dict = Depends(actor), scope: Optional[list] = Depends(scope_of)):
+    """A caretaker's patients: risk, medicine, doses and what needs them."""
+    return await caretaker_home.people(user, scope)
+
+
+@router.post("/my-people/seen")
+async def my_people_seen(user: dict = Depends(actor)):
+    """'Mark all as read' on a caretaker's bell."""
+    return await caretaker_home.mark_seen(user)

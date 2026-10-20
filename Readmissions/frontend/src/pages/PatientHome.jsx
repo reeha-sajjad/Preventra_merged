@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { ArrowLeft, Gauge, Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard } from 'lucide-react';
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
+
+const BAND_TEXT = { High: 'text-red-700', Medium: 'text-amber-700', Low: 'text-green-700' };
+const BAND_PILL = { High: 'bg-red-50 text-red-700', Medium: 'bg-amber-50 text-amber-800', Low: 'bg-green-50 text-green-800' };
 
 // How each level of the status reads (api/patient_home.STATUS). Calm colours
 // throughout: "extra support" is blue, not red - it means the team is helping.
@@ -34,8 +38,8 @@ export default function PatientHome() {
   const [error, setError] = useState(null);
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(null);
-  // A caretaker looking after several people picks whose summary to see.
-  const [who, setWho] = useState(null);
+  // A caretaker opens one of their people from My people (/person/:pid).
+  const { pid: who = null } = useParams();
 
   const load = useCallback(() => {
     getMyHome(who).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
@@ -83,13 +87,19 @@ export default function PatientHome() {
             {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
             summary as their caretaker. It’s written to them.
           </p>
-          {data.caring_for.people.length > 1 && (
-            <label className="flex items-center gap-2 text-sm text-gray-600">Show
-              <select value={data.patient_id} onChange={(e) => { setSent(null); setWho(e.target.value); }}
-                className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm">
-                {data.caring_for.people.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.name}</option>)}
-              </select>
-            </label>
+          <Link to="/" className="inline-flex items-center gap-1 text-sm font-semibold text-ns-navy">
+            <ArrowLeft size={14} /> All my people
+          </Link>
+          {/* The care team's score, for the carer who helps manage the recovery. */}
+          {data.risk && (
+            <div className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-gray-100 px-4 py-3">
+              <Gauge size={16} className="text-gray-400" />
+              <span className="text-sm text-gray-600">Chance of going back into hospital, as the care team sees it:</span>
+              <span className={`text-lg font-semibold ${BAND_TEXT[data.risk.band] || 'text-gray-800'}`}>{data.risk.score}%</span>
+              {data.risk.band && (
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${BAND_PILL[data.risk.band] || ''}`}>{data.risk.band}</span>
+              )}
+            </div>
           )}
         </div>
       )}

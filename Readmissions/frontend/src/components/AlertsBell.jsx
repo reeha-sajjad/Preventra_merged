@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen, getFollowUpBell, markInsurerAlertsSeen, FOLLOWUPS_CHANGED } from '../api';
-import { Bell, Check, CheckCheck, Loader2, Pill, CalendarCheck, Receipt, Siren } from 'lucide-react';
+import { getAlerts, acknowledgeAlert, getRisingRisk, markRiskSeen, getFollowUpBell, markInsurerAlertsSeen, markCaretakerSeen, FOLLOWUPS_CHANGED } from '../api';
+import { readClaims } from '../api/auth';
+import { Bell, Check, CheckCheck, Loader2, Pill, CalendarCheck, Receipt, Siren, PackageX } from 'lucide-react';
 import { can, WATCH_ROLES, FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, INSURER_ROLES } from '../roles';
 import { RisingRiskRow } from './shared/RisingRiskList';
 
@@ -23,7 +24,9 @@ export default function AlertsBell() {
   // risk (api/insurer_alerts.py).
   const [news, setNews] = useState([]);
   const isInsurer = can(INSURER_ROLES);
-  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES) || isInsurer;
+  // A caretaker: refill problems, medicines due, appointments booked (api/caretaker_home.py).
+  const isCarer = readClaims()?.role === 'caretaker';
+  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES) || isInsurer || isCarer;
   const [open, setOpen] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState(null);
   const containerRef = useRef(null);
@@ -43,6 +46,8 @@ export default function AlertsBell() {
   // opening the pharmacy page (both pages tell the backend).
   const openNews = (item) => {
     setOpen(false);
+    if (isCarer) { navigate(`/person/${encodeURIComponent(item.patient_id)}`); return; }
+    if (item.kind === 'dose_missed') { navigate(`/patients/${encodeURIComponent(item.patient_id)}`); return; }
     if (isInsurer) {
       // A flag leaves the bell when answered (on Members); a member who turned
       // high risk when opened.
@@ -60,6 +65,13 @@ export default function AlertsBell() {
   const markAllHigh = () => {
     markInsurerAlertsSeen().catch(() => {});
     setNews((n) => n.filter((i) => i.kind !== 'turned_high'));
+  };
+  // A caretaker's "mark all": refill reports and bookings go; a medicine still
+  // to log stays while it is true.
+  const carerReadable = isCarer && news.some((i) => i.kind !== 'dose_due');
+  const markAllCarer = () => {
+    markCaretakerSeen().catch(() => {});
+    setNews((n) => n.filter((i) => i.kind === 'dose_due'));
   };
 
   const openRising = (item) => {
@@ -135,8 +147,16 @@ export default function AlertsBell() {
               <>
                 <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-gray-800 text-sm">
-                    {isInsurer ? 'Your members' : news[0].kind === 'report_done' ? 'Your reports that are done' : 'Pharmacy reports on your follow-ups'}
+                    {isCarer ? 'The people you care for' : isInsurer ? 'Your members' : news[0].kind === 'report_done' ? 'Your reports that are done'
+                      : news.every((i) => i.kind === 'dose_missed') ? 'Medicines not being logged'
+                      : 'Follow-up news'}
                   </h3>
+                  {carerReadable && (
+                    <button type="button" onClick={markAllCarer}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-ns-navy whitespace-nowrap">
+                      <CheckCheck size={13} /> Mark all as read
+                    </button>
+                  )}
                   {turnedHigh.length > 0 && (
                     <button type="button" onClick={markAllHigh}
                       className="inline-flex items-center gap-1 text-xs font-semibold text-ns-navy whitespace-nowrap">
@@ -151,15 +171,21 @@ export default function AlertsBell() {
                       ? <CalendarCheck size={16} className="mt-0.5 text-green-700 shrink-0" />
                       : item.kind === 'insurer_flag' ? <Receipt size={16} className="mt-0.5 text-ns-navy shrink-0" />
                       : item.kind === 'turned_high' ? <Siren size={16} className="mt-0.5 text-risk-high shrink-0" />
+                      : item.kind === 'refill_problem' ? <PackageX size={16} className="mt-0.5 text-red-700 shrink-0" />
+                      : item.kind === 'booked' ? <CalendarCheck size={16} className="mt-0.5 text-green-700 shrink-0" />
                       : <Pill size={16} className="mt-0.5 text-amber-700 shrink-0" />}
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm font-semibold text-ns-navy">
-                        {isInsurer && item.member_id ? `Member ${item.member_id}` : item.patient_id}
+                        {item.patient_name ?? (isInsurer && item.member_id ? `Member ${item.member_id}` : item.patient_id)}
                       </span>
                       <span className="block text-sm text-gray-600 mt-0.5">
                         {item.kind === 'report_done'
                           ? `${item.problem_label ? `${item.problem_label} · ` : ''}done: ${item.outcome_label}`
                           : item.kind === 'insurer_flag' ? `${item.hospital}: ${item.kind_label} · from ${item.by}`
+                          : item.kind === 'refill_problem' ? `Pharmacy: ${item.label}`
+                          : item.kind === 'dose_due' ? "Today's medicines not logged yet"
+                          : item.kind === 'booked' ? 'The case manager booked an appointment'
+                          : item.kind === 'dose_missed' ? `No medicines logged in ${item.days} days (last by ${item.by})`
                           : item.kind === 'turned_high'
                           ? `Turned high risk (${Math.round(item.risk_score)}%)${item.previous_band ? ` · was ${item.previous_band}` : ' · new member'}`
                           : `${item.by}: ${item.problem_label}`}

@@ -157,6 +157,9 @@ const RealAPI = {
   // Pharmacies (api/pharmacy.py): their patients, and refill-problem reports.
   getPharmacyHome: () => apiFetch('/api/pharmacy/home'),
   // A patient's own home page (api/patient_home.py), and asking a case manager.
+  // A caretaker's people and bell (api/caretaker_home.py).
+  getMyPeople: () => apiFetch('/api/my-people'),
+  markCaretakerSeen: () => apiFetch('/api/my-people/seen', { method: 'POST' }),
   getMyHome: (patient) => apiFetch(`/api/my-home${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   askCaseManager: (body) => apiFetch('/api/my-home/ask', json(body)).then(followUpsChanged),
   // A caretaker's daily "medicines given" tick (api/medicines_given.py).
@@ -485,6 +488,8 @@ export const takeFollowUp        = realOnly(RealAPI.takeFollowUp);
 export const finishFollowUp      = realOnly(RealAPI.finishFollowUp);
 export const getPharmacyHome     = realOnly(RealAPI.getPharmacyHome);
 export const getMyHome           = realOnly(RealAPI.getMyHome);
+export const getMyPeople         = realOnly(RealAPI.getMyPeople);
+export const markCaretakerSeen   = realOnly(RealAPI.markCaretakerSeen);
 export const askCaseManager      = realOnly(RealAPI.askCaseManager);
 export const getCaretakers       = realOnly(RealAPI.getCaretakers);
 export const getInsurance        = realOnly(RealAPI.getInsurance);
