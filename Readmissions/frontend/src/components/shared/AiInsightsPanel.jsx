@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { getAiInsights } from '../../api';
 import { can, COST_ROLES } from '../../roles';
+import { aiOn, useAiStatus } from '../../hooks/useAiStatus';
 import BulletList from './BulletList';
 import { Sparkles, Loader2, AlertCircle, DollarSign, Lightbulb, ChevronRight,
          ShieldCheck, TrendingUp, AlertTriangle } from 'lucide-react';
@@ -38,7 +39,7 @@ function CostTable({ title, items, total }) {
 }
 
 /**
- * On-demand Gemini-estimated ROI + counterfactual explanation, appended to
+ * The ROI estimate (computed by the server) and an AI-written explanation, appended to
  * the end of a patient's risk verdict (prediction result, recalculation
  * result, or the patient detail page).
  */
@@ -50,6 +51,9 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
   // Roles that do not see costs get the counterfactual only; the server sends
   // nothing else (api/main.py get_ai_insights), this just labels the panel.
   const seesCosts = can(COST_ROLES);
+  // With AI off the panel is the cost figures alone, for the roles that see
+  // them, and nothing at all for the roles that do not.
+  const ai = aiOn(useAiStatus(), 'insights');
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -78,12 +82,14 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
     }
   };
 
+  if (!ai && !seesCosts) return null;
   return (
     <div className={`bg-white rounded-xl border border-gray-200 shadow-sm ${compact ? 'p-4' : 'p-6'}`}>
       <div className={`flex items-center justify-between ${compact ? 'mb-3' : 'mb-4 border-b pb-4'}`}>
         <h3 className={`font-semibold text-ns-navy flex items-center space-x-2 ${compact ? 'text-sm' : 'text-base'}`}>
           <Sparkles className="text-gray-400" size={compact ? 16 : 20} />
-          <span>{seesCosts ? <>AI Insights — ROI &amp; Counterfactual</> : 'AI Insights — What would lower the risk'}</span>
+          <span>{!ai ? 'Return on investment'
+            : seesCosts ? <>AI Insights — ROI &amp; Counterfactual</> : 'AI Insights — What would lower the risk'}</span>
         </h3>
         {!insights && (
           <button
@@ -93,16 +99,18 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
             className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold bg-ns-navy text-white rounded-lg hover:bg-blue-900 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            <span>{loading ? 'Estimating…' : 'Generate insights'}</span>
+            <span>{loading ? 'Estimating…' : ai ? 'Generate insights' : 'Calculate'}</span>
           </button>
         )}
       </div>
 
       {!insights && !loading && !error && (
         <p className="text-sm text-gray-500">
-          {seesCosts
-            ? 'Estimate the return on investment of a care-coordination intervention for this patient, and get a counterfactual explaining what would most lower their risk.'
-            : 'Get a counterfactual explaining which of this patient’s risk factors, if addressed, would most lower their risk.'}
+          {!ai
+            ? 'Estimate the return on investment of a care-coordination intervention for this patient.'
+            : seesCosts
+              ? 'Estimate the return on investment of a care-coordination intervention for this patient, and get a counterfactual explaining what would most lower their risk.'
+              : 'Get a counterfactual explaining which of this patient’s risk factors, if addressed, would most lower their risk.'}
         </p>
       )}
 
@@ -238,10 +246,12 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
             )}
 
             <BulletList items={insights.roi_rationale} className="text-sm text-gray-600 mt-3" />
+            {insights.ai_error && <p className="mt-3 text-xs text-gray-500">{insights.ai_error}</p>}
           </div>
           )}
 
-          {/* Counterfactual — always the final block */}
+          {/* Counterfactual — always the final block, when the model wrote one */}
+          {insights.counterfactual_explanation?.length > 0 && (
           <div className={insights.costs_hidden ? '' : 'border-t border-gray-100 pt-4'}>
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
               <Lightbulb size={14} />
@@ -251,6 +261,7 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
               <BulletList items={insights.counterfactual_explanation} />
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

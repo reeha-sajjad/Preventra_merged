@@ -5,12 +5,12 @@ hospital's own CSV.
 THE FLOW (one job per upload)
 -----------------------------
     profile    column statistics, computed here                    (no LLM)
-    analyze    Gemini proposes label / id / time / feature roles    (sees the profile only)
+    analyze    the AI model proposes label / id / time / feature roles  (sees the profile only)
     confirm    a person reviews and edits that plan                 (waits for the user)
-    generate   Gemini writes preprocess / transform / train         (checked by studio_guard)
+    generate   the AI model writes preprocess / transform / train   (checked by studio_guard)
     train      the code runs in the sandbox runner                  (separate process)
     evaluate   held-out test metrics, comparisons, subgroups        (our code, not the model's)
-    recommend  fixed rules decide deploy / caution / do not deploy  (Gemini only explains)
+    recommend  fixed rules decide deploy / caution / do not deploy  (the AI model only explains)
 
 WHAT IS TRUSTED
 ---------------
@@ -80,6 +80,14 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RESULTS = os.path.join(_BASE, "data", "mimic", "model", "results")
 
 LABEL_FIELD, GROUP_FIELD, ORDER_FIELD = "__label__", "__group__", "__order__"
+
+def _ai_name() -> str:
+    """The model serving Model Studio, as the log and the page name it."""
+    from api import llm
+    chosen = llm.status()["studio"]
+    return f"{llm.LABELS.get(chosen['provider'], chosen['provider'])} ({chosen['model']})" \
+        if chosen.get("provider") else "The AI model"
+
 
 # ------------------------------------------------------------------ built-ins
 BUILTIN_MIMIC = "builtin-mimic-phase1"
@@ -296,7 +304,7 @@ def _is_date(s: pd.Series) -> bool:
 
 def profile_dataframe(df: pd.DataFrame) -> dict:
     """
-    What Gemini is allowed to see. Column statistics only: the values of a
+    What the AI model is allowed to see. Column statistics only: the values of a
     column are shown only when it has few distinct values, short ones, and a
     name that does not suggest personal details - never identifiers, free text
     or anything resembling a name, address or date of birth.
@@ -329,8 +337,14 @@ def profile_dataframe(df: pd.DataFrame) -> dict:
             entry["mean_length"] = round(mean_len, 1)
         # An id-named column is an identifier even when it repeats - weekly data
         # has one row per patient per week, so patient_id is only 25% unique.
-        if _ID_HINT.search(col) and n_unique >= min(20, max(len(non_null), 1)):
-            entry["kind"] = "identifier-like"
+        # One with a short list of values over many rows is a code instead
+        # (admission_type_id, discharge_disposition_id): a category.
+        if _ID_HINT.search(col):
+            if n_unique >= min(20, max(len(non_null), 1)) and n_unique >= 0.01 * len(non_null):
+                entry["kind"] = "identifier-like"
+            elif n_unique <= 50 and entry["kind"] in ("numeric", "identifier-like"):
+                entry["kind"] = "categorical"
+                entry.pop("stats", None)
         if (n_unique <= 20 and entry["kind"] in ("binary", "categorical")
                 and not _PII_HINT.search(col)):
             top = non_null.astype(str).value_counts().head(20)
@@ -344,10 +358,18 @@ def profile_dataframe(df: pd.DataFrame) -> dict:
 _LABEL_HINT = re.compile(r"readmi|label|target|outcome|^y$|event", re.I)
 _TIME_HINT = re.compile(r"disch|date|time|admit|week_date", re.I)
 _SENSITIVE_HINT = re.compile(r"gender|sex|^age|anchor_age|race|ethnic|insur|payer", re.I)
+# Names of things known only after the moment of prediction - the outcome
+# itself in another form, or what happened next. A history of earlier
+# admissions (prior_readmissions, readmit_history) is known, and is not one.
+_AFTER_HINT = re.compile(r"readmi|days?_?to_|time_?to_|next_|future|after_?disch|post_?disch|"
+                         r"died|death|deceased|expired|mortality", re.I)
+_HISTORY_HINT = re.compile(r"prior|prev|history|hist|past|before|n_adm", re.I)
+_DISPOSITION_HINT = re.compile(r"dispos|discharge_?to|disch.*(status|dest)", re.I)
+_TERMINAL_VALUE = re.compile(r"expired|died|death|dead|deceased|hospice|morgue", re.I)
 
 
 def heuristic_plan(profile: dict, target: str) -> dict:
-    """A conservative plan from column names and types, used when Gemini is
+    """A conservative plan from column names and types, used when the AI model is
     unavailable or its answer does not validate."""
     cols = profile["columns"]
     label = None
@@ -357,19 +379,39 @@ def heuristic_plan(profile: dict, target: str) -> dict:
             if "readmi" in col.lower():
                 break
     ids = [c for c, p in cols.items() if p["kind"] == "identifier-like"]
-    id_col = next((c for c in ids if re.search(r"patient|subject|mrn|member|person", c, re.I)),
-                  ids[0] if ids else None)
+    # The split keeps a patient's rows together only through this column, so a
+    # patient-named column whose values repeat (several stays per person) wins
+    # over one that is different on every row, such as an encounter id.
+    rows = profile["n_rows"]
+
+    def repeats(c):
+        return cols[c]["n_unique"] < rows * (1 - cols[c]["missing_pct"] / 100) * 0.999
+
+    patients = [c for c, p in cols.items() if _PATIENT_NAME.search(c) and c != label
+                and p["kind"] in ("identifier-like", "numeric", "categorical") and p["n_unique"] >= 20]
+    id_col = next((c for c in patients if repeats(c)),
+                  next((c for c in ids if _PATIENT_NAME.search(c)), ids[0] if ids else None))
     dates = [c for c, p in cols.items() if p["kind"] == "date"]
     time_col = next((c for c in dates if re.search(r"disch", c, re.I)),
                     next((c for c in dates if _TIME_HINT.search(c)), None))
-    drop, numeric, categorical = [], [], []
+    drop, numeric, categorical, leaks = [], [], [], []
     for col, p in cols.items():
         if col in (label, id_col, time_col):
             continue
+        if _AFTER_HINT.search(col) and not _HISTORY_HINT.search(col):
+            leaks.append({"column": col, "reason": "Named like the outcome or something that happens after "
+                                                   "discharge: known only after the prediction is made."})
+            drop.append({"column": col, "reason": "possible leakage"})
+            continue
+        if _DISPOSITION_HINT.search(col) and any(_TERMINAL_VALUE.search(v) for v in (p.get("values") or {})):
+            leaks.append({"column": col, "reason": "Some values mean the patient died or went to hospice, "
+                                                   "and cannot be readmitted: exclude those discharges, or "
+                                                   "confirm they belong in the training data."})
         if (p["kind"] in ("identifier-like", "text", "date") or p["n_unique"] <= 1
                 or (p["kind"] == "categorical" and p["n_unique"] > 200)):
-            reason = {"identifier-like": "identifier", "text": "free text", "date": "date",
-                      "categorical": "too many distinct values"}.get(p["kind"], "constant")
+            reason = "constant" if p["n_unique"] <= 1 else {
+                "identifier-like": "identifier", "text": "free text", "date": "date",
+                "categorical": "too many distinct values"}.get(p["kind"], "constant")
             drop.append({"column": col, "reason": reason})
         elif p["kind"] in ("numeric", "binary"):
             numeric.append(col)
@@ -381,7 +423,7 @@ def heuristic_plan(profile: dict, target: str) -> dict:
         "label_column": label, "positive_value": None, "label_threshold": None,
         "id_column": id_col,
         "time_column": time_col, "numeric_columns": numeric, "categorical_columns": categorical,
-        "drop_columns": drop, "leakage_suspects": [],
+        "drop_columns": drop, "leakage_suspects": leaks,
         "sensitive_columns": [c for c in cols if _SENSITIVE_HINT.search(c)][:6],
         "data_issues": [], "recommended_algorithms": ["gradient_boosting"],
     }
@@ -576,14 +618,14 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
         plan, source = None, "heuristic"
         if studio_llm.available():
             try:
-                _log(job, "Gemini is reading the column profile (no patient rows are sent).")
+                _log(job, f"{_ai_name()} is reading the column profile (no patient rows are sent).")
                 plan = studio_llm.analyze_dataset(profile, job["target"], base_ctx,
                                                   notify=lambda m: _log(job, m, "analyze"))
-                source = "gemini"
+                source = "ai"
             except Exception as exc:
-                _log(job, f"Gemini analysis failed ({_short(exc)}); using name/type rules.")
+                _log(job, f"The AI analysis failed ({_short(exc)}); using name/type rules.")
         else:
-            _log(job, "No GEMINI_API_KEY is configured; using name/type rules.")
+            _log(job, "No AI model is available for Model Studio (Settings, AI); using name/type rules.")
         if not isinstance(plan, dict):
             plan = heuristic_plan(profile, job["target"])
         if base_ctx:  # a retrain keeps the base model's choices where the data allows
@@ -601,7 +643,7 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
         if strong:
             _log(job, "Columns that predict the outcome suspiciously well on their own: "
                       + ", ".join(strong))
-        _step(job, "analyze", "done", "Plan proposed by " + ("Gemini" if source == "gemini"
+        _step(job, "analyze", "done", "Plan proposed by " + (_ai_name() if source == "ai"
                                                                else "name/type rules"))
         _step(job, "confirm", "waiting", "Review the plan and continue")
         with _jobs_lock:
@@ -907,14 +949,14 @@ def _generate_and_train(job: dict, config: dict, base: Optional[dict]) -> bool:
     for attempt in range(1, CODE_ATTEMPTS + 1 if use_llm else 1):
         _step(job, "generate", "running")
         try:
-            _log(job, f"Gemini is writing the pipeline (attempt {attempt}).", "generate")
+            _log(job, f"{_ai_name()} is writing the pipeline (attempt {attempt}).", "generate")
             code = studio_llm.generate_pipeline(
                 job["profile"], config, job["target"], base_code=base_code,
                 base_card=base_card, previous_code=code if error else None, error=error,
                 notify=lambda m: _log(job, m, "generate"))
         except Exception as exc:
             attempts.append({"attempt": attempt, "stage": "generate", "error": _short(exc)})
-            _log(job, f"Gemini could not write the code: {_short(exc)}", "generate")
+            _log(job, f"The AI model could not write the code: {_short(exc)}", "generate")
             break
         problems = studio_guard.check_code(code)
         if problems:
@@ -923,11 +965,11 @@ def _generate_and_train(job: dict, config: dict, base: Optional[dict]) -> bool:
                              "code": code[:30000]})
             _log(job, error, "generate")
             continue
-        _step(job, "generate", "done", f"Gemini, attempt {attempt}")
+        _step(job, "generate", "done", f"{_ai_name()}, attempt {attempt}")
         result = _train_code(job, code, config)
         if result["ok"]:
             attempts.append({"attempt": attempt, "stage": "train", "error": None})
-            return _accept_code(job, code, "gemini", attempts)
+            return _accept_code(job, code, "ai", attempts)
         error = result["error"]
         attempts.append({"attempt": attempt, "stage": "train", "error": error[-1500:],
                          "code": code[:30000]})
@@ -935,7 +977,7 @@ def _generate_and_train(job: dict, config: dict, base: Optional[dict]) -> bool:
         _step(job, "train", "failed", "Generated code failed; retrying")
 
     # Every run ends with a model: the tested standard pipeline takes over.
-    reason = ("no GEMINI_API_KEY is configured" if not use_llm
+    reason = ("no AI model is available for Model Studio" if not use_llm
               else f"the generated code failed {len(attempts)} time(s)")
     _log(job, f"Using the Preventra standard pipeline because {reason}.", "generate")
     _step(job, "generate", "done", "Preventra standard pipeline")
@@ -1303,7 +1345,7 @@ def decide(evaluation: dict, association: list, code_origin: str,
     """
     Deploy / deploy with caution / do not deploy, by fixed rules - the same
     rules for every model, so two runs can be compared and the decision can be
-    audited. Gemini explains this verdict; it does not make it.
+    audited. The AI model explains this verdict; it does not make it.
     """
     m = evaluation["metrics"]
     checks = []
@@ -1406,7 +1448,7 @@ def decide(evaluation: dict, association: list, code_origin: str,
 
     if code_origin == "standard":
         check("Pipeline", "info", "Trained with the Preventra standard pipeline, not "
-                                  "Gemini-written code.")
+                                  "AI-written code.")
 
     statuses = {c["status"] for c in checks}
     decision = ("do_not_deploy" if "fail" in statuses else
@@ -1441,9 +1483,9 @@ def _recommend(job: dict) -> None:
     if studio_llm.available():
         try:
             explanation, source = studio_llm.explain_verdict(
-                summary, notify=lambda m: _log(job, m, "recommend")), "gemini"
+                summary, notify=lambda m: _log(job, m, "recommend")), "ai"
         except Exception as exc:
-            _log(job, f"Gemini could not write the explanation ({_short(exc)}).", "recommend")
+            _log(job, f"The AI model could not write the explanation ({_short(exc)}).", "recommend")
     if not explanation:
         explanation = [f"{c['name']}: {c['detail']}" for c in verdict["checks"]]
     with _jobs_lock:
@@ -1640,6 +1682,7 @@ def delete_model(db, model_id: str, user: dict) -> None:
 def overview(db, user: dict) -> dict:
     return {
         "llm_available": studio_llm.available(),
+        "llm_name": _ai_name() if studio_llm.available() else None,
         "algorithms": ALGORITHMS,
         "limits": {"max_upload_mb": MAX_UPLOAD_MB, "max_rows": MAX_ROWS},
         "active": {t: active_model(db, user, t) for t in TARGETS},

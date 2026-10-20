@@ -65,13 +65,39 @@ async function apiFetch(path, options = {}) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const detail = body?.detail;
-    // FastAPI's validation errors are a list; the reason prompt's is an object.
+    // FastAPI's validation errors are a list (of objects, or of our own
+    // sentences); the reason prompt's is an object.
     const message = typeof detail === 'string' ? detail
-      : detail?.message || (Array.isArray(detail) ? detail.map((d) => d.msg).join('; ') : '')
+      : detail?.message || (Array.isArray(detail) ? detail.map((d) => (typeof d === 'string' ? d : d.msg)).join('; ') : '')
       || `API error ${res.status}: ${path}`;
     throw new ApiError(message, res.status, detail?.code);
   }
   return res.json();
+}
+
+/** A file from the API, saved by the browser under the server's name for it.
+ *  Same headers as apiFetch: a download is not a way around the sign-in. */
+async function apiDownload(path, fallbackName) {
+  const headers = {};
+  if (API_KEY) headers['X-API-Key'] = API_KEY;
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const hospital = getActingHospital();
+  if (hospital) headers['X-Hospital-Id'] = hospital;
+  const res = await fetch(`${BASE_URL}${path}`, { headers });
+  if (res.status === 401) signOut();
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(typeof body?.detail === 'string' ? body.detail : `API error ${res.status}: ${path}`, res.status);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { name };
 }
 
 // Anything that can change the follow-up queue says so, and the menu's
@@ -324,6 +350,60 @@ const RealAPI = {
     return apiFetch('/api/studio/score', { method: 'POST', body: form });
   },
 
+  // ── Data: getting a hospital's patients in (api/ingest.py, api/ingest_connections.py) ──
+  getIngestProfile: () => apiFetch('/api/ingest/profile'),
+  saveIngestProfile: (profile) => apiFetch('/api/ingest/profile', { ...json(profile), method: 'PUT' }),
+  getIngestCodes: () => apiFetch('/api/ingest/mapping'),
+  saveIngestCodes: (mapping) => apiFetch('/api/ingest/mapping', { ...json(mapping), method: 'PUT' }),
+  /** What one file would give, before anything is stored. */
+  previewIngestFile: (file, table) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (table) form.append('table', table);
+    return apiFetch('/api/ingest/preview', { method: 'POST', body: form });
+  },
+  getIngestBatches: (limit = 30) => apiFetch(`/api/ingest/batches?limit=${limit}`),
+  getIngestScoring: () => apiFetch('/api/ingest/scoring'),
+  rescoreNow: () => apiFetch('/api/ingest/rescore', { method: 'POST' }),
+  getIngestClients: () => apiFetch('/api/ingest/clients'),
+  createIngestClient: (prefix) => apiFetch('/api/ingest/clients', json({ patient_prefix: prefix })),
+  revokeIngestClient: (id) => apiFetch(`/api/ingest/clients/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  getConnections: () => apiFetch('/api/ingest/connections'),
+  createConnection: (body) => apiFetch('/api/ingest/connections', json(body)),
+  updateConnection: (id, body) =>
+    apiFetch(`/api/ingest/connections/${encodeURIComponent(id)}`, { ...json(body), method: 'PUT' }),
+  deleteConnection: (id) => apiFetch(`/api/ingest/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testConnection: (body) => apiFetch('/api/ingest/connections/test', json(body)),
+  runConnection: (id, historyOnly) =>
+    apiFetch(`/api/ingest/connections/${encodeURIComponent(id)}/run`, json({ history_only: !!historyOnly })),
+  /** The hospital's discharges with outcomes, as a file to train on in Model Studio. */
+  downloadTrainingFile: () => apiDownload('/api/ingest/export/discharges.csv', 'discharges_trainable.csv'),
+
+  // ── Plug-and-play upload (api/data_upload.py) ───────────────────────────
+  /** Any CSVs and what they are about -> how they were read, for a person to confirm. */
+  createDraft: (kind, files) => {
+    const form = new FormData();
+    form.append('kind', kind);
+    files.forEach((f) => form.append('files', f));
+    return apiFetch('/api/ingest/drafts', { method: 'POST', body: form });
+  },
+  getDraft: (id) => apiFetch(`/api/ingest/drafts/${encodeURIComponent(id)}`),
+  confirmDraft: (id, body) => apiFetch(`/api/ingest/drafts/${encodeURIComponent(id)}/confirm`, json(body)),
+  deleteDraft: (id) => apiFetch(`/api/ingest/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  getTrainingStatus: () => apiFetch('/api/ingest/training'),
+  trainFromData: (name) => apiFetch('/api/ingest/train', json({ name: name || null })),
+
+  // ── AI models (api/ai_settings.py) ──────────────────────────────────────
+  /** Which AI features are on, for everyone: the app hides the ones that are off. */
+  getAiStatus: () => apiFetch('/api/ai/status'),
+  getAiSettings: () => apiFetch('/api/ai/settings'),
+  saveAiSettings: (body) => apiFetch('/api/ai/settings', { ...json(body), method: 'PUT' }),
+  /** A provider's models, live; `apiKey`/`baseUrl` try ones not saved yet. */
+  listAiModels: (provider, apiKey, baseUrl) =>
+    apiFetch('/api/ai/models', json({ provider, api_key: apiKey || undefined, base_url: baseUrl || undefined })),
+  testAiModel: (provider, model, apiKey, baseUrl) =>
+    apiFetch('/api/ai/test', json({ provider, model, api_key: apiKey || undefined, base_url: baseUrl || undefined })),
+
   /**
    * Field list and valid category values for the manual-entry form, read from
    * the same feature spec the model was trained against. Fetching it keeps the
@@ -377,7 +457,7 @@ const RealAPI = {
   getPatientTrend: (patientId) => apiFetch(`/api/patients/${patientId}/trend`),
 
   /**
-   * On-demand Gemini call: ROI estimate + counterfactual explanation for a
+   * On-demand AI call: ROI estimate + counterfactual explanation for a
    * patient's current risk verdict (score/band/drivers).
    */
   getAiInsights: (payload) =>
@@ -388,7 +468,7 @@ const RealAPI = {
     }),
 
   /**
-   * On-demand Gemini call: narrate why a single week's trend-series score
+   * On-demand AI call: narrate why a single week's trend-series score
    * moved the way it did, using that week's drivers + delta.
    */
   getWeekNarrative: (payload) =>
@@ -553,6 +633,42 @@ export const saveStudioJob = realOnly(RealAPI.saveStudioJob);
 export const scanStudioJob = realOnly(RealAPI.scanStudioJob);
 export const discardStudioJob = realOnly(RealAPI.discardStudioJob);
 export const scoreStudioFile = realOnly(RealAPI.scoreStudioFile);
+
+// The Data page: uploads, mappings, database connections and re-scoring.
+export const getIngestProfile = realOnly(RealAPI.getIngestProfile);
+export const saveIngestProfile = realOnly(RealAPI.saveIngestProfile);
+export const getIngestCodes = realOnly(RealAPI.getIngestCodes);
+export const saveIngestCodes = realOnly(RealAPI.saveIngestCodes);
+export const previewIngestFile = realOnly(RealAPI.previewIngestFile);
+export const getIngestBatches = realOnly(RealAPI.getIngestBatches);
+export const getIngestScoring = realOnly(RealAPI.getIngestScoring);
+export const rescoreNow = realOnly(RealAPI.rescoreNow);
+export const getIngestClients = realOnly(RealAPI.getIngestClients);
+export const createIngestClient = realOnly(RealAPI.createIngestClient);
+export const revokeIngestClient = realOnly(RealAPI.revokeIngestClient);
+export const getConnections = realOnly(RealAPI.getConnections);
+export const createConnection = realOnly(RealAPI.createConnection);
+export const updateConnection = realOnly(RealAPI.updateConnection);
+export const deleteConnection = realOnly(RealAPI.deleteConnection);
+export const testConnection = realOnly(RealAPI.testConnection);
+export const runConnection = realOnly(RealAPI.runConnection);
+export const downloadTrainingFile = realOnly(RealAPI.downloadTrainingFile);
+
+export const createDraft = realOnly(RealAPI.createDraft);
+export const getDraft = realOnly(RealAPI.getDraft);
+export const confirmDraft = realOnly(RealAPI.confirmDraft);
+export const deleteDraft = realOnly(RealAPI.deleteDraft);
+export const getTrainingStatus = realOnly(RealAPI.getTrainingStatus);
+export const trainFromData = realOnly(RealAPI.trainFromData);
+
+// AI models. With mock data every AI feature shows, as it always has.
+export const getAiStatus = USE_MOCK
+  ? () => Promise.resolve({ chatbot: { on: true }, insights: { on: true }, studio: { on: true }, data: { on: true } })
+  : RealAPI.getAiStatus;
+export const getAiSettings = realOnly(RealAPI.getAiSettings);
+export const saveAiSettings = realOnly(RealAPI.saveAiSettings);
+export const listAiModels = realOnly(RealAPI.listAiModels);
+export const testAiModel = realOnly(RealAPI.testAiModel);
 export const getPipelineStatus = USE_MOCK
   ? () => Promise.resolve({ status: 'Completed', current_step: 'registry_updated', patient_count: 0 })
   : RealAPI.getPipelineStatus;

@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FlaskConical, Boxes, Calculator, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
 import { getStudioOverview, getStudioModels } from '../api';
 import TrainSetup from '../components/studio/TrainSetup';
 import TrainingRun from '../components/studio/TrainingRun';
 import ModelLibrary from '../components/studio/ModelLibrary';
 import ScorePanel from '../components/studio/ScorePanel';
+import RescoreCard from '../components/data/RescoreCard';
 import { TARGET_LABELS, fmt } from '../components/studio/studioFormat';
 
 const TABS = [
@@ -23,7 +25,10 @@ export default function ModelStudio() {
   const [overview, setOverview] = useState(null);
   const [models, setModels] = useState(null);
   const [error, setError] = useState(null);
-  const [jobId, setJobId] = useState(null);
+  // A run started elsewhere (the Data page's "Train a model on your data")
+  // arrives as ?job=ID and opens straight away.
+  const [searchParams] = useSearchParams();
+  const [jobId, setJobId] = useState(() => searchParams.get('job'));
   const [preset, setPreset] = useState(null);
 
   // Bumped to reload the active models, the library and the recent runs.
@@ -65,7 +70,7 @@ export default function ModelStudio() {
           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${overview.llm_available
             ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-800'}`}>
             <Sparkles size={13} />
-            {overview.llm_available ? 'Gemini connected' : 'Gemini not configured: standard pipeline only'}
+            {overview.llm_available ? `AI: ${overview.llm_name}` : 'No AI model: standard pipeline only'}
           </span>
         )}
       </div>
@@ -95,6 +100,9 @@ export default function ModelStudio() {
           })}
         </div>
       )}
+
+      {/* After a deploy: patients still scored by the earlier model, and Re-score now. */}
+      <RescoreCard compact reloadKey={reloadKey} />
 
       <div className="mb-5 flex gap-1 border-b border-gray-200">
         {TABS.map((t) => (

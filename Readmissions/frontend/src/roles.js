@@ -29,6 +29,9 @@ export const WATCH_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
 // Model Studio: training, comparing and deploying the hospital's own models
 // (api/access.py manage_models).
 export const STUDIO_ROLES = ['superadmin', 'hospital_admin'];
+// The Data page: uploads, the hospital's column mapping, database connections
+// and re-scoring (api/access.py manage_ingest).
+export const DATA_ROLES = ['superadmin', 'hospital_admin'];
 // Cost and ROI figures (api/access.py ACTIONS view_costs). A case manager
 // coordinates care and does not manage money: they see the counterfactual and
 // the care plan, without the dollar figures.

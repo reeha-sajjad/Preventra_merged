@@ -1,8 +1,9 @@
 """
-Phase 2 verification script: confirms Gemini selects the correct predefined
-function + arguments for a handful of representative dashboard questions.
-This calls the real Gemini API (requires GEMINI_API_KEY) but does NOT touch
-MongoDB — it only inspects the function-calling decision.
+Verification script: confirms the chatbot's model selects the correct
+predefined function + arguments for a handful of representative dashboard
+questions. It calls the model a key in the environment gives the chatbot
+(GEMINI_API_KEY by default; see api/llm.py) but does NOT touch MongoDB - it
+only inspects the function-calling decision.
 
 Run with:
   python scripts/verify_gemini_selection.py
@@ -13,13 +14,13 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from chatbot_gemini import select_function_call
+from api.chatbot_llm import select_function_call
 
 QUESTIONS = [
     "How many patients have a high risk score?",

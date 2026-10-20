@@ -85,10 +85,15 @@ def test_a_bad_record_is_returned_and_the_rest_go_ahead(main, world, token):
     r = machine(main, token).post("/ingest/v1/encounters",
                                   json={"bundles": [bundle("E-1"), bad_date, bad_code, odd_lab]})
     body = r.json()
-    assert body["accepted"] == 2 and [x["encounter_key"] for x in body["rejected"]] == ["E-3", "E-4"]
+    # Impossible dates are refused; a code the hospital has not mapped is kept,
+    # with a warning, and the stay is marked incomplete for the built-in model.
+    assert body["accepted"] == 3 and [x["encounter_key"] for x in body["rejected"]] == ["E-3"]
     assert "before admit_datetime" in body["rejected"][0]["errors"][0]
-    assert "WALK-IN" in body["rejected"][1]["errors"][0]
-    assert body["warnings"][0]["encounter_key"] == "E-5" and "furlongs" in body["warnings"][0]["warning"]
+    warned = {w["encounter_key"]: w["warning"] for w in body["warnings"]}
+    assert "WALK-IN" in warned["E-4"] and "furlongs" in warned["E-5"]
+    stays = {s["encounter_key"]: s for s in world["db"][ingest.STAYS].find()}
+    assert stays["E-1"]["complete"] and not stays["E-4"]["complete"]
+    assert stays["E-4"]["encounter"]["admission_type"] is None
     assert world["db"][ingest.JOBS].count_documents({"status": "queued"}) == 1
 
 
@@ -201,10 +206,16 @@ def test_demographics_may_come_on_the_encounter(main, world, token):
     assert stays["E-1"]["patient"] == {"sex": "F", "marital_status": "MARRIED", "race_ethnicity": None,
                                        "death_date": None}
     assert "sex" not in stays["E-1"]["encounter"] and stays["E-2"]["patient"]["sex"] == "F"
+    # No sex anywhere: kept, but incomplete for the built-in model.
     missing = bundle("E-3")
     del missing["patient"]
     r = machine(main, token).post("/ingest/v1/encounters", json={"bundles": [missing]}).json()
-    assert r["rejected"][0]["errors"] == ["patient: Field required"]
+    assert r["accepted"] == 1
+    assert world["db"][ingest.STAYS].find_one({"encounter_key": "E-3"})["patient"]["sex"] is None
+    keyless = bundle("E-4")
+    del keyless["encounter"]["patient_key"]
+    r = machine(main, token).post("/ingest/v1/encounters", json={"bundles": [keyless]}).json()
+    assert r["rejected"][0]["errors"] == ["encounter.patient_key: Field required"]
 
 
 def test_a_credential_is_only_made_for_a_real_hospital(main, world):

@@ -8,7 +8,7 @@ import {
   ReferenceLine, Legend,
 } from 'recharts';
 
-import { download, fmt } from './studioFormat';
+import { download, fmt, isAi } from './studioFormat';
 
 export function StepIcon({ status }) {
   // shrink-0: in a narrow step card the label wraps, and without it the
@@ -81,10 +81,10 @@ export function CodeViewer({ code, sections, origin, attempts, filename = 'pipel
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${origin === 'gemini' ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-700'}`}>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${isAi(origin) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-700'}`}>
           <Sparkles size={13} />
-          {origin === 'gemini'
-            ? `Written by Gemini${attempts?.length ? ` · attempt ${attempts.length}` : ''}`
+          {isAi(origin)
+            ? `Written by the AI model${attempts?.length ? ` · attempt ${attempts.length}` : ''}`
             : 'Preventra standard pipeline'}
         </span>
         <button type="button" onClick={() => download(code, filename, 'text/x-python')}

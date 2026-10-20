@@ -17,6 +17,8 @@ Documents at this level span every phase:
 | `project_comparison_baseline_vs_current.md` | Baseline against the current model |
 | `HANDOVER.md` | File-by-file architecture reference |
 | `ROADMAP.md` | Planned work |
+| `pilot_ingestion_build.md` | How hospitals' data comes in: the ingest API, the plug-and-play upload, database pulls, re-scoring |
+| `ai_models.md` | Choosing the AI model for each feature (Gemini, Claude, OpenAI, a local Ollama model), keys, and what each feature sends |
 
 **Read at runtime, not documentation:** `mimic/band_thresholds_mimic.json` is the live
 risk-band configuration — `api/mimic_scoring.py` and three scripts read it. See the Risk bands

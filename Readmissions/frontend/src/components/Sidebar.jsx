@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, HeartPulse, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
-         FlaskConical, Settings, CalendarClock, Pill, List } from 'lucide-react';
+         FlaskConical, Settings, CalendarClock, Pill, List, Database } from 'lucide-react';
 import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
 import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
-         PHARMACY_ROLES, ROLE_LABELS } from '../roles';
+         PHARMACY_ROLES, DATA_ROLES, ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
 // Below `md` the sidebar is an off-canvas drawer; at `md` and above it is the
@@ -69,6 +69,7 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
       ? [{ name: 'Manual Entry', path: '/manual-entry', icon: <UserPlus size={20} /> }]
       : []),
     { name: 'Analytics', path: '/analytics', icon: <BarChart size={20} /> },
+    ...(can(DATA_ROLES) ? [{ name: 'Data', path: '/data', icon: <Database size={20} /> }] : []),
     ...(can(STUDIO_ROLES) ? [{ name: 'Model Studio', path: '/model-studio', icon: <FlaskConical size={20} /> }] : []),
     ...(can(CONSOLE_ROLES) ? [{ name: 'Clinician Console', path: '/doctor', icon: <Stethoscope size={20} /> }] : []),
     { name: 'About Preventra', path: '/about', icon: <Info size={20} /> },

@@ -20,6 +20,10 @@ monitoring aligned with the discharge diagnosis) is on `main` only, and workstre
 > **Status, 15 October 2026: A to D are built** on `readmission-case-manager` (on top of `main`, so
 > `a4cda07` is included). See [Implementation notes](#implementation-notes) at the end for the
 > runbook, where the build differs from this plan, and the known limitations.
+>
+> **19 October 2026: continuous ingestion added** - each hospital's own columns, uploads from the
+> app, history-only loads, database pulls, an on-site agent, and re-scoring after a new model is
+> deployed. See [Continuous ingestion](#continuous-ingestion-19-october-2026) at the end.
 
 ---
 
@@ -649,3 +653,186 @@ curl -X POST "$PILOT_API/ingest/v1/files" -H "Authorization: Bearer ing_ic_4f9a2
   are recomputed; its week-on-week change is not.
 - **Rate limit** is counted per API process. With more than one replica, each counts separately.
 
+
+---
+
+## Continuous ingestion (19 October 2026)
+
+Every way in now goes through one pipeline, and a hospital no longer has to rename its columns to
+ours.
+
+```
+ API (/ingest/v1)            ─┐
+ Upload (Data page)          ─┼─► the hospital's profile ─► checks ─► ingest_stays / ingest_weeks ─► jobs ─► worker ─► dashboard
+ Database pull (nightly)     ─┤    columns, codes, units,      (one record per hospital + encounter;
+ On-site agent (-> /ingest)  ─┘    date order, extras           a resend replaces it, never duplicates)
+```
+
+### Where things are
+
+| Piece | Code | Tests |
+|---|---|---|
+| A hospital's data profile: its columns, units, date order, prefix, extras | `ingestion/profile.py`; `GET/PUT /api/ingest/profile` | `tests/units/test_ingest_pipeline.py` |
+| One path for files, uploads and pulls | `api/ingest.take_files` | same |
+| Upload from the app, with a preview first | `POST /api/ingest/preview`, `POST /api/ingest/upload` | same |
+| History-only loads (stored for training, not on the worklist) | `history_only` on `take_encounters` / `take_weeks` | same |
+| Training file download | `GET /api/ingest/export/discharges.csv` (`canonical.training_table`); each download recorded in `ingest_exports` | same |
+| Re-scoring after a deployment | `scoring_service.deployed_fingerprint`, `due_for_rescore`; `ingest.queue_rescore`; `GET /api/ingest/scoring`, `POST /api/ingest/rescore` | same |
+| The worker's clock: nightly re-score, scheduled pulls | `ingestion/scheduler.py`, called by `ingestion/worker.py` every 30 s | same |
+| Database pulls (SQL Server, PostgreSQL, MySQL/MariaDB, Oracle) | `ingestion/pull.py` (standalone), `api/ingest_connections.py` | same, against SQLite |
+| On-site agent | `ingestion/agent.py` | same |
+| The Data page | `frontend/src/pages/DataIngest.jsx`, `frontend/src/components/data/` | - |
+
+### How it works
+
+- **The profile.** Each hospital says once which of its columns is which of our fields, which
+  columns to keep for its own model (encounters and patients only), whether dates are written day
+  first, and whether weight is in pounds and temperature in Fahrenheit. A date of birth becomes the
+  age at admission. Columns already named like ours need nothing. It lives on the hospital's
+  `ingest_mappings` document, next to its code mapping, and every way in reads it.
+- **Extras.** Kept columns travel with each stay as `extras` and become `x_<name>` columns in the
+  feature table, so the training file and live scoring both carry them. The built-in model never
+  reads them; a Model Studio model trained on the hospital's training file can.
+- **One prefix per hospital.** Patient ids are `<prefix>-<their id>` whichever way the data
+  arrives. A credential must use the hospital's prefix, and the prefix cannot change once patients
+  exist.
+- **History-only.** Past discharges sent to build a first model are stored but not queued for
+  scoring, so they never fill the worklist. They count as earlier admissions of later patients and
+  are in the training file with their outcomes.
+- **Re-scoring.** Every worklist row records the fingerprint of the models deployed when it was
+  scored (`scored_for`). After a new deployment, rows with another fingerprint are due; the admin
+  re-scores them from the Data page or Model Studio, or the nightly check does it. Re-scoring
+  uses the stored stays; nothing is resent. The fingerprint is the deployed models, not the model
+  that stood in when a deployed one could not read the rows, so such rows are not re-scored every
+  night for nothing.
+- **Pulls.** A connection is one SQL query per table, in the hospital's own column names, using
+  `:since` to read only what changed. The time passed is the last successful pull less an overlap
+  (default 2 hours), in the hospital's time zone (`NIGHTLY_TZ`). The watermark moves only after
+  everything read is stored, so a failed night is read again. Sessions are read-only where the
+  database allows it, and the database user must be read-only regardless. The password is encrypted
+  with `INGEST_SECRET_KEY`, which never leaves the server's environment and is never returned to a
+  browser.
+- **The agent.** For a hospital that will not let any server in: the same pull code, run from the
+  hospital's own scheduler, posting CSVs to `/ingest/v1/files` with an ingest credential, in parts of
+  500 discharges. Its watermark is kept in a local state file.
+- **The clock.** The worker checks every 30 seconds for the nightly re-score (`NIGHTLY_AT`, default
+  02:00) and for connections that have fallen due. Each run is claimed with one atomic update, so
+  two workers never start the same run.
+
+### Settings
+
+| Variable | Where | What |
+|---|---|---|
+| `INGEST_SECRET_KEY` | API and worker, the same value | Encrypts database passwords. Without it, connections cannot be saved or run |
+| `NIGHTLY_AT` | worker (and API, for display) | Time of the nightly re-score and the default pull time, `HH:MM` |
+| `NIGHTLY_TZ` | worker and API | The hospital's IANA time zone, e.g. `Asia/Karachi`; default `UTC` |
+
+### Limitations
+
+- **The weekly training file** is still a script (`scripts/export_weekly_training_csv.py`). It
+  rebuilds series from scored discharges, so history-only discharges, which are not scored, are not
+  in it.
+- **Extras** are one value per discharge or patient. Extra columns on labs, medications and other
+  many-per-discharge tables are not kept.
+- **No HL7 v2 or FHIR.** A hospital's interface engine converts to our JSON or CSV.
+- **Pulls from the cloud deployment** need the hospital to let our server in (VPN or an allowed fixed
+  outbound IP). On the clinic's own server this is a pull within its network.
+- **Rolling batch and summaries** are as before: ingested rows join the newest `batch_date`.
+
+## Plug-and-play upload (20 October 2026)
+
+The Data page's upload no longer asks which table each file is or which column is which. A
+hospital administrator says what the files are about, drops them in as exported, checks the
+reading, and stores them.
+
+### What the person does
+
+1. **What are these files about?** *Discharges* (patients leaving hospital: the stay, diagnoses,
+   labs, medications) or *Weekly follow-up* (check-ins after discharge). A hospital that only has
+   data from the time of discharge uploads discharges and nothing else; weekly follow-up is optional.
+2. **Add the files.** One flat export or several files that belong together, up to 100 MB each.
+3. **Check the reading.** A few sentences on what was found; what each file is and how it joins the
+   main one; every column with what it holds and what it is used as; the readmission outcome column
+   and which of its values mean readmitted; what the hospital's codes mean; and what else would make
+   predictions better. Most exports need nothing changed here.
+4. **Store them.** Past discharges are kept for training and as earlier admissions of future
+   patients, off the worklist (the default when the file has an outcome column); current patients
+   are scored and put on the worklist. The first upload also sets the patient id prefix.
+5. **Train a model on your data**, once at least 50 stored discharges have a known outcome, some
+   readmitted and some not. This opens the run in Model Studio.
+
+### How the files are read (`api/data_reader.py`)
+
+- **The main file** is the discharges (or check-ins) file: the one whose columns best match ours.
+  Its stay id is a column with a different value on every row and a name like an id; its patient id
+  a repeating one. A column of people's names is never taken for either.
+- **Other files** are patients, diagnoses, labs, medications, procedures or DRG, by file name and
+  then by columns, and join the main file by value: the column whose values match at least half of
+  the main file's stay ids (patient ids, for a patients file). A file that matches nothing is left
+  out, and the page says so.
+- **Columns** are matched to our fields by name, with the hospital's saved reading first. Diagnosis
+  columns of the discharge itself (`diag_1`, `diag_2`, ...) become its ranked diagnoses; whether
+  they are ICD-9 or ICD-10 is decided by the majority of the file's codes. Age bands such as
+  `[70-80)` become their midpoint. `?`, `NA`, `NULL` and the like are empty.
+- **The outcome** is a column named like readmitted, outcome or label with 2 to 6 values; values
+  such as `<30`, `Yes`, `1` or `True` count as readmitted. It overrides the outcome worked out from
+  dates, which needs admission and discharge dates.
+- **Codes** are matched by value (Female is F, Caucasian is WHITE). A value with no match is stored
+  as unknown, with a warning, and can be given a meaning on the review or on Mapping, Codes. A
+  numeric code column (`admission_type_id`) can be set to its field on the review, and its values
+  given meanings there.
+- **Date order** is day first when a date's first number is above 12 somewhere in the files.
+- **An AI model**, when the superadmin has chosen one for *Reading uploaded files*, improves the
+  rules' reading and writes the summary. It sees column summaries only, never rows and never the
+  values of personal columns (`docs/ai_models.md`). Its answer is checked before use: fields must be
+  ours, one column per field, outcome values must be in the file, codes must be our values, and the
+  main file stays the main file.
+
+### What is stored
+
+- **Only the stay id and the patient id are required.** A discharge without dates, age or codes
+  is stored. The built-in model scores only complete adult discharges (both dates, age, admission
+  type, where the patient went); the others wait for a model trained on the hospital's own data,
+  and the batch on the Activity tab says why.
+- **Every other column is kept** for the hospital's own model (`x_<name>` features), except the
+  ones marked *Don't use* (the profile's `drop` list), the outcome column, and columns named like a
+  name, address, phone, email or national id, which are never kept. The raw value of a coded
+  column is kept too, so the hospital's own model has it even where our code is unknown.
+- **The reading is saved** as the hospital's profile: the next export of the same shape reads the
+  same way, uploaded here, sent to the ingest API or read from the hospital's database.
+- **The files wait on the API's disk** (`INGEST_DRAFT_DIR`, default the system temp folder) until
+  confirmed, and at most a day. The import runs in the background; the page follows it.
+- **Training starts from what is stored**, never from the uploaded file
+  (`canonical.training_table`), so the model learns from exactly the features live scoring gives it.
+
+### What else to send
+
+After each reading the page lists what the files lack that would make predictions better, most
+important first: admission and discharge dates; diagnosis codes; the last lab results before
+discharge; medications at discharge; where the patient went; whether the admission was an
+emergency; the 30-day outcome (for training); whether a follow-up was booked within 7 days; and
+emergency visits in the 6 months before. For weekly follow-up: weight, blood pressure, heart rate
+and oxygen saturation, medication adherence or refills, and symptoms.
+
+### Where things are
+
+| Piece | Code | Tests |
+|---|---|---|
+| Reading the files: rules, the AI model's check, gaps, summary | `api/data_reader.py` | `tests/units/test_data_upload.py` |
+| Drafts, confirm and import, training | `api/data_upload.py`: `POST/GET/DELETE /api/ingest/drafts`, `POST /api/ingest/drafts/{id}/confirm`, `GET /api/ingest/training`, `POST /api/ingest/train` | same |
+| Optional fields, unknown codes as warnings, complete stays | `ingestion/schema.py` (`COMPLETE_FIELDS`, `missing_for_builtin`) | `tests/units/test_ingest.py` |
+| Wide diagnoses, age bands, the outcome column, keep-all extras | `ingestion/profile.py` | `tests/units/test_ingest_pipeline.py` |
+| The reported outcome over the computed one; undated stays | `ingestion/canonical.py` | same |
+| The page | `frontend/src/components/data/UploadPanel.jsx`, `UploadReview.jsx`, `UploadDone.jsx`; Model Studio opens `?job=` | - |
+
+### Limitations
+
+- **Import speed on a real database for 100,000 rows is not measured yet.** Reading the 101,766-row
+  UCI file takes about 2 seconds; storing it on the in-memory test database runs at about 100 rows a
+  second, which says nothing about MongoDB with its indexes.
+- **Lookup files** (an id-to-description table such as UCI's `IDS_mapping.csv`) are not read; their
+  meanings are given on the review instead.
+- **Drafts live on one API server's disk.** With more than one API replica, the confirm must reach
+  the same one; a redeploy during a review loses the draft, and the files are uploaded again.
+- **Weekly check-ins without a stay id** attach to the patient's latest dated discharge on or before
+  the week.

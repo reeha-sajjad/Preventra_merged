@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from api import chatbot_service
-from api.chatbot_gemini import GENERAL_QUESTION
+from api.chatbot_llm import GENERAL_QUESTION
 
 
 # ---------------------------------------------------------------------------
@@ -174,34 +174,34 @@ def test_rate_limited_selection_tells_the_user_to_wait(stub, monkeypatch):
 # tight it refused "what is acute myeloid leukemia", and a decision limit that
 # existed on one of the two routes and not the other.
 
-from api import chatbot_gemini
+from api import chatbot_llm
 
 
 def test_general_path_scope_covers_clinical_knowledge():
-    scope = chatbot_gemini._GENERAL_SYSTEM_INSTRUCTION
+    scope = chatbot_llm._GENERAL_SYSTEM_INSTRUCTION
     for phrase in ["Conditions, diagnoses", "medications", "clinical terminology"]:
         assert phrase in scope
 
 
 def test_general_path_refuses_only_non_health_topics():
-    assert "never grounds to refuse" in chatbot_gemini._GENERAL_SYSTEM_INSTRUCTION
+    assert "never grounds to refuse" in chatbot_llm._GENERAL_SYSTEM_INSTRUCTION
 
 
 def test_both_answer_paths_forbid_deciding_for_a_patient():
     """A guardrail on one of the two prose-producing calls is not a guardrail."""
-    for instruction in (chatbot_gemini._GENERAL_SYSTEM_INSTRUCTION,
-                        chatbot_gemini._ANSWER_SYSTEM_INSTRUCTION):
+    for instruction in (chatbot_llm._GENERAL_SYSTEM_INSTRUCTION,
+                        chatbot_llm._ANSWER_SYSTEM_INSTRUCTION):
         assert "treating clinician" in instruction
 
 
 def test_data_path_refuses_to_recommend():
-    answer = chatbot_gemini._ANSWER_SYSTEM_INSTRUCTION
+    answer = chatbot_llm._ANSWER_SYSTEM_INSTRUCTION
     assert "never turn it into a recommendation" in answer
     assert "advisable, recommended, safe or unsafe" in answer
 
 
 def test_general_path_cannot_quote_cohort_figures():
-    assert "no data in front of you" in chatbot_gemini._GENERAL_SYSTEM_INSTRUCTION
+    assert "no data in front of you" in chatbot_llm._GENERAL_SYSTEM_INSTRUCTION
 
 
 # ---------------------------------------------------------------------------

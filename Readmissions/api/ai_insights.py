@@ -1,38 +1,27 @@
 """
-Gemini-powered clinical decision support for a single patient's risk verdict:
+AI-written clinical decision support for a single patient's risk verdict, by
+whichever model serves the "insights" feature (api/llm.py):
 
   1. Return-on-investment estimate for enrolling the patient in a post-discharge
      care-coordination intervention (cost avoided vs. cost of the intervention).
-  2. Counterfactual explanation — which risk driver(s), if addressed, would most
+  2. Counterfactual explanation - which risk driver(s), if addressed, would most
      plausibly lower the score, and roughly by how much.
 
-Gemini is asked to return both as a single structured JSON object (response_schema
-enforced) so the API never has to parse free-form text. Only the risk score, band,
-and driver list already computed by the model are given to Gemini — it never sees
-raw patient identifiers or invents clinical facts beyond what's provided.
+The model is asked to return both as a single structured JSON object (schema
+enforced) so the API never has to parse free-form text. Only the risk score,
+band, driver list and dates already computed by the model are given to it -
+never the patient's identifier - and it is told not to invent clinical facts
+beyond what is provided.
 """
 
-import json
-import os
-
-from google import genai
-from google.genai import types
-
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
+from api import llm
 
 # The panel is button-triggered and shows an "Estimating..." state, so a slow
-# call is visible rather than silent - but it must still be bounded, because a
-# hung retry loop would leave that spinner up indefinitely.
-#
-# The original 20s / no-retry setting was too tight in practice: Gemini returns
-# a transient 504 DEADLINE_EXCEEDED often enough that a single attempt failed
-# the whole panel, surfacing as "AI insights are temporarily unavailable" even
-# though the key, payload and model were all fine. A retry clears it.
-_REQUEST_TIMEOUT_MS = 45_000
-_HTTP_OPTIONS = types.HttpOptions(
-    timeout=_REQUEST_TIMEOUT_MS,
-    retry_options=types.HttpRetryOptions(attempts=3),
-)
+# call is visible rather than silent - but it must still be bounded (the
+# feature's timeout in api/llm.py). Transient failures (a 504 from the
+# provider, an overload) are tried again twice: a single attempt failed the
+# whole panel often enough to matter.
+_RETRIES = 2
 
 _INSIGHTS_SYSTEM_INSTRUCTION = (
     "You are a clinical operations analyst supporting a hospital readmission-risk dashboard. "
@@ -63,29 +52,20 @@ _INSIGHTS_SYSTEM_INSTRUCTION = (
     "sentence punctuation; write plain sentences using only commas and periods."
 )
 
-_INSIGHTS_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    properties={
-        "roi_rationale": types.Schema(
-            type=types.Type.ARRAY,
-            items=types.Schema(type=types.Type.STRING),
-            description="2-3 short plain-text bullet points explaining the supplied ROI figures.",
-        ),
-        "counterfactual_explanation": types.Schema(
-            type=types.Type.ARRAY,
-            items=types.Schema(type=types.Type.STRING),
-            description="2-3 short plain-text bullet points: what change would lower this patient's risk.",
-        ),
+_INSIGHTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "roi_rationale": {
+            "type": "array", "items": {"type": "string"},
+            "description": "2-3 short plain-text bullet points explaining the supplied ROI figures.",
+        },
+        "counterfactual_explanation": {
+            "type": "array", "items": {"type": "string"},
+            "description": "2-3 short plain-text bullet points: what change would lower this patient's risk.",
+        },
     },
-    required=["roi_rationale", "counterfactual_explanation"],
-)
-
-
-def _client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
-    return genai.Client(api_key=api_key, http_options=_HTTP_OPTIONS)
+    "required": ["roi_rationale", "counterfactual_explanation"],
+}
 
 
 def _driver_lines(drivers: list) -> str:
@@ -118,7 +98,7 @@ def generate_roi_and_counterfactual(
     Write the narrative around an already-computed ROI breakdown.
 
     `roi` comes from api.roi_model.compute_roi. Every monetary figure is fixed
-    before this call: Gemini receives the itemisation and is instructed to
+    before this call: The model receives the itemisation and is instructed to
     explain it, not to price anything. It returns only roi_rationale and
     counterfactual_explanation, and the caller merges those into the ROI dict.
 
@@ -159,7 +139,6 @@ def generate_roi_and_counterfactual(
         roi_block = ""
 
     prompt = (
-        f"Patient ID: {patient_id}\n"
         f"Readmission risk score: {risk_score}%\n"
         f"Risk band: {risk_band}\n"
         f"Top clinical risk drivers:\n{driver_lines}\n"
@@ -167,24 +146,14 @@ def generate_roi_and_counterfactual(
         "Return the JSON now."
     )
 
-    client = _client()
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_INSIGHTS_SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=_INSIGHTS_SCHEMA,
-        ),
-    )
-
-    return json.loads(response.text)
+    return llm.complete_json("insights", system=_INSIGHTS_SYSTEM_INSTRUCTION, prompt=prompt,
+                             schema=_INSIGHTS_SCHEMA, retries=_RETRIES)
 
 
 # The score series is a patient's ADMISSION history, not a weekly monitoring
 # feed: consecutive points are typically months apart. The previous version of
 # this instruction said "one week's re-score" and "the change from the previous
-# week", so Gemini narrated week-over-week deterioration for admissions that
+# week", so the model narrated week-over-week deterioration for admissions that
 # were in fact years apart. The interval is now stated explicitly in the prompt
 # and the model is told to reason about that elapsed time.
 _WEEK_NARRATIVE_SYSTEM_INSTRUCTION = (
@@ -256,17 +225,16 @@ _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION = (
 )
 
 
-_WEEK_NARRATIVE_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    properties={
-        "bullet_points": types.Schema(
-            type=types.Type.ARRAY,
-            items=types.Schema(type=types.Type.STRING),
-            description="2-4 short plain-text bullet points explaining this week's score.",
-        ),
+_WEEK_NARRATIVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "bullet_points": {
+            "type": "array", "items": {"type": "string"},
+            "description": "2-4 short plain-text bullet points explaining this week's score.",
+        },
     },
-    required=["bullet_points"],
-)
+    "required": ["bullet_points"],
+}
 
 
 def generate_week_narrative(
@@ -289,7 +257,7 @@ def generate_week_narrative(
     group_focus: str = "",
 ) -> list:
     """
-    Calls Gemini once to narrate a single ADMISSION in a patient's trend series —
+    Calls the model once to narrate a single ADMISSION in a patient's trend series —
     why the score is where it is and what drove the change since the previous
     admission — as a list of bullet points. Raises on failure; the caller turns
     that into a 503.
@@ -323,7 +291,6 @@ def generate_week_narrative(
                           f"discharge. The patient is at home. {draw}\n"
                           f"Change from last week: {delta:+.1f} points ({week_trend}).")
         prompt = (
-            f"Patient ID: {patient_id}\n"
             f"Post-discharge monitoring week {week_number} of 4.\n"
             f"{dx_line}"
             f"Readmission risk score this week: {risk_score}%\n"
@@ -332,17 +299,8 @@ def generate_week_narrative(
             f"Top clinical risk drivers this week:\n{driver_lines}\n\n"
             "Return the JSON now."
         )
-        client = _client()
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION,
-                response_mime_type="application/json",
-                response_schema=_WEEK_NARRATIVE_SCHEMA,
-            ),
-        )
-        return json.loads(response.text).get("bullet_points", [])
+        return llm.complete_json("insights", system=_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION, prompt=prompt,
+                                 schema=_WEEK_NARRATIVE_SCHEMA, retries=_RETRIES).get("bullet_points", [])
 
     if delta is None:
         delta_text = ("This is the first scored admission on record, with no prior score to "
@@ -368,7 +326,6 @@ def generate_week_narrative(
     stay_text = f"This admission: {'; '.join(stay_bits)}.\n" if stay_bits else ""
 
     prompt = (
-        f"Patient ID: {patient_id}\n"
         f"Admission number {week_number} in this patient's scored history.\n"
         f"{dx_line}"
         f"{stay_text}"
@@ -379,14 +336,5 @@ def generate_week_narrative(
         "Return the JSON now."
     )
 
-    client = _client()
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_WEEK_NARRATIVE_SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=_WEEK_NARRATIVE_SCHEMA,
-        ),
-    )
-    return json.loads(response.text).get("bullet_points", [])
+    return llm.complete_json("insights", system=_WEEK_NARRATIVE_SYSTEM_INSTRUCTION, prompt=prompt,
+                             schema=_WEEK_NARRATIVE_SCHEMA, retries=_RETRIES).get("bullet_points", [])

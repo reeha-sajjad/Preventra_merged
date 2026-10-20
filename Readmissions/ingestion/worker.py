@@ -1,8 +1,11 @@
 """
-The ingestion worker: takes queued jobs (ingest_jobs) and scores them.
+The ingestion worker: takes queued jobs (ingest_jobs) and runs them -
+scoring discharges and weekly check-ins, and pulling from hospital databases
+(api/ingest_connections.py). It also keeps the clock (ingestion/scheduler.py):
+the nightly re-score after a new model is deployed, and scheduled pulls.
 
     python -m ingestion.worker           run until stopped (a Railway service)
-    python -m ingestion.worker --once    drain the queue and exit
+    python -m ingestion.worker --once    drain the queue and exit (no clock)
 
 A job is claimed atomically with a lease, so two workers never take the same
 one, and a worker that dies mid-job leaves it to be retried once the lease
@@ -44,6 +47,9 @@ def handle(db, job: dict) -> dict:
         return scoring_service.score_discharges(db, job["hospital_id"], job["keys"])
     if job["kind"] == "week":
         return scoring_service.score_weeks(db, job["hospital_id"], job["keys"])
+    if job["kind"] == "pull":
+        from api import ingest_connections
+        return ingest_connections.run_pull(db, job)
     raise ValueError(f"unknown job kind '{job['kind']}'")
 
 
@@ -75,10 +81,31 @@ def run_one(db) -> bool:
     return True
 
 
+TICK_SECONDS = 30
+
+
+def tick(db) -> None:
+    """The clock (ingestion/scheduler.py): the nightly re-score and the
+    database pulls that have fallen due become jobs. A failure is logged and
+    tried again on the next tick; it never stops the worker."""
+    from ingestion import scheduler
+    try:
+        started = scheduler.tick(db)
+        if started["rescored"] or started["pulls"]:
+            print(f"[worker] scheduled: re-score {sum(started['rescored'].values())} patient(s) in "
+                  f"{len(started['rescored'])} hospital(s), {len(started['pulls'])} database pull(s)")
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"[worker] schedule check failed: {type(exc).__name__}")
+
+
 def run(db, once: bool = False, idle_seconds: float = 2.0) -> int:
-    """Process jobs; with `once`, until the queue is empty. Returns how many."""
-    done = 0
+    """Process jobs; with `once`, until the queue is empty. Returns how many.
+    Between jobs, the clock is checked every TICK_SECONDS."""
+    done, last_tick = 0, 0.0
     while True:
+        if not once and time.monotonic() - last_tick >= TICK_SECONDS:
+            tick(db)
+            last_tick = time.monotonic()
         if run_one(db):
             done += 1
             continue

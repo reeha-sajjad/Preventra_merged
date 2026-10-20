@@ -116,6 +116,37 @@ def test_heuristic_plan_on_demo_discharges():
     assert "readmission_date" in {d["column"] for d in plan["drop_columns"]}
 
 
+def test_the_rules_alone_find_the_patient_codes_and_likely_leaks():
+    """Without an AI model, a flat export shaped like the UCI diabetes file:
+    the repeating patient number keeps a patient's stays together, *_id code
+    columns are categories, and columns that give the outcome away are flagged."""
+    rng = np.random.default_rng(3)
+    n = 3000
+    frame = pd.DataFrame({
+        "encounter_id": np.arange(n) * 7 + 1000,
+        "patient_nbr": rng.integers(0, 2000, n) * 13 + 500,
+        "discharge_disposition_id": rng.integers(1, 26, n),
+        "admission_type_id": rng.integers(1, 9, n),
+        "discharge_status": rng.choice(["Home", "SNF", "Expired"], n),
+        "time_in_hospital": rng.integers(1, 15, n),
+        "prior_readmissions": rng.integers(0, 4, n),
+        "days_to_readmission": rng.integers(1, 400, n),
+        "examide": ["No"] * n,
+        "readmitted": rng.choice(["NO", ">30", "<30"], n),
+    })
+    plan = ms.heuristic_plan(ms.profile_dataframe(frame), "discharge")
+    plan, problems = ms.normalise_plan(plan, list(frame.columns), "discharge", frame)
+    assert problems == []
+    assert plan["label_column"] == "readmitted" and plan["id_column"] == "patient_nbr"
+    assert {"discharge_disposition_id", "admission_type_id"} <= set(plan["categorical_columns"])
+    dropped = {d["column"]: d["reason"] for d in plan["drop_columns"]}
+    assert dropped["encounter_id"] == "identifier" and dropped["examide"] == "constant"
+    assert dropped["days_to_readmission"] == "possible leakage"
+    suspects = {d["column"] for d in plan["leakage_suspects"]}
+    assert suspects == {"days_to_readmission", "discharge_status"}     # a history of readmissions is not one
+    assert "discharge_status" in plan["categorical_columns"]           # flagged, left for the reviewer
+
+
 def test_weekly_plan_without_patient_id_is_refused():
     plan = {"label_column": "y", "numeric_columns": ["x"]}
     _, problems = ms.normalise_plan(plan, ["y", "x"], "weekly")
