@@ -356,6 +356,10 @@ def profile_dataframe(df: pd.DataFrame) -> dict:
 
 # ===================================================== 2. analysis / the plan
 _LABEL_HINT = re.compile(r"readmi|label|target|outcome|^y$|event", re.I)
+_SCORE_HINT = re.compile(r"risk_?score", re.I)
+_NEXT_WEEK_SCORE = re.compile(r"next_?week_?risk_?score", re.I)
+# Where the app's High band starts, on the discharge and the weekly score alike.
+HIGH_BAND = 40.0
 _TIME_HINT = re.compile(r"disch|date|time|admit|week_date", re.I)
 _SENSITIVE_HINT = re.compile(r"gender|sex|^age|anchor_age|race|ethnic|insur|payer", re.I)
 # Names of things known only after the moment of prediction - the outcome
@@ -378,6 +382,10 @@ def heuristic_plan(profile: dict, target: str) -> dict:
             label = col
             if "readmi" in col.lower():
                 break
+    if label is None and target == "weekly":
+        # The weekly export's outcome (scripts/export_weekly_training_csv.py):
+        # next week's score, given a threshold by suggest_threshold.
+        label = next((c for c in cols if _NEXT_WEEK_SCORE.fullmatch(c)), None)
     ids = [c for c, p in cols.items() if p["kind"] == "identifier-like"]
     # The split keeps a patient's rows together only through this column, so a
     # patient-named column whose values repeat (several stays per person) wins
@@ -519,6 +527,9 @@ def normalise_plan(plan: dict, columns: list, target: str,
     problems = []
     if not label:
         problems.append("Choose the outcome (label) column.")
+    elif (df is not None and out["positive_value"] is None and out["label_threshold"] is None
+          and needs_threshold(df[label])):
+        problems.append(needs_threshold(df[label]))
     if target == "weekly" and not id_col:
         problems.append("Weekly data needs a patient identifier column, so each patient's "
                         "weeks stay together when the data is split.")
@@ -527,6 +538,43 @@ def normalise_plan(plan: dict, columns: list, target: str,
     if not numeric + categorical:
         problems.append("No feature columns are selected.")
     return out, problems
+
+
+def needs_threshold(s: pd.Series) -> Optional[str]:
+    """
+    What to do when the outcome is a number with many values - a score, not a
+    yes/no - and no threshold says where "yes" starts. None for anything else.
+    """
+    x = pd.to_numeric(s, errors="coerce")
+    if s.notna().sum() == 0 or x[s.notna()].isna().any() or x.nunique() <= 2:
+        return None
+    hint = (f" For a risk score, {HIGH_BAND:g} is where the High band starts."
+            if _SCORE_HINT.search(str(s.name)) else "")
+    return (f"'{s.name}' is a score with {x.nunique():,} different values ({x.min():g} to "
+            f"{x.max():g}), not a yes/no. Under 'Counts as \"yes\" when', choose 'it is at or "
+            f"above a threshold' and enter the value that counts as yes.{hint}")
+
+
+def suggest_threshold(plan: dict, df: pd.DataFrame) -> dict:
+    """
+    A risk score proposed as the outcome without a threshold gets the High
+    band's 40, and the plan says so: the person sees it before anything trains
+    and can change it. Any other number is left for them to decide.
+    """
+    label = plan.get("label_column")
+    if (not isinstance(label, str) or label not in df.columns or not _SCORE_HINT.search(label)
+            or _number(plan.get("label_threshold")) is not None
+            or plan.get("positive_value") not in (None, "", "null")
+            or not needs_threshold(df[label])):
+        return plan
+    x = pd.to_numeric(df[label], errors="coerce")
+    if x.min() < 0 or x.max() > 100:
+        return plan
+    issues = plan.get("data_issues")
+    issues = list(issues) if isinstance(issues, list) else [issues] if issues else []
+    note = (f"The outcome is '{label}' at or above {HIGH_BAND:g}, where the High band starts. "
+            "Change the threshold if you mean something else.")
+    return {**plan, "label_threshold": HIGH_BAND, "data_issues": [*issues, note]}
 
 
 def _number(value):
@@ -562,7 +610,8 @@ def label_series(s: pd.Series, positive_value: Optional[str],
     values = set(text.dropna().unique())
     if values <= _YES | _NO:
         return text.map(lambda v: np.nan if pd.isna(v) else float(v in _YES))
-    raise ValueError(f"The outcome column has values {sorted(map(str, values))[:8]}; say which "
+    raise ValueError(needs_threshold(s) or
+                     f"The outcome column has values {sorted(map(str, values))[:8]}; say which "
                      "one means 'readmitted' (positive value).")
 
 
@@ -634,7 +683,8 @@ def _phase_one(db, job: dict, base: Optional[dict]) -> None:
                 if base_ctx.get(key) in df.columns or key in ("positive_value",
                                                               "label_threshold"):
                     plan.setdefault(key, base_ctx.get(key))
-        plan, problems = normalise_plan(plan, list(df.columns), job["target"], df)
+        plan, problems = normalise_plan(suggest_threshold(plan, df), list(df.columns),
+                                        job["target"], df)
         assoc = _association_for(df, plan)
         with _jobs_lock:
             job["plan"], job["plan_source"], job["association"] = plan, source, assoc

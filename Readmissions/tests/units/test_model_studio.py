@@ -585,6 +585,46 @@ def test_threshold_outcome():
         ms.label_series(pd.Series(["a", "b"], name="s"), None, 40)
 
 
+def test_a_score_chosen_without_a_threshold_says_how_to_fix_it():
+    """A risk score as the outcome with no threshold used to be asked 'which
+    value means readmitted?' - with eight of its 825 values listed."""
+    frame = _weekly_scored(200, 7)
+    with pytest.raises(ValueError, match="at or above a threshold.*40 is where the High band"):
+        ms.label_series(frame["risk_score"], None, None)
+    plan = ms.heuristic_plan(ms.profile_dataframe(frame), "weekly")
+    _, problems = ms.normalise_plan({**plan, "label_column": "risk_score", "label_threshold": None},
+                                    list(frame.columns), "weekly", frame)
+    assert any("'risk_score' is a score" in p for p in problems)
+    yes_no = pd.Series(["0", "1", "1.0", None], name="readmitted")
+    assert ms.needs_threshold(yes_no) is None
+
+
+def test_a_risk_score_outcome_is_proposed_with_the_high_band():
+    frame = _weekly_scored(200, 7)
+    plan = ms.suggest_threshold({"label_column": "risk_score", "data_issues": ["x"]}, frame)
+    assert plan["label_threshold"] == 40 and plan["data_issues"][0] == "x"
+    assert "at or above 40" in plan["data_issues"][1]
+    # a threshold or a yes-value the plan already has is left alone
+    assert ms.suggest_threshold({"label_column": "risk_score", "label_threshold": 25},
+                                frame)["label_threshold"] == 25
+    assert "label_threshold" not in ms.suggest_threshold(
+        {"label_column": "risk_score", "positive_value": "96.0"}, frame)
+    # any other number is the person's to decide
+    assert "label_threshold" not in ms.suggest_threshold({"label_column": "adherence_pct"}, frame)
+
+
+def test_the_rules_propose_next_weeks_score_for_the_weekly_export():
+    """With no AI model, the weekly export still gets the outcome it was made
+    for: next week's score at or above 40."""
+    frame = _weekly_scored(200, 7).drop(columns=["readmitted_30d", "readmit_visit_flag"])
+    plan = ms.heuristic_plan(ms.profile_dataframe(frame), "weekly")
+    assert plan["label_column"] == "next_week_risk_score"
+    plan, problems = ms.normalise_plan(ms.suggest_threshold(plan, frame), list(frame.columns),
+                                       "weekly", frame)
+    assert plan["label_threshold"] == 40 and not problems
+    assert ms.heuristic_plan(ms.profile_dataframe(frame), "discharge")["label_column"] is None
+
+
 def test_order_values_sorts_dates_and_keeps_numbers():
     dates = ms.order_values(pd.Series(["2025-01-08", "2025-01-01", "bad"]))
     assert dates[1] < dates[0] and np.isnan(dates[2])

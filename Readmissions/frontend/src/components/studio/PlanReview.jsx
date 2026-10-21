@@ -6,6 +6,10 @@ import { fmt, isAi } from './studioFormat';
 
 const ROLE_LABEL = { numeric: 'Number', categorical: 'Category', drop: 'Leave out' };
 
+// A number with many values - a risk score, say - is not a yes/no by itself:
+// it becomes one at a threshold (api/model_studio.needs_threshold).
+const isScore = (profileCol) => profileCol?.kind === 'numeric' && profileCol.n_unique > 2;
+
 function defaultRole(profileCol) {
   if (!profileCol) return 'drop';
   if (['identifier-like', 'text', 'date'].includes(profileCol.kind)) return 'drop';
@@ -36,7 +40,8 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
   const [label, setLabel] = useState(plan.label_column || '');
   const [positive, setPositive] = useState(plan.positive_value ?? '');
   // How the outcome becomes yes/no: a value that means yes, or "at or above a threshold".
-  const [rule, setRule] = useState(plan.label_threshold != null ? 'threshold' : 'value');
+  const [rule, setRule] = useState(plan.label_threshold != null
+    || isScore(profile.columns[plan.label_column]) ? 'threshold' : 'value');
   const [threshold, setThreshold] = useState(plan.label_threshold ?? '');
   const [idCol, setIdCol] = useState(plan.id_column || '');
   const [timeCol, setTimeCol] = useState(plan.time_column || '');
@@ -54,6 +59,8 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
   const features = columns.filter((c) => !reserved.has(c) && roleOf(c) !== 'drop');
   const labelValues = Object.keys(profile.columns[label]?.values || {});
   const labelIsNumber = ['numeric', 'binary'].includes(profile.columns[label]?.kind);
+  const labelIsScore = isScore(profile.columns[label]);
+  const chooseLabel = (c) => { setLabel(c); setRule(isScore(profile.columns[c]) ? 'threshold' : 'value'); };
   const weekly = job.target === 'weekly';
   const history = Boolean(idCol && timeCol);
   const outcomeRule = {
@@ -112,7 +119,7 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
         <div className="grid gap-4 md:grid-cols-4">
           <label className="text-sm">
             <span className="mb-1 block font-medium text-gray-700">Outcome (readmitted?)</span>
-            {select(label, setLabel, false)}
+            {select(label, chooseLabel, false)}
           </label>
           <div className="text-sm">
             <span className="mb-1 block font-medium text-gray-700">Counts as "yes" when</span>
@@ -139,6 +146,11 @@ export default function PlanReview({ job, onConfirm, busy, error }) {
             ) : (
               <input value={positive} onChange={(e) => setPositive(e.target.value)} placeholder="1 / yes / true"
                 className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm" />
+            )}
+            {labelIsScore && rule === 'threshold' && (
+              <span className="mt-1 block text-xs text-gray-500">
+                A score, not a yes/no. For a risk score, 40 is where High starts.
+              </span>
             )}
           </div>
           <label className="text-sm">
