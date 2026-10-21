@@ -49,6 +49,8 @@ export default function PatientDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const isPatient = myRole() === 'patient';
+  // A caretaker opens the full record of the people who linked them, read only.
+  const isCarer = myRole() === 'caretaker';
 
   // The overview layer first; the clinical record only once it is open to this
   // user - at once for the care team, after a reason for hospital admins and
@@ -92,11 +94,11 @@ export default function PatientDetail() {
   const back = (
     !isPatient && (
       <button
-        onClick={() => navigate('/patients')}
+        onClick={() => navigate(isCarer ? '/' : '/patients')}
         className="flex items-center space-x-2 text-gray-500 hover:text-ns-navy transition-colors font-medium mb-2 focus:outline-none"
       >
         <ArrowLeft size={18} />
-        <span>Back to {can(INSURER_ROLES) ? 'members' : 'patients'}</span>
+        <span>Back to {isCarer ? 'the people you care for' : can(INSURER_ROLES) ? 'members' : 'patients'}</span>
       </button>
     )
   );
@@ -325,14 +327,17 @@ export default function PatientDetail() {
 
           <ForecastPanel patientId={patient.id} />
 
-          <AiInsightsPanel
-            patientId={patient.id}
-            riskScore={patient.risk_score}
-            riskBand={patient.risk_band}
-            drivers={patient.drivers}
-          />
+          {/* The care team's tools: AI suggestions and coordination notes. */}
+          {!isCarer && (
+            <AiInsightsPanel
+              patientId={patient.id}
+              riskScore={patient.risk_score}
+              riskBand={patient.risk_band}
+              drivers={patient.drivers}
+            />
+          )}
 
-          <CareCoordination patientId={patient.id} />
+          {!isCarer && <CareCoordination patientId={patient.id} />}
 
         </div>
       </div>

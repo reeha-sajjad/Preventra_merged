@@ -131,30 +131,10 @@ export default function ZoeCard({ patientIdx = null, patientName = null }) {
         )}
       </ul>
 
-      {/* Doses a caretaker recorded: tick (caretaker), and the last one for everyone */}
+      {/* Doses a caretaker recorded: this week (or today) at a glance, the
+          last four weeks as a strip, and the recent entries. */}
       {given && !plan.medicine.stopped && (given.can_tick || lastGiven) && (
-        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-gray-100 px-4 py-3">
-          <div className="flex-1 min-w-[180px] text-sm text-gray-700">
-            {lastGiven
-              ? <>Last dose recorded {new Date(lastGiven.given_at).toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' })}
-                  {' '}by {lastGiven.logged_by}.
-                  {given.expected_4_weeks ? <span className="text-gray-500"> {given.last_4_weeks} of {given.expected_4_weeks} expected in the last 4 weeks.</span> : null}</>
-              : 'No doses recorded yet.'}
-            {lastGiven?.can_undo && (
-              <button type="button" onClick={() => undo(lastGiven.id)}
-                className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 hover:underline">
-                <Undo2 size={11} /> Undo
-              </button>
-            )}
-          </div>
-          {given.can_tick && (
-            <button type="button" onClick={tick} disabled={ticking}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white disabled:opacity-50"
-              style={{ background: '#1E6B34' }}>
-              {ticking ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Dose given
-            </button>
-          )}
-        </div>
+        <DoseLog given={given} ticking={ticking} onTick={tick} onUndo={undo} />
       )}
 
       {editing === 'dose' && <DoseForm plan={plan} patientIdx={patientIdx} onSaved={saved} onCancel={() => setEditing(null)} />}
@@ -292,5 +272,86 @@ function AppointmentForm({ plan, patientIdx, onSaved, onCancel }) {
                className={field} />
       </label>
     </FormShell>
+  );
+}
+
+
+const DAY = 86400000;
+const short = (d) => d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+/** The dose log: weekly medicines as four weekly boxes, daily ones as the last
+ * seven days, then the recent entries with who logged them. A carer can log
+ * more than one (the backend only refuses a second tap within two hours). */
+function DoseLog({ given, ticking, onTick, onUndo }) {
+  const entries = given.entries || [];
+  const at = entries.map((e) => new Date(e.given_at));
+  const now = new Date();
+  const daily = given.frequency === 'daily';
+  // Rolling windows ending today: 4 weeks of 7 days, or 7 single days.
+  const span = daily ? 1 : 7;
+  const count = daily ? 7 : 4;
+  const slots = Array.from({ length: count }, (_, i) => {
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1 - i * span);
+    const begin = new Date(end - span * DAY);
+    const hit = at.find((d) => d >= begin && d < end);
+    const label = daily ? (i === 0 ? 'Today' : begin.toLocaleDateString(undefined, { weekday: 'short' }))
+                        : (i === 0 ? 'This week' : i === 1 ? 'Last week' : `${i} weeks ago`);
+    return { label, hit };
+  }).reverse();
+  const current = slots[slots.length - 1];
+  return (
+    <div className="mt-3 rounded-xl border border-gray-100 px-4 py-3 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm">
+          <span className="font-semibold text-gray-800">{daily ? 'Today: ' : 'This week: '}</span>
+          {current.hit
+            ? <span style={{ color: '#1E6B34' }}>given {short(current.hit)} ✓</span>
+            : <span style={{ color: '#B45309' }}>not logged yet</span>}
+          {given.expected_4_weeks
+            ? <span className="text-gray-500"> · {given.last_4_weeks} of {given.expected_4_weeks} doses in the last 4 weeks</span> : null}
+        </div>
+        {given.can_tick && (
+          <button type="button" onClick={onTick} disabled={ticking}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold px-3.5 py-2 rounded-lg text-white disabled:opacity-50"
+            style={{ background: '#1E6B34' }}>
+            {ticking ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Log a dose given now
+          </button>
+        )}
+      </div>
+
+      <div className={`grid gap-2 ${daily ? 'grid-cols-7' : 'grid-cols-4'}`}>
+        {slots.map((sl) => (
+          <div key={sl.label} className="rounded-lg px-2 py-2 text-center border"
+               style={{ background: sl.hit ? '#EAF5EC' : '#F8FAFC', borderColor: sl.hit ? '#BFE0C6' : '#EDF2F7' }}>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{sl.label}</div>
+            <div className="text-sm font-semibold mt-0.5" style={{ color: sl.hit ? '#1E6B34' : '#A0AEC0' }}>
+              {sl.hit ? '✓' : '—'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {entries.length > 0 ? (
+        <ul className="divide-y divide-gray-100">
+          {entries.slice(0, 4).map((e) => (
+            <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-xs">
+              <span className="text-gray-700">
+                {new Date(e.given_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
+                <span className="text-gray-400"> · by {e.logged_by}</span>
+                {e.note && <span className="text-gray-500"> · {e.note}</span>}
+              </span>
+              {e.can_undo && (
+                <button type="button" onClick={() => onUndo(e.id)}
+                  className="inline-flex items-center gap-1 font-medium text-gray-500 hover:text-gray-800 hover:underline">
+                  <Undo2 size={11} /> Undo
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-gray-500">No doses logged yet.</p>
+      )}
+    </div>
   );
 }

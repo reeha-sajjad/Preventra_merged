@@ -1,110 +1,156 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Pill, AlertTriangle, CalendarCheck, PackageX, Users, Loader2 } from 'lucide-react';
+import { HeartHandshake, Users, AlertTriangle, Pill, PackageX, CalendarCheck, ChevronRight, FileText, Loader2 } from 'lucide-react';
 import { getMyPeople } from '../api';
+import RiskBadge from '../components/shared/RiskBadge';
 import { ago } from '../components/followups/format';
 
-const BAND = {
-  High:   { text: 'text-red-700', pill: 'bg-red-50 text-red-700' },
-  Medium: { text: 'text-amber-700', pill: 'bg-amber-50 text-amber-800' },
-  Low:    { text: 'text-green-700', pill: 'bg-green-50 text-green-800' },
-};
 const ALERT = {
-  refill_problem: { icon: PackageX, cls: 'text-red-700' },
-  dose_due:       { icon: Pill, cls: 'text-amber-700' },
-  booked:         { icon: CalendarCheck, cls: 'text-green-700' },
+  refill_problem: { icon: PackageX, pill: 'bg-red-50 text-red-700' },
+  dose_due:       { icon: Pill, pill: 'bg-amber-50 text-amber-800' },
+  booked:         { icon: CalendarCheck, pill: 'bg-green-50 text-green-800' },
 };
 
 /**
- * A caretaker's home (api/caretaker_home.py): everyone who linked them, most
- * in need first - their readmission risk, why they were in hospital, when the
- * medicines were last logged, and anything that needs the carer. Opening a
- * person shows their full summary (PatientHome). GLP-1 has the same page.
+ * A caretaker's home (api/caretaker_home.py), laid out like the pharmacy and
+ * insurer pages: the counts that need them, then everyone who linked them, most
+ * in need first. A row opens the patient's full record (PatientDetail - read
+ * only, logged as "Caretaker (linked by the patient)"); "Summary" opens the
+ * plain-words page written to the patient. GLP-1 has the same page.
  */
 export default function MyPeople() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [view, setView] = useState('all');
   useEffect(() => { getMyPeople().then(setData).catch((e) => setError(e.message)); }, []);
 
-  if (!data) {
-    return (
-      <div className="flex justify-center py-16 text-sm text-gray-500">
-        {error ? <span className="text-red-700">{error}</span> : <Loader2 className="animate-spin" />}
-      </div>
-    );
+  const people = data?.people || [];
+  const has = (p, kind) => p.alerts.some((a) => a.kind === kind);
+  const shown = useMemo(() => (
+    view === 'high' ? people.filter((p) => p.band === 'High')
+      : view === 'meds' ? people.filter((p) => has(p, 'dose_due'))
+      : view === 'refill' ? people.filter((p) => has(p, 'refill_problem'))
+      : people
+  ), [people, view]);
+
+  if (error && !data) {
+    return <div className="p-6"><div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{error}</div></div>;
   }
-  if (data.people.length === 0) {
-    return (
-      <div className="mx-auto my-8 max-w-xl rounded-xl border border-gray-200 bg-white p-8 text-center">
-        <Users size={22} className="mx-auto text-gray-300" />
-        <p className="mt-3 text-sm leading-relaxed text-gray-600">
-          Nobody has added you as their caretaker yet. Ask the person you care for to add you from their own
-          page, using the email you signed up with - or ask their hospital to, with their agreement.
-        </p>
-      </div>
-    );
-  }
+  if (!data) return <div className="flex justify-center p-16 text-gray-400"><Loader2 className="animate-spin" /></div>;
+
+  const stats = {
+    people: people.length,
+    high: people.filter((p) => p.band === 'High').length,
+    meds: people.filter((p) => has(p, 'dose_due')).length,
+    refill: people.filter((p) => has(p, 'refill_problem')).length,
+  };
+  const openRecord = (id) => navigate(`/patients/${encodeURIComponent(id)}`);
 
   return (
-    <div className="mx-auto max-w-[1080px] space-y-5 py-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">People you care for</h1>
-        <p className="mt-0.5 text-sm text-gray-500">Anyone who needs you today is at the top.</p>
+        <h1 className="flex items-center gap-2 text-2xl font-bold text-ns-navy">
+          <HeartHandshake size={24} className="text-gray-400" /> People you care for
+        </h1>
+        <p className="mt-1 max-w-2xl text-sm text-gray-500">
+          Everyone who added you as their caretaker. What you open here is recorded in their hospital&rsquo;s access log.
+        </p>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {data.people.map((p) => {
-          const band = BAND[p.band] || { text: 'text-gray-800', pill: 'bg-gray-100 text-gray-700' };
-          return (
-            <button key={p.patient_id} type="button" onClick={() => navigate(`/person/${encodeURIComponent(p.patient_id)}`)}
-              className="group rounded-xl border border-gray-200 bg-white p-5 text-left shadow-sm transition-shadow hover:shadow-md">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-base font-semibold text-gray-900">{p.name}</div>
-                  <div className="mt-0.5 text-xs text-gray-500">{p.status}</div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className={`text-xl font-semibold leading-none ${band.text}`}>{p.risk_score}%</div>
-                  {p.band && <div className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${band.pill}`}>{p.band} risk</div>}
-                </div>
-              </div>
 
-              {p.alerts.length > 0 && (
-                <ul className="mt-3 space-y-1">
-                  {p.alerts.map((a) => {
-                    const k = ALERT[a.kind] || { icon: AlertTriangle, cls: 'text-gray-600' };
-                    return (
-                      <li key={a.kind} className={`flex items-center gap-1.5 text-xs font-medium ${k.cls}`}>
-                        <k.icon size={12} /> {a.text}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Tile icon={Users} label="People" value={stats.people} sub="linked to you" tone="text-ns-navy"
+              active={view === 'all'} onClick={() => setView('all')} />
+        <Tile icon={AlertTriangle} label="High readmission risk" value={stats.high} sub="latest score" tone="text-risk-high"
+              active={view === 'high'} onClick={() => setView('high')} />
+        <Tile icon={Pill} label="Medicines to log" value={stats.meds} sub="not logged today" tone="text-amber-700"
+              active={view === 'meds'} onClick={() => setView('meds')} />
+        <Tile icon={PackageX} label="Refill problems" value={stats.refill} sub="reported by the pharmacy" tone="text-risk-high"
+              active={view === 'refill'} onClick={() => setView('refill')} />
+      </div>
 
-              <dl className="mt-4 grid grid-cols-3 gap-3 text-xs">
-                <div>
-                  <dt className="text-gray-400">In hospital for</dt>
-                  <dd className="mt-0.5 text-gray-700">{p.reason || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-gray-400">Went home</dt>
-                  <dd className="mt-0.5 text-gray-700">{p.discharged || '—'}</dd>
-                </div>
-                <div>
-                  <dt className="text-gray-400">Medicines last logged</dt>
-                  <dd className="mt-0.5 text-gray-700">
-                    {p.logged_today ? 'Today' : p.last_given ? `${ago(p.last_given.at)} · ${p.last_given.by}` : 'Not yet'}
-                  </dd>
-                </div>
-              </dl>
-              <div className="mt-3 flex items-center justify-end text-xs font-semibold text-ns-navy">
-                Open summary <ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5" />
-              </div>
-            </button>
-          );
-        })}
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-5 py-4">
+          <h2 className="font-semibold text-gray-800">
+            {view === 'high' ? 'High readmission risk' : view === 'meds' ? 'Medicines to log' : view === 'refill' ? 'Refill problems' : 'Everyone'}
+            <span className="ml-2 text-xs font-normal text-gray-400">{shown.length}</span>
+          </h2>
+        </div>
+        {people.length === 0 ? (
+          <p className="mx-auto max-w-lg p-8 text-center text-sm leading-relaxed text-gray-500">
+            Nobody has added you as their caretaker yet. Ask the person you care for to add you from their own page,
+            using the email you signed up with - or ask their hospital to, with their agreement.
+          </p>
+        ) : shown.length === 0 ? (
+          <p className="p-8 text-center text-sm text-gray-400">Nobody here right now.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-5 py-3">Person</th><th className="px-5 py-3">Readmission risk</th>
+                  <th className="px-5 py-3">In hospital for</th><th className="px-5 py-3">Went home</th>
+                  <th className="px-5 py-3">Medicines logged</th><th className="px-5 py-3">Needs you</th>
+                  <th className="px-5 py-3" aria-label="Open" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {shown.map((p) => (
+                  <tr key={p.patient_id} className="cursor-pointer hover:bg-gray-50" onClick={() => openRecord(p.patient_id)}>
+                    <td className="whitespace-nowrap px-5 py-3">
+                      <div className="font-semibold text-gray-900">{p.name}</div>
+                      <div className="font-mono text-xs text-gray-400">{p.patient_id}</div>
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-3">
+                      <span className="mr-2 font-bold text-gray-900">{Number(p.risk_score).toFixed(1)}%</span>
+                      {p.band && <RiskBadge riskBand={p.band} size="sm" />}
+                    </td>
+                    <td className="px-5 py-3 text-gray-700">{p.reason || '—'}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-xs text-gray-600">{p.discharged || '—'}</td>
+                    <td className="whitespace-nowrap px-5 py-3 text-xs text-gray-600">
+                      {p.logged_today ? <span className="font-semibold text-green-700">Today ✓</span>
+                        : p.last_given ? <>{ago(p.last_given.at)}<div className="text-gray-400">by {p.last_given.by}</div></>
+                        : 'Not yet'}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {p.alerts.length === 0 && <span className="text-xs text-gray-300">—</span>}
+                        {p.alerts.map((a) => {
+                          const k = ALERT[a.kind] || { icon: AlertTriangle, pill: 'bg-gray-100 text-gray-700' };
+                          return (
+                            <span key={a.kind} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${k.pill}`}>
+                              <k.icon size={11} /> {a.text}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-5 py-3 text-right">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/person/${encodeURIComponent(p.patient_id)}`); }}
+                        className="mr-1 inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+                        <FileText size={12} /> Summary
+                      </button>
+                      <ChevronRight size={15} className="inline text-gray-300" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function Tile({ icon, label, value, sub, tone, active, onClick }) {
+  const Icon = icon;
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active}
+      className={`rounded-lg border bg-white p-3 text-left transition-colors hover:bg-gray-50 sm:p-4 ${active ? 'border-ns-navy ring-1 ring-ns-navy' : 'border-gray-200'}`}>
+      <div className={`flex items-center gap-1.5 text-xs font-medium sm:text-sm ${tone}`}><Icon size={15} /> {label}</div>
+      <div className="mt-1.5 text-2xl font-bold text-gray-900 sm:text-3xl">{value.toLocaleString()}</div>
+      <div className="mt-1 text-xs text-gray-500">{sub}</div>
+    </button>
   );
 }

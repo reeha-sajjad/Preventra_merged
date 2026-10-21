@@ -87,9 +87,14 @@ export default function PatientHome() {
             {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
             summary as their caretaker. It’s written to them.
           </p>
-          <Link to="/" className="inline-flex items-center gap-1 text-sm font-semibold text-ns-navy">
-            <ArrowLeft size={14} /> All my people
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to={`/patients/${encodeURIComponent(data.patient_id)}`} className="text-sm font-semibold text-ns-navy">
+              Full clinical record
+            </Link>
+            <Link to="/" className="inline-flex items-center gap-1 text-sm font-semibold text-ns-navy">
+              <ArrowLeft size={14} /> All my people
+            </Link>
+          </div>
           {/* The care team's score, for the carer who helps manage the recovery. */}
           {data.risk && (
             <div className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-gray-100 px-4 py-3">

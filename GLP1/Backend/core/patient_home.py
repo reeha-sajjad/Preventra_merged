@@ -61,37 +61,42 @@ SCHEDULE = {
 FACTORS = {
     "Financial pressure relative to income": (
         "Paying for your medicine",
-        "The cost of your medicine compared with your income can make it hard to keep going. If paying is a "
-        "struggle, tell your case manager - savings and copay programmes often help.",
-        "Paying for your medicine looks manageable for you."),
+        "Cost is one of the main reasons people stop - and stopping early throws away what you have already "
+        "paid for. Don't skip or stretch doses to save money. Tell your case manager this week: savings and "
+        "copay programmes can lower what you pay.",
+        "Paying for your medicine is manageable for you, so cost is no reason to miss a dose."),
     "Out-of-pocket medication cost": (
         "What you pay for your medicine",
-        "What you pay out of pocket is on the high side. Your case manager can check for copay or savings "
-        "programmes.",
-        "What you pay for your medicine is not a big barrier for you."),
+        "You pay more out of pocket than most. Don't let that make you skip a refill - ask your case manager "
+        "now about copay and savings programmes before your next one is due.",
+        "What you pay out of pocket is low, so there's nothing in the way of taking every dose."),
     "Provider & pharmacy refill reliability": (
         "Getting your refills on time",
-        "Collecting each refill on time keeps your treatment working. If your pharmacy often runs out, your care "
-        "team can help you find another.",
-        "Your refills have been reliable - that really helps."),
+        "Late refills are where treatment breaks down. Pick up every refill on the day it is due, and if your "
+        "pharmacy can't supply it, tell your care team straight away rather than waiting.",
+        "Your refills have been on time - keep it that way. A missed refill is the easiest way to fall off "
+        "treatment."),
     "Side effect intensity (GI friction)": (
         "Stomach side effects",
-        "Nausea and an upset stomach are common, especially early on, and usually ease. If they don't, talk to "
-        "your care team before you stop - there are often ways to make it easier.",
-        "Side effects are unlikely to be a big problem with your medicine."),
+        "Nausea and an upset stomach are common at first and usually settle within weeks. Do not stop on your "
+        "own - call your care team, who can adjust things so you can keep going.",
+        "Side effects are unlikely to be a problem with your medicine, so keep taking it exactly as prescribed."),
     "Blood sugar control (HbA1c)": (
         "Your blood sugar",
-        "Taking your medicine regularly helps bring your blood sugar down over time.",
-        "Your blood sugar results are a good reason to keep going."),
+        "Your blood sugar only comes down if you take every dose. Missed doses undo the progress, so stay on "
+        "schedule.",
+        "Your blood sugar results show the treatment working - keep every dose on schedule to hold on to it."),
     "Body weight / BMI severity": (
         "Your weight",
-        "Progress often slows after the first few months - that's normal. If it feels stuck, your care team can "
-        "help.",
-        "Your weight goals are a strong reason to keep going."),
+        "People who stop early usually regain most of the weight they lost. Progress often slows after a few "
+        "months - that is normal, not a reason to stop. Keep going, and talk to your care team if it feels "
+        "stuck.",
+        "Your weight goals depend on staying on treatment - keep going even when progress slows."),
     "Overall disease burden": (
         "Your other health conditions",
-        "Looking after several conditions at once is a lot. Your care team can help you plan it.",
-        "Your treatment can help with your other health conditions too."),
+        "With several conditions to manage, this medicine matters more, not less. Keep it on your schedule "
+        "alongside the others, and ask your care team to help you plan.",
+        "This treatment helps your other conditions too - one more reason not to miss a dose."),
 }
 
 SAFETY = ("If you have severe stomach pain that won't go away, trouble breathing, or swelling of your face or "

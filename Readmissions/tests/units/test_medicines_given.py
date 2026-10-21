@@ -15,7 +15,7 @@ def test_a_caretaker_ticks_and_the_care_team_sees_it(main, world):
     staff = as_user(main, world, "cm@a.test").get(f"/api/patients/{A4}/medicines-given").json()
     assert staff["entries"][0]["note"] == "With breakfast" and staff["expected_4_weeks"] == 28
     assert as_user(main, world, "admin@b.test").get(f"/api/patients/{A4}/medicines-given").status_code == 404
-    assert carer.get(f"/api/patients/{A4}/medicines-given").status_code == 403
+    assert carer.get(f"/api/patients/{A4}/medicines-given").status_code == 200   # their own people's record
     eid = body["entries"][0]["id"]
     assert me.delete(f"/api/my-home/medicines/{eid}").status_code == 403
     assert carer.delete(f"/api/my-home/medicines/{eid}").json()["entries"] == []

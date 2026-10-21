@@ -24,6 +24,11 @@ is safe: nothing is duplicated, and the passwords are set again.
     .venv/bin/python scripts/seed_role_logins.py --dry-run
     .venv/bin/python scripts/seed_role_logins.py
     .venv/bin/python scripts/seed_role_logins.py --pharmacy "CityCare Pharmacy" --glp1-patient 727
+    .venv/bin/python scripts/seed_role_logins.py --pharmacy "Riverside Drugs" --add-pharmacy-patient
+
+--add-pharmacy-patient also links the caretaker to the highest-risk patient (in
+each app) who fills at that pharmacy, so a report from the pharmacy login
+reaches the caretaker's bell in a demo.
 
 NOTE: if scripts/migrate_user_roles.py installed the users validator on your
 cluster, re-run it first so the database accepts the "pharmacy" and
@@ -102,6 +107,8 @@ def main() -> None:
     parser.add_argument("--pharmacy", help="pharmacy name or id (default: the one most patients fill at)")
     parser.add_argument("--readmissions-patient", help="Readmissions patient id for the caretaker, e.g. MIMIC-1101")
     parser.add_argument("--glp1-patient", help="GLP-1 patient number for the caretaker, e.g. 727")
+    parser.add_argument("--add-pharmacy-patient", action="store_true",
+                        help="also link the caretaker to the highest-risk patient who fills at the pharmacy")
     parser.add_argument("--glp1-db", default=os.environ.get("GLP1_DB", "glp1_analytics"))
     parser.add_argument("--dry-run", action="store_true", help="report without writing anything")
     args = parser.parse_args()
@@ -145,15 +152,36 @@ def main() -> None:
     r_state = _link(readm["care_actions"], r_doc, carer_id, dry)
     g_state = _link(glp1["patient_access"], g_doc, carer_id, dry)
 
+    # ---- and, if asked, a patient who fills at the pharmacy (highest risk first)
+    extra = []
+    if args.add_pharmacy_patient:
+        g_ids = [d["patient_idx"] for d in glp1["patient_access"].find(
+            {"pharmacy_id": org, "hospital_id": {"$nin": [None, ""]}}, {"patient_idx": 1})]
+        top = glp1["patients"].find_one({"patient_idx": {"$in": g_ids}}, sort=[("dropout_prob", -1)]) if g_ids else None
+        if top:
+            doc = glp1["patient_access"].find_one({"patient_idx": top["patient_idx"]})
+            extra.append(("GLP-1 patient", f"#{top['patient_idx']}", _link(glp1["patient_access"], doc, carer_id, dry)))
+        r_ids = [d["patient_id"] for d in readm["care_actions"].find(
+            {"pharmacy_id": org, "hospital_id": {"$nin": [None, ""]}}, {"patient_id": 1})]
+        if r_ids:
+            from api.db_utils import get_latest_batch_date
+            row = readm["patient_worklist"].find_one({"patient_id": {"$in": r_ids},
+                                                     "batch_date": get_latest_batch_date(readm, "patient_worklist")},
+                                                    sort=[("current_score", -1)])
+            pid = (row or {}).get("patient_id", r_ids[0])
+            doc = readm["care_actions"].find_one({"patient_id": pid})
+            extra.append(("Readmissions patient", str(pid), _link(readm["care_actions"], doc, carer_id, dry)))
+
     print(f"\n  {tag}Sign in at the Portal with the password you typed:")
     print(f"    {rx_email:<40} pharmacy  ({'new' if rx_state == 'new' else 'password reset'}) - "
           f"{pharmacy.get('name', org)}, {n_patients:,} patients across both apps")
     print(f"    {CARETAKER_EMAIL:<40} caretaker ({'new' if carer_state == 'new' else 'password reset'})")
     print(f"      Readmissions patient {r_doc['patient_id'] if r_doc else '-':<14} {r_state}")
     print(f"      GLP-1 patient        #{g_doc['patient_idx'] if g_doc else '-':<13} {g_state}")
+    for label, who, state in extra:
+        print(f"      {label:<20} {who:<14} {state}   (fills at {pharmacy.get('name', org)})")
     print(f"\n  {'Dry run: nothing written.' if dry else 'Done.'}")
 
 
 if __name__ == "__main__":
     main()
-    

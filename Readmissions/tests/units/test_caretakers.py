@@ -1,7 +1,7 @@
 """Caretakers in Readmissions (api/caretakers.py) - GLP-1's twin. Same accounts
 as test_isolation.py: carer@home.test is linked to A4 (me@patient.test)."""
 from api import access_log, auth, followups
-from tests.units.test_isolation import A2, A4, B1, as_user, main, world  # noqa: F401
+from tests.units.test_isolation import A1, A2, A4, B1, as_user, main, world  # noqa: F401
 
 
 def new_carer(world, email="new.carer@home.test"):
@@ -43,13 +43,16 @@ def test_staff_link_only_with_the_patients_agreement(main, world):
         "email": "new.carer@home.test", "patient_id": A2, "patient_agreed": True}).status_code == 403
 
 
-def test_a_caretaker_sees_the_summary_not_the_clinical_record(main, world):
+def test_a_caretaker_opens_the_clinical_record_of_their_people_and_it_is_logged(main, world):
     carer = as_user(main, world, "carer@home.test")
     home = carer.get("/api/my-home").json()
     assert home["linked"] and home["patient_id"] == A4 and home["caring_for"]["people"][0]["patient_id"] == A4
     entry = access_log.collection(world["db"]).find_one({"email": "carer@home.test"})
     assert entry["reason"] == "caretaker"
-    assert carer.get(f"/api/patients/{A4}").status_code == 403
+    assert carer.get(f"/api/patients/{A4}").status_code == 200
+    assert carer.get(f"/api/patients/{A1}").status_code == 404              # not one of theirs
+    assert carer.get(f"/api/patients/{A4}/care-actions").status_code == 403  # the care team's notes
+    assert carer.post("/api/ai-insights", json={"patient_id": A4}).status_code in (403, 422)
     assert carer.get(f"/api/caretakers?patient={A4}").status_code == 403
     for path in ("/api/overview", "/api/followups", "/api/staff"):
         assert carer.get(path).status_code in (403, 404), path

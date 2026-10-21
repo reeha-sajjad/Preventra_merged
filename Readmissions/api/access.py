@@ -107,7 +107,10 @@ REASON_ROLES = ("hospital_admin", "insurer")
 # A caretaker (a family or home carer the patient linked) is the same: the
 # patient's plain-words home page (api/patient_home.py) is what is relevant to
 # helping with their care (45 CFR 164.510(b)), not the clinical layer.
-OVERVIEW_ONLY_ROLES = ("pharmacy", "caretaker")
+# A caretaker opens the clinical layer of the patients who linked them - the
+# patient agreed to involve them in their care (45 CFR 164.510(b)) - and every
+# first look is logged as CARETAKER_REASON (AUTOMATIC_REASONS). GLP-1's twin.
+OVERVIEW_ONLY_ROLES = ("pharmacy",)
 
 # What a hospital admin may give as the reason for opening a patient's
 # clinical details. Stored as the key, shown as the label.
@@ -143,7 +146,8 @@ SUPERADMIN_REASON = "superadmin"            # logged, never asked for
 TREATMENT_REASON = "treatment"
 COORDINATION_REASON = "case_management"
 AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,
-                     "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON}
+                     "nurse": TREATMENT_REASON, "case_manager": COORDINATION_REASON,
+                     "caretaker": "caretaker"}       # = CARETAKER_REASON, defined below
 # Emergency access ("break the glass", api/emergency.py): a doctor or nurse
 # opening a patient of their hospital who is not on their care team, with a
 # reason and a note, for 24 hours. Logged under its own reason and reviewed by
