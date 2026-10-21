@@ -31,6 +31,8 @@ from api import hospital
 from api import risk_watch
 from api import followups
 from api import ingest
+from api import ingest_connections
+from api import ai_settings, data_upload, llm
 from api import emergency
 from api import pharmacy
 from api import patient_home
@@ -42,7 +44,7 @@ from api import caretaker_home
 from api import insurer as insurer_home_page
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
-from api.gemini_insights import generate_roi_and_counterfactual, generate_week_narrative
+from api.ai_insights import generate_roi_and_counterfactual, generate_week_narrative
 from models import early_warning
 from models.monitoring_rules import (RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
                                      LABEL_TO_SIGNAL, MODEL_SOURCE, SIGNAL_RULES,
@@ -433,6 +435,7 @@ access_log.ensure_indexes(db)
 # The ingest API (api/ingest.py) reads the database through a getter, so it
 # always uses this module's db - the same handle as every other route.
 ingest.bind(lambda: db)
+llm.bind(lambda: db)
 try:
     ingest.ensure_indexes(db)
 except Exception as exc:                                  # noqa: BLE001
@@ -440,6 +443,9 @@ except Exception as exc:                                  # noqa: BLE001
     print(f"WARNING: could not create the ingest indexes ({type(exc).__name__}: {exc})")
 app.include_router(ingest.router)
 app.include_router(ingest.admin)
+app.include_router(ingest_connections.router)
+app.include_router(ai_settings.router)
+app.include_router(data_upload.router)
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +676,12 @@ def _cached(key, produce):
 
 
 def _latest_batch(collection: str = "patient_worklist"):
-    return _cached(f"batch:{collection}", lambda: get_latest_batch_date(db, collection))
+    found = _cached(f"batch:{collection}", lambda: get_latest_batch_date(db, collection))
+    if found is None:
+        # "Nothing yet" is not kept: a new hospital's first upload shows at
+        # once instead of up to CACHE_TTL_SECONDS later.
+        _cache.pop(f"batch:{collection}", None)
+    return found
 
 
 # Only the fields the worklist renders. Pulling whole documents - including
@@ -1064,7 +1075,7 @@ def get_patient(patient_id: str, request: Request):
 # feed. The intervals are irregular and wide - on MIMIC-IV the median gap
 # between consecutive admissions is ~83 days and the 75th percentile is ~355 -
 # so every point carries its own elapsed time, and both the status rules and
-# the Gemini narration read that interval rather than assuming a week.
+# the model's narration read that interval rather than assuming a week.
 #
 # A true weekly cadence needs a source that samples weekly (post-discharge
 # telemetry); until that exists, this module describes what the data is.
@@ -1089,7 +1100,7 @@ def _days_between(earlier: str, later: str):
 
 
 def _describe_interval(days) -> str:
-    """Plain-English elapsed time, used in the UI label and the Gemini prompt."""
+    """Plain-English elapsed time, used in the UI label and the model's prompt."""
     if days is None:
         return "interval unknown"
     if days < 0:
@@ -1488,7 +1499,7 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
         "weeks_observed": sum(1 for w in weeks if w["observed"]),
         # Whether there is a case for intervening at THIS point in the series.
         # Sent with the trend so the page can decide whether to lead with money
-        # or with "no action needed" before it asks Gemini for anything.
+        # or with "no action needed" before it asks a model for anything.
         "roi_case": roi_case(latest, status),
         # Which condition this patient is monitored as, what it was decided on,
         # and which readings matter for them. Surfaced rather than applied
@@ -1662,7 +1673,7 @@ def get_patient_trend(patient_id: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# AI insights — ROI estimate + counterfactual explanation (Gemini)
+# AI insights — ROI estimate + counterfactual explanation (api/ai_insights.py)
 # ---------------------------------------------------------------------------
 
 class DriverInsightInput(BaseModel):
@@ -1671,7 +1682,7 @@ class DriverInsightInput(BaseModel):
     explanation: str = ""
     # {kind, feed, channel} - which monitoring feed this value arrived on. The
     # narrative reads differently when a number is a pharmacy fact rather than
-    # a patient's own report, so it is passed through to Gemini.
+    # a patient's own report, so it is passed through to the model.
     source: Optional[dict] = None
 
 
@@ -1703,12 +1714,12 @@ def get_ai_insights(payload: AIInsightsRequest, request: Request):
 
     The money is computed here, from the itemised model in api/roi_model.py, so
     the same patient always produces the same figures and every line item is
-    auditable. Gemini is given that breakdown and writes only the narrative
+    auditable. The model is given that breakdown and writes only the narrative
     around it — it no longer prices anything or does the arithmetic.
     """
     _require_detail(request, payload.patient_id)
     if not access.sees_costs(request.state.user):
-        # The counterfactual only. Gemini is given no figures at all, and is
+        # The counterfactual only. The model is given no figures at all, and is
         # told never to state one that is not in its input, so nothing about
         # money can reach a role that does not see costs.
         try:
@@ -1716,13 +1727,17 @@ def get_ai_insights(payload: AIInsightsRequest, request: Request):
                 patient_id=payload.patient_id, risk_score=payload.risk_score,
                 risk_band=payload.risk_band,
                 drivers=[d.model_dump() for d in payload.drivers], roi=None)
+        except llm.LLMUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"AI explanations are off: {exc}")
         except Exception as exc:
-            print(f"[ai-insights] Gemini call failed: {exc}")
+            print(f"[ai-insights] model call failed: {type(exc).__name__}")
             raise HTTPException(
                 status_code=503,
                 detail="AI insights are temporarily unavailable. Please try again in a moment.")
         return {"counterfactual_explanation": narrative.get("counterfactual_explanation", []),
                 "costs_hidden": True}
+    # The figures are ours and never wait on a model: with AI off, or a model
+    # that fails, they come back without the written explanation.
     roi = compute_roi(payload.risk_score, trend_status=payload.trend_status)
     try:
         narrative = generate_roi_and_counterfactual(
@@ -1733,12 +1748,12 @@ def get_ai_insights(payload: AIInsightsRequest, request: Request):
             roi=roi,
         )
         return {**roi, **narrative}
+    except llm.LLMUnavailable:
+        return {**roi, "roi_rationale": [], "counterfactual_explanation": [], "ai": False}
     except Exception as exc:
-        print(f"[ai-insights] Gemini call failed: {exc}")
-        raise HTTPException(
-            status_code=503,
-            detail="AI insights are temporarily unavailable. Please try again in a moment.",
-        )
+        print(f"[ai-insights] model call failed: {type(exc).__name__}")
+        return {**roi, "roi_rationale": [], "counterfactual_explanation": [],
+                "ai_error": "The written explanation is unavailable right now. Try again in a moment."}
 
 
 class WeekNarrativeRequest(BaseModel):
@@ -1750,7 +1765,7 @@ class WeekNarrativeRequest(BaseModel):
     week_trend: str = "stable"
     drivers: list[DriverInsightInput] = []
     # Interval context. Optional so an older client still gets a narrative, but
-    # without it Gemini is explicitly told not to characterise the pace of the
+    # without it the model is explicitly told not to characterise the pace of the
     # change rather than assuming a week has passed.
     days_since_prev: Optional[int] = None
     interval_label: str = ""
@@ -1771,7 +1786,7 @@ class WeekNarrativeRequest(BaseModel):
 
 @app.post("/api/week-narrative")
 def get_week_narrative(payload: WeekNarrativeRequest, request: Request):
-    """On-demand Gemini call: narrate why one admission's score in the trend
+    """On-demand model call: narrate why one admission's score in the trend
     series is where it is, using that admission's drivers, its delta from the
     previous admission, and the elapsed time between the two. Triggered per
     point from the risk trend module."""
@@ -1796,8 +1811,10 @@ def get_week_narrative(payload: WeekNarrativeRequest, request: Request):
             observed=payload.observed,
             primary_diagnosis=payload.primary_diagnosis,
         )
+    except llm.LLMUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"AI explanations are off: {exc}")
     except Exception as exc:
-        print(f"[week-narrative] Gemini call failed: {exc}")
+        print(f"[week-narrative] model call failed: {type(exc).__name__}")
         raise HTTPException(
             status_code=503,
             detail="AI explanation is temporarily unavailable. Please try again in a moment.",
