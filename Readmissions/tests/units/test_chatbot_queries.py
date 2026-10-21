@@ -941,3 +941,59 @@ def test_a_name_nothing_resembles_suggests_nothing():
     result = list_registered_doctors(_directory_db(), name="Zzyzx")
     assert result["count"] == 0
     assert result["closest_matches"] is None
+
+
+# ---------------------------------------------------------------------------
+# Conditions mean what the patient list means, and the care team is known
+# ---------------------------------------------------------------------------
+# "Patients with heart disease" answered for the 271 MONITORED as heart disease
+# while the list's Condition filter showed the 547 who HAVE it - and missed the
+# highest-risk one, monitored as heart failure. And "who is this patient's
+# doctor?" had no answer: the care team lives in care_actions.
+
+@pytest.fixture
+def conditions_db():
+    from chatbot_queries import reset_vocabulary_cache
+    reset_vocabulary_cache()
+    database = mongomock.MongoClient()["neuroshield"]
+    database["patient_worklist"].insert_many([
+        {"patient_id": "HF-1", "batch_date": LATEST_BATCH, "current_score": 95.1, "current_band": "High",
+         "group_label": "Heart failure", "clinical_groups": ["heart_failure", "cardiac_other"]},
+        {"patient_id": "HD-1", "batch_date": LATEST_BATCH, "current_score": 79.5, "current_band": "High",
+         "group_label": "Heart disease", "clinical_groups": ["cardiac_other"]},
+        {"patient_id": "DM-1", "batch_date": LATEST_BATCH, "current_score": 40.0, "current_band": "High",
+         "group_label": "Diabetes", "clinical_groups": ["diabetes"]},
+    ])
+    yield database
+    reset_vocabulary_cache()
+
+
+def test_a_condition_by_its_screen_name_matches_everyone_who_has_it(conditions_db):
+    result = list_patients(conditions_db, filters=[{"field": "clinical_groups", "op": "eq",
+                                                    "value": "Heart disease"}])
+    assert result["count_matching"] == 2
+    assert result["patients"][0]["patient_id"] == "HF-1"          # monitored as heart failure, still counted
+    assert "Heart disease" in result["filter"] and "cardiac_other" not in result["filter"]
+
+
+def test_monitored_as_is_still_its_own_question(conditions_db):
+    result = list_patients(conditions_db, filters=[{"field": "group_label", "op": "eq", "value": "Heart disease"}])
+    assert [p["patient_id"] for p in result["patients"]] == ["HD-1"]
+
+
+def test_an_unknown_condition_names_the_real_ones(conditions_db):
+    with pytest.raises(ValueError, match=r"cardiac_other \(Heart disease\)"):
+        list_patients(conditions_db, filters=[{"field": "clinical_groups", "op": "eq", "value": "Gout"}])
+
+
+def test_patient_details_carry_the_care_team(conditions_db):
+    conditions_db["doctors"].insert_one({"doctor_id": "DR-1", "name": "Dr Emily Carter",
+                                         "specialty": "Cardiology"})
+    nurse = conditions_db.client["shared_identity"]["users"].insert_one(
+        {"email": "grace@h.test", "name": "Grace Taylor", "role": "nurse"}).inserted_id
+    conditions_db["care_actions"].insert_one({"patient_id": "HD-1", "assigned_doctor_id": "DR-1",
+                                              "assigned_nurse_ids": [str(nurse)]})
+    team = get_patient_details(conditions_db, "HD-1")["care_team"]
+    assert team == {"doctor": "Dr Emily Carter (Cardiology)", "nurses": ["Grace Taylor"]}
+    assert get_patient_details(conditions_db, "DM-1")["care_team"] == {
+        "doctor": "no doctor assigned", "nurses": "no nurse assigned"}

@@ -183,7 +183,11 @@ def get_patient_drivers(db, patient_id: str) -> dict:
 
 
 def get_patient_details(db, patient_id: str) -> dict:
-    """Returns the full patient_worklist document for one patient_id."""
+    """Returns the full patient_worklist document for one patient_id, with the
+    patient's care team - the assigned doctor and nurses - as the patient list
+    shows it. The care team lives in care_actions, not on the worklist row, so
+    without it "who is this patient's doctor?" had no answer."""
+    from api import hospital
     batch_date = _latest_batch_or_raise(db)
 
     row = db["patient_worklist"].find_one(
@@ -193,6 +197,17 @@ def get_patient_details(db, patient_id: str) -> dict:
     if not row:
         raise LookupError(f"No patient found with patient_id '{patient_id}'.")
 
+    try:
+        team = hospital.care_teams(db, [row["patient_id"]]).get(str(row["patient_id"])) or {}
+    except Exception as exc:                                             # noqa: BLE001
+        print(f"[chatbot] could not read the care team for {patient_id}: {exc}")
+        team = {}
+    doctor = team.get("doctor")
+    row["care_team"] = {
+        "doctor": (f"{doctor['name']}" + (f" ({doctor['specialty']})" if doctor.get("specialty") else ""))
+                  if doctor else "no doctor assigned",
+        "nurses": [n.get("name") or n.get("email") for n in team.get("nurses") or []] or "no nurse assigned",
+    }
     return row
 
 
@@ -600,7 +615,14 @@ FIELDS = {
     "current_band":      Field("string", "current risk band", values=("Low", "Medium", "High")),
     "risk_band":         Field("string", "risk band at discharge", values=("Low", "Medium", "High")),
     "gender":            Field("string", "sex", values=("F", "M")),
-    "group_label":       Field("string", "primary condition"),
+    # Two different questions, and they gave two different answers. A patient
+    # HAS every condition in clinical_groups - that is what the patient list's
+    # Condition filter matches - and is MONITORED AS one of them (group_label).
+    # Labelled "primary condition", group_label was the one the model reached
+    # for on "patients with heart disease", and answered for 271 patients where
+    # the list shows 547, missing the highest-risk one because their weekly plan
+    # follows heart failure.
+    "group_label":       Field("string", "condition monitored as"),
     "clinical_groups":   Field("string", "condition", array=True),
     "primary_diagnosis": Field("string", "principal diagnosis"),
     "monitoring_status": Field("string", "monitoring status"),
@@ -690,13 +712,19 @@ def field_vocabulary(db, field: str):
     return resolved
 
 
+def _condition_names(values) -> list:
+    """Condition keys as the screen names them: "cardiac_other (Heart disease)"."""
+    return [f"{v} ({GROUP_LABELS[v]})" if v in GROUP_LABELS else str(v) for v in values]
+
+
 def describe_vocabularies(db) -> str:
     """The catalog, as a line per field, for injection into the selection prompt."""
     lines = []
     for field in ENUMERABLE_FIELDS:
         values = field_vocabulary(db, field)
         if values:
-            lines.append(f"- {field}: {', '.join(values)}")
+            shown = _condition_names(values) if field == "clinical_groups" else values
+            lines.append(f"- {field}: {', '.join(shown)}")
     return "\n".join(lines)
 
 
@@ -710,11 +738,20 @@ def _resolve_categorical(db, field: str, value):
     vocabulary = field_vocabulary(db, field)
     if not vocabulary:
         return value
+    wanted = str(value).strip().lower()
+    # A condition may be named as the screen shows it ("Heart disease") or by
+    # its key ("cardiac_other"); clinical_groups stores keys, group_label names.
+    names = {label.lower(): key for key, label in GROUP_LABELS.items()}
+    if field == "clinical_groups" and wanted in names:
+        wanted = names[wanted]
+    elif field == "group_label" and wanted in GROUP_LABELS:
+        wanted = GROUP_LABELS[wanted].lower()
     for known in vocabulary:
-        if str(known).strip().lower() == str(value).strip().lower():
+        if str(known).strip().lower() == wanted:
             return known
+    shown = _condition_names(vocabulary) if field == "clinical_groups" else vocabulary
     raise ValueError(
-        f"'{value}' is not a value of '{field}'. Valid values: {', '.join(vocabulary)}.")
+        f"'{value}' is not a value of '{field}'. Valid values: {', '.join(shown)}.")
 
 
 def _validate_filters(db, filters) -> tuple:
@@ -757,7 +794,9 @@ def _validate_filters(db, filters) -> tuple:
         else:
             match.setdefault(name, {})[FILTER_OPS[op]] = value
 
-        described.append(f"{spec.label} {op} {value}")
+        named = ([GROUP_LABELS.get(v, v) for v in value] if isinstance(value, list) else GROUP_LABELS.get(value, value)) \
+            if name == "clinical_groups" else value
+        described.append(f"{spec.label} {op} {named}")
     return match, described
 
 
