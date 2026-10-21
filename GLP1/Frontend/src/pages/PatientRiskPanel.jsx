@@ -239,6 +239,9 @@ export default function PatientRiskPanel() {
       const av = a[sortKey], bv = b[sortKey];
       return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
     });
+    // Searching a number: that exact patient first (exact number first).
+    const exact = /^\d+$/.test(search.trim()) ? Number(search.trim()) : null;
+    if (exact !== null) d.sort((a, b) => (b.patient_idx === exact) - (a.patient_idx === exact));
     return d;
   }, [patients, search, segFilter, molFilter, predFilter, financialOnly, minRisk, sortKey, sortDir,
       care.doctor, care.nurse, care.unassigned, care.caseManager]);
