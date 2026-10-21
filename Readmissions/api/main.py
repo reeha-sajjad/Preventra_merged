@@ -46,7 +46,7 @@ from api.gemini_insights import generate_roi_and_counterfactual, generate_week_n
 from models import early_warning
 from models.monitoring_rules import (RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
                                      LABEL_TO_SIGNAL, MODEL_SOURCE, SIGNAL_RULES,
-                                     score_week, signal_plan, signals_for,
+                                     contact_gap, score_week, signal_plan, signals_for,
                                      source_for, variant_for, week_sources)
 from models.discharge_baseline import (derive_baseline, describe as describe_baseline,
                                        relative_observations)
@@ -1353,22 +1353,41 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
     if not baseline_record:
         baseline_record = derive_baseline(patient_id, group["group"])
 
-    weeks, prev = [], None
-    for doc in docs:
+    # The change on a card is measured from the last week with readings, and
+    # the elapsed time from when those readings were taken. A week nobody
+    # reported only holds the score, so it shows no change of its own; the
+    # first week after it carries the whole movement since the last contact,
+    # and says so. Measuring each card from the one before it made a silent
+    # fortnight read as "+0.0, +0.0, +36.1 in 7 days". Real check-ins that skip
+    # a week have no document for it, so the gap comes from the dates too.
+    weeks, last = [], None          # last: (score, week number, days after discharge)
+    for i, doc in enumerate(docs):
         try:
             score = float(doc.get("risk_score", 0))
         except (TypeError, ValueError):
             score = 0.0
 
         wk = int(doc.get("week_number", len(weeks)))
-        if prev is None:
-            delta, week_trend = None, "stable"
-        else:
-            delta = round(score - prev, 1)
+        days = int(doc.get("days_after_discharge", 7 * wk) or 7 * wk)
+        observed = bool(doc.get("observed", True))
+        delta, week_trend, gap_days, since_week = None, "stable", None, None
+        if last is not None and observed:
+            delta = round(score - last[0], 1)
             week_trend = ("increasing" if delta >= WEEK_TREND_NOISE_BAND else
                           "decreasing" if delta <= -WEEK_TREND_NOISE_BAND else "stable")
-
-        observed = bool(doc.get("observed", True))
+            gap_days, since_week = days - last[2], last[1]
+        if wk == 0:
+            interval = "discharge baseline"
+        elif not observed:
+            held = last[1] if last else 0
+            interval = ("no readings this week - score held from "
+                        + ("discharge" if held == 0 else f"week {held}"))
+        elif gap_days in (None, 7) or (since_week is not None and since_week == wk - 1 and gap_days <= 8):
+            interval = "7 days later"
+        elif since_week == 0:
+            interval = f"{gap_days} days after discharge - the first readings since"
+        else:
+            interval = f"{gap_days} days after the last readings (week {since_week})"
 
         # Where this week's numbers came from. Week 0 is not a monitoring week
         # at all - it is the model reading the discharge record - so it is
@@ -1396,18 +1415,24 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
             # Readings that need assessing today - see models/monitoring_rules.
             "red_flags": [RED_FLAGS[k][1] for k in (doc.get("red_flags") or []) if k in RED_FLAGS],
             "delta": delta,
+            # Which week the change is measured from, when it is not the week
+            # before - the first contact after a silent week.
+            "delta_since_week": since_week if since_week is not None and since_week != wk - 1 else None,
             "week_trend": week_trend,
-            "days_after_discharge": int(doc.get("days_after_discharge", 7 * wk)),
-            "days_since_prev": None if wk == 0 else 7,
-            "interval_label": ("discharge baseline" if wk == 0 else
-                               "7 days later" if observed else
-                               "7 days later, no readings recorded - score carried forward"),
+            "days_after_discharge": days,
+            "days_since_prev": None if wk == 0 else (gap_days or 7),
+            "interval_label": interval,
             "observed": observed,
+            # A silent week after warning signs: someone should be calling.
+            "contact_overdue": (not observed) and contact_gap(docs[:i + 1])["overdue"],
+            # Which week's readings a silent week is still showing.
+            "held_from_week": (last[1] if last else 0) if (wk > 0 and not observed) else None,
             "rapid_return": False,
             "drivers": drivers,
             "sources": sources,
         })
-        prev = score
+        if observed:
+            last = (score, wk, days)
 
     scores = [w["risk_score"] for w in weeks]
     gaps = [w["days_since_prev"] for w in weeks]
@@ -1417,6 +1442,25 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
     # trend says.
     if docs and docs[-1].get("red_flags"):
         status = "action_required"
+    # So does silence after warning signs: the score is only held, and nobody
+    # knows how the patient has gone since (models/monitoring_rules.contact_gap).
+    contact = contact_gap(docs)
+    action = _WEEKLY_STATUS_ACTIONS[status]
+    flagged = [RED_FLAGS[k][1] for k in ((docs[-1].get("red_flags") or []) if docs else []) if k in RED_FLAGS]
+    if flagged:
+        # The general "action required" advice is about a sharp one-week rise;
+        # a red flag is a different reason and needs its own words.
+        action = (f"Red flag in the latest readings ({', '.join(flagged)}). Assess the patient today, "
+                  "whatever the trend shows: contact them, review symptoms and medicines, and decide "
+                  "whether they need to be seen now rather than at the next review.")
+    if contact["overdue"]:
+        status = "action_required"
+        n, since = contact["weeks_without_contact"], contact["last_contact_week"]
+        action = (f"No readings for {n} week{'s' if n != 1 else ''} since "
+                  + ("discharge" if since == 0 else f"week {since}")
+                  + f", when this patient was {contact['last_contact_band'] or 'flagged'}. Contact the "
+                  "patient today: the score is only held, so open warning signs with nobody hearing "
+                  "how they have gone are a reason to escalate, not to wait.")
     first, latest = (scores[0], scores[-1]) if scores else (0.0, 0.0)
 
     return {
@@ -1433,7 +1477,8 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
         "simulated": docs[0].get("source") == "simulated",
         "monitoring_status": status,
         "status_label": _TREND_STATUS_LABELS[status],
-        "recommended_action": _WEEKLY_STATUS_ACTIONS[status],
+        "recommended_action": action,
+        "contact": contact,
         "weeks_tracked": len(weeks),
         "first_score": first,
         "latest_score": latest,

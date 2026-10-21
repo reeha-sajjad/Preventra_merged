@@ -59,27 +59,40 @@ function TrendDot(props) {
   return <Dot cx={cx} cy={cy} r={5} fill={color} stroke="#fff" strokeWidth={1.5} />;
 }
 
-function DeltaIndicator({ delta }) {
+// A week with no readings shows no change of its own: the score is only held.
+// The first week after it is measured from the last readings, and says which.
+function DeltaIndicator({ delta, held = false, sinceWeek = null }) {
+  if (held) {
+    return <span className="text-xs text-gray-400">held</span>;
+  }
   if (delta === null || delta === undefined) {
     return <span className="text-xs text-gray-400">baseline</span>;
   }
+  const since = sinceWeek != null && (
+    <span className="block text-[10px] font-normal text-gray-500 text-right">
+      since {sinceWeek === 0 ? 'discharge' : `wk ${sinceWeek}`}
+    </span>
+  );
   if (delta > 0.4) {
     return (
-      <span className="inline-flex items-center text-xs font-semibold text-risk-high">
-        <ArrowUpRight size={13} className="mr-0.5" /> +{delta.toFixed(1)}
+      <span className="text-xs font-semibold text-risk-high">
+        <span className="inline-flex items-center"><ArrowUpRight size={13} className="mr-0.5" /> +{delta.toFixed(1)}</span>
+        {since}
       </span>
     );
   }
   if (delta < -0.4) {
     return (
-      <span className="inline-flex items-center text-xs font-semibold text-risk-low">
-        <ArrowDownRight size={13} className="mr-0.5" /> {delta.toFixed(1)}
+      <span className="text-xs font-semibold text-risk-low">
+        <span className="inline-flex items-center"><ArrowDownRight size={13} className="mr-0.5" /> {delta.toFixed(1)}</span>
+        {since}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center text-xs font-semibold text-gray-400">
-      <Minus size={13} className="mr-0.5" /> {delta.toFixed(1)}
+    <span className="text-xs font-semibold text-gray-400">
+      <span className="inline-flex items-center"><Minus size={13} className="mr-0.5" /> {delta.toFixed(1)}</span>
+      {since}
     </span>
   );
 }
@@ -126,6 +139,9 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
     }
   };
 
+  // A monitoring week nobody reported: nothing new was measured.
+  const silent = weekly && week.observed === false;
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4">
       <div className="flex items-start justify-between mb-2">
@@ -165,7 +181,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
             </div>
           )}
         </div>
-        <DeltaIndicator delta={week.delta} />
+        <DeltaIndicator delta={week.delta} held={silent} sinceWeek={week.delta_since_week} />
       </div>
       <div className="flex items-center space-x-3 mb-3">
         <span className="text-2xl font-black text-gray-800">{week.risk_score.toFixed(1)}%</span>
@@ -178,7 +194,31 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
           <span className="font-semibold">Red flag - assess today:</span> {week.red_flags.join(', ')}
         </div>
       )}
-      {week.drivers?.length > 0 && (
+      {/* Silence after warning signs is a reason to call, not to wait: the
+          score is held, not improved. */}
+      {silent && week.contact_overdue && (
+        <div className="mb-3 rounded-md bg-yellow-50 border border-yellow-200 px-2.5 py-1.5 text-xs text-yellow-900">
+          <span className="font-semibold">Contact the patient today:</span> no readings while the last
+          ones put them at {week.risk_band}. The score is held from{' '}
+          {week.held_from_week ? `week ${week.held_from_week}` : 'discharge'}, not improved.
+        </div>
+      )}
+      {/* A silent week has no readings of its own. The last ones taken are
+          shown as what they are - older readings - without repeating what they
+          meant, which the week they came from already says. */}
+      {silent && week.drivers?.length > 0 && (
+        <div className="text-xs text-gray-500">
+          <div className="mb-1 font-medium text-gray-600">
+            Last readings ({week.held_from_week ? `week ${week.held_from_week}` : 'discharge'})
+          </div>
+          <ul className="space-y-0.5">
+            {week.drivers.map((d, idx) => (
+              <li key={idx}><span className="text-gray-600">{d.label}:</span> {d.value}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!silent && week.drivers?.length > 0 && (
         <div className="space-y-2">
           {week.drivers.map((d, idx) => (
             <div key={idx} className="text-xs">
@@ -220,7 +260,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
       )}
 
       <div className="mt-3 pt-3 border-t border-gray-100">
-        {explains && !narrative && !loading && (
+        {explains && !silent && !narrative && !loading && (
           <button
             type="button"
             onClick={handleExplain}
@@ -407,8 +447,11 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
       {!compact && weekly && (
         <p className="text-xs text-gray-500 mb-4">
           Re-scored every 7 days across the 30-day post-discharge window ·{' '}
-          <span className="font-semibold">{trend.weeks_observed} of {trend.weeks_tracked}</span> weeks
-          recorded observations, the rest carried forward.
+          <span className="font-semibold">
+            {trend.weeks.filter((w) => w.week_number > 0 && w.observed !== false).length} of{' '}
+            {trend.weeks.filter((w) => w.week_number > 0).length}
+          </span>{' '}
+          monitoring weeks had readings; in the others the score is held from the last readings, not re-scored.
         </p>
       )}
       {!compact && !weekly && trend.median_gap_days != null && (

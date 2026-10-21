@@ -12,3 +12,7 @@ DEPLOYMENT.md
 # Rendered video/VO audio — re-renderable from the scripts in */docs/, too big to version
 *.wav
 *.mp3
+
+# Office/LibreOffice lock files
+.~lock.*#
+~$*

@@ -116,14 +116,115 @@ SOURCE = "simulated"
 # flagged rather than invented.
 NO_CONTACT_RATE = 0.12
 
+# ---------------------------------------------------------------------------
+# Things that happen on a schedule
+# ---------------------------------------------------------------------------
+# An appointment, a pharmacy refill and an antibiotic course are EVENTS, not
+# readings: each happens once (or on a fixed cycle) and then stays happened.
+# Drawing them afresh every week produced cards nobody could believe - an
+# appointment "missed" in week 1 and "attended" in week 3 and "missed" again in
+# week 4, a refill collected two weeks running from a 30-day supply. A
+# PatientCourse carries them from week to week so each card follows from the
+# one before it.
 
-def observe_disease_signals(group: str, drift: float, rng: np.random.Generator) -> dict:
+# A 7-day post-discharge review is the standard for heart failure, other
+# cardiac and kidney admissions; everyone else is seen at about 14 days.
+EARLY_FOLLOWUP_GROUPS = {"heart_failure", "cardiac_other", "renal"}
+# Most discharge prescriptions cover 30 days, so the first refill falls in
+# week 4; a minority are written for 14 days and are refilled in weeks 2 and 4.
+SHORT_SUPPLY_RATE = 0.30
+# About one infection admission in six goes home without antibiotics.
+NO_ANTIBIOTIC_RATE = 0.17
+
+
+def followup_due_week(group: str) -> int:
+    return 1 if group in EARLY_FOLLOWUP_GROUPS else 2
+
+
+class PatientCourse:
+    """One patient's 30 days: the follow-up appointment, the pharmacy supply
+    and the antibiotic course, which carry from one week to the next."""
+
+    def __init__(self, group: str, deteriorating: bool, rng: np.random.Generator):
+        self.group = group
+        self.deteriorating = deteriorating
+        self.followup_due = followup_due_week(group)
+        self.followup_done = False
+        self.refill_weeks = (2, 4) if rng.random() < SHORT_SUPPLY_RATE else (4,)
+        self.antibiotics = "not_prescribed" if rng.random() < NO_ANTIBIOTIC_RATE else "ongoing"
+        # Each patient's own level for every reading, kept for all four weeks.
+        # Week-to-week noise on its own made the same patient look like four
+        # different people: a deteriorating heart failure patient on four pillows
+        # with 13% of usual walking one week and two pillows at 55% the next,
+        # while the weight kept rising. Most of the spread is now between
+        # patients, and a little is left for the week.
+        self.offset = {"fluid": rng.normal(0, 0.5), "sbp": rng.normal(0, 8),
+                       "hr": rng.normal(0, 6), "spo2": rng.normal(0, 1.0),
+                       "congestion": rng.normal(0, 0.3), "walk": rng.normal(0, 5)}
+
+    def followup(self, week: int, drift: float, rng: np.random.Generator) -> str:
+        """Not due before the booked week; then attended, or missed and still
+        outstanding until a rebooked visit is attended; not due once seen."""
+        if self.followup_done or week < self.followup_due:
+            return "not due"
+        p_attend = (float(np.clip(0.75 - 0.35 * drift, 0.25, 0.75)) if self.deteriorating
+                    else 0.88)
+        if rng.random() < p_attend:
+            self.followup_done = True
+            return "attended"
+        return "missed"
+
+    def refill(self, week: int, drift: float, rng: np.random.Generator) -> str:
+        """Due only in a week the supply runs out."""
+        if week not in self.refill_weeks:
+            return "not due"
+        missed, late = ((0.08 + 0.40 * drift, 0.12 + 0.15 * drift) if self.deteriorating
+                        else (0.04, 0.10))
+        r = rng.random()
+        return "missed" if r < missed else "late" if r < missed + late else "collected"
+
+    def antibiotic(self, week: int, drift: float, rng: np.random.Generator) -> str:
+        """Ongoing for the first week or two, then completed - or stopped early,
+        which stays stopped."""
+        if self.antibiotics in ("not_prescribed", "stopped_early"):
+            return self.antibiotics
+        if self.deteriorating and week >= 2 and rng.random() < 0.10 + 0.40 * drift:
+            self.antibiotics = "stopped_early"
+            return self.antibiotics
+        if week >= 3:
+            self.antibiotics = "completed"
+        return self.antibiotics
+
+
+def _walk_distance(drift: float, spo2: float, congestion: float, rng, offset: float = 0.0) -> int:
+    """Exercise tolerance falls with the same deterioration the vitals show:
+    a lower saturation and more retained fluid both cut how far someone walks."""
+    mean = 96 - 45 * drift - 2.5 * max(0.0, 94 - spo2) - 6 * max(0.0, congestion - 1.0) + offset
+    return round(float(np.clip(rng.normal(mean, 4), 5, 130)))
+
+
+def _level(x: float, cuts: tuple, names: tuple) -> str:
+    """The category whose cut `x` has passed: names[i] once x >= cuts[i-1]."""
+    for cut, name in zip(reversed(cuts), reversed(names[1:])):
+        if x >= cut:
+            return name
+    return names[0]
+
+
+def observe_disease_signals(group: str, drift: float, rng: np.random.Generator,
+                            fluid: float = 0.0, spo2: float = 96.0,
+                            course: "PatientCourse | None" = None, week: int = 1,
+                            deteriorating: bool = False) -> dict:
     """
-    The condition-specific readings for one week.
+    The condition-specific readings for one week, derived from the SAME state
+    the shared vitals came from, so a card cannot contradict itself.
 
-    `drift` is 0 for a recovering patient and rises toward `severity` as a
-    deteriorating one declines, so these move with the same trajectory the
-    shared vitals do rather than telling a contradictory story.
+    `fluid` is the weight gained since discharge and `spo2` this week's
+    saturation. Ankle swelling and pillows follow the fluid - marked swelling
+    with a stable weight was possible when they were drawn separately, and it
+    describes litres of retained fluid that the scales say are not there.
+    Inhaler use follows the saturation; sputum, the wound and the temperature
+    follow the deterioration; new confusion follows a fever or a severe decline.
 
     Only the signals this group is actually asked for are produced - see
     GROUP_SIGNALS. Generating readings nobody scores would put numbers on a card
@@ -132,42 +233,45 @@ def observe_disease_signals(group: str, drift: float, rng: np.random.Generator) 
     keys = GROUP_SIGNALS.get(group, ())
     if not keys:
         return {}
-
-    def pick(options, weights):
-        w = np.clip(np.array(weights, dtype=float), 0.01, None)
-        return str(rng.choice(options, p=w / w.sum()))
-
     out = {}
+    off = course.offset if course is not None else {"congestion": 0.0, "walk": 0.0}
+    congestion = fluid + off["congestion"] + rng.normal(0, 0.15)
     if "orthopnoea_pillows" in keys:
-        out["orthopnoea_pillows"] = int(np.clip(rng.normal(1.0 + 2.4 * drift, 0.55), 0, 4))
+        out["orthopnoea_pillows"] = int(np.clip(
+            1 + (congestion >= 1.8) + (congestion >= 3.2) + (spo2 < 92), 0, 4))
     if "ankle_swelling" in keys:
-        out["ankle_swelling"] = pick(["none", "mild", "marked"],
-                                     [1.0 - 0.8 * drift, 0.25 + 0.4 * drift, 0.05 + 0.55 * drift])
+        out["ankle_swelling"] = _level(congestion, (1.2, 2.6), ("none", "mild", "marked"))
     if "walk_distance_pct" in keys:
-        out["walk_distance_pct"] = round(float(np.clip(
-            rng.normal(96 - 60 * drift, 11), 5, 130)))
+        out["walk_distance_pct"] = _walk_distance(
+            drift, spo2, congestion if "ankle_swelling" in keys else 0.0, rng, off["walk"])
     if "rescue_inhaler_uses" in keys:
-        out["rescue_inhaler_uses"] = int(np.clip(rng.normal(1.5 + 16 * drift, 2.0), 0, 40))
+        out["rescue_inhaler_uses"] = int(np.clip(
+            rng.normal(1.5 + 3.5 * max(0.0, 95 - spo2) + 6 * drift, 1.5), 0, 40))
     if "sputum_change" in keys:
-        out["sputum_change"] = pick(["none", "volume", "purulent", "both"],
-                                    [1.0 - 0.85 * drift, 0.2 + 0.25 * drift,
-                                     0.08 + 0.4 * drift, 0.02 + 0.5 * drift])
-    if "temperature_c" in keys:
-        out["temperature_c"] = round(float(np.clip(
-            rng.normal(36.8 + 1.5 * drift, 0.35), 34.5, 41.0)), 1)
+        out["sputum_change"] = _level(drift + rng.normal(0, 0.15), (0.35, 0.65, 0.95),
+                                      ("none", "volume", "purulent", "both"))
+    wound = None
     if "wound_status" in keys:
-        out["wound_status"] = pick(["clean", "red", "discharge", "opening"],
-                                   [1.0 - 0.85 * drift, 0.15 + 0.35 * drift,
-                                    0.05 + 0.4 * drift, 0.01 + 0.25 * drift])
+        wound = _level(drift + rng.normal(0, 0.15), (0.35, 0.65, 0.95),
+                       ("clean", "red", "discharge", "opening"))
+        out["wound_status"] = wound
+    if "temperature_c" in keys:
+        infected_wound = 0.6 if wound in ("discharge", "opening") else 0.0
+        out["temperature_c"] = round(float(np.clip(
+            rng.normal(36.8 + 1.5 * drift + infected_wound, 0.3 if deteriorating else 0.25),
+            35.0, 41.0)), 1)
     if "pain_trend" in keys:
-        out["pain_trend"] = pick(["improving", "unchanged", "worse"],
-                                 [1.0 - 0.8 * drift, 0.3 + 0.2 * drift, 0.05 + 0.6 * drift])
+        p = drift + rng.normal(0, 0.15)
+        out["pain_trend"] = ("worse" if wound in ("discharge", "opening") or p >= 0.7
+                             else "unchanged" if p >= 0.3 else "improving")
     if "antibiotic_course" in keys:
-        out["antibiotic_course"] = pick(
-            ["completed", "ongoing", "stopped_early", "not_prescribed"],
-            [0.55 - 0.35 * drift, 0.25, 0.03 + 0.5 * drift, 0.17])
+        course = course or PatientCourse(group, deteriorating, rng)
+        out["antibiotic_course"] = course.antibiotic(week, drift, rng)
     if "new_confusion" in keys:
-        out["new_confusion"] = pick(["no", "yes"], [1.0 - 0.55 * drift, 0.02 + 0.55 * drift])
+        fever = out.get("temperature_c", 36.8)
+        out["new_confusion"] = ("yes" if deteriorating and (
+            (fever >= 38.8 and rng.random() < 0.5) or (drift > 0.9 and rng.random() < 0.35))
+            else "no")
     return out
 
 
@@ -186,62 +290,64 @@ def vital_relevance(groups) -> float:
 
 def observe_week(week: int, n_weeks: int, deteriorating: bool,
                  severity: float, rng: np.random.Generator,
-                 group: str = "general", groups=None) -> dict:
+                 group: str = "general", groups=None,
+                 course: "PatientCourse | None" = None) -> dict:
     """
     Generate one week of monitoring observations.
 
     `severity` scales how fast a deteriorating patient declines, so the cohort
     contains slow drifts as well as sharp falls rather than one uniform curve.
+    `course` carries the patient's appointment, pharmacy supply and antibiotics
+    from week to week; pass the same one for every week of a patient. Without
+    it the week is generated as if it were the patient's only one.
     """
+    course = course or PatientCourse(group, deteriorating, rng)
     # 0 at discharge, 1 at the end of the window - how far along the trajectory.
     t = week / max(n_weeks, 1)
 
+    off = course.offset
     if deteriorating:
         drift = severity * t
         # Vitals follow the patient's conditions; adherence, refills and
-        # follow-up deteriorate for everyone. The draws stay in the same order,
-        # so patients whose vitals keep full relevance get identical data.
+        # follow-up deteriorate for everyone.
         vd = drift * vital_relevance(groups or [group])
-        weight = rng.normal(0.9 + 2.4 * vd, 0.7)
+        fluid = rng.normal(0.9 + 2.4 * vd + off["fluid"], 0.4)
         adherence = float(np.clip(rng.normal(88 - 45 * drift, 9), 5, 100))
-        sbp = rng.normal(138 + 26 * vd, 12)
-        hr = rng.normal(82 + 26 * vd, 9)
-        spo2 = rng.normal(96 - 6.0 * vd, 1.5)
-        refill_p = [0.10 + 0.45 * drift, 0.15 + 0.15 * drift, 0.55, 0.20]
-        follow_p = [0.10 + 0.40 * drift, 0.55, 0.35]
+        sbp = rng.normal(138 + 26 * vd + off["sbp"], 7)
+        hr = rng.normal(82 + 26 * vd + off["hr"], 5)
+        spo2 = rng.normal(96 - 6.0 * vd + off["spo2"], 0.9)
     else:
         drift = 0.0
-        recovery = 1.0 - 0.6 * t
-        weight = rng.normal(-0.5 * (1 - recovery) - 0.2, 0.6)
+        fluid = rng.normal(-0.2 - 0.3 * t + off["fluid"] * 0.8, 0.35)
         adherence = float(np.clip(rng.normal(90 + 7 * t, 7), 30, 100))
-        sbp = rng.normal(132 - 4 * t, 10)
-        hr = rng.normal(78 - 3 * t, 8)
-        spo2 = rng.normal(96.5 + 0.6 * t, 1.2)
-        refill_p = [0.04, 0.08, 0.78, 0.10]
-        follow_p = [0.06, 0.64, 0.30]
+        sbp = rng.normal(132 - 4 * t + off["sbp"], 6)
+        hr = rng.normal(78 - 3 * t + off["hr"], 5)
+        spo2 = rng.normal(96.5 + 0.6 * t + off["spo2"] * 0.8, 0.7)
+
+    refill = course.refill(week, drift, rng)
+    if refill == "missed":
+        # The supply ran out before the refill, so the last days went untaken.
+        adherence = max(5.0, adherence - 15)
+    follow = course.followup(week, drift, rng)
 
     # In cancer the danger runs the other way: a declining patient LOSES weight
     # (poor intake, cachexia) and a recovering one holds or regains it, which is
-    # what the oncology weight rule scores. Mirroring the same draw keeps every
-    # other patient's data identical.
-    if group == "oncology":
-        weight = -weight
-
-    refill = rng.choice(["missed", "late", "collected", "not due"],
-                        p=np.array(refill_p) / sum(refill_p))
-    follow = rng.choice(["missed", "attended", "not due"],
-                        p=np.array(follow_p) / sum(follow_p))
+    # what the oncology weight rule scores.
+    weight = -fluid if group == "oncology" else fluid
+    spo2_reading = int(np.clip(spo2, 82, 100))
 
     obs = {
         "weight_change_kg": round(float(weight), 1),
         "adherence_pct": round(adherence),
-        "refill_status": str(refill),
-        "followup_status": str(follow),
+        "refill_status": refill,
+        "followup_status": follow,
         "sbp": int(np.clip(sbp, 78, 215)),
         "heart_rate": int(np.clip(hr, 44, 145)),
-        "spo2": int(np.clip(spo2, 82, 100)),
+        "spo2": spo2_reading,
     }
-    obs.update(observe_disease_signals(group, drift if deteriorating else 0.0, rng))
+    obs.update(observe_disease_signals(group, drift, rng, fluid=float(fluid),
+                                       spo2=float(spo2_reading), course=course, week=week,
+                                       deteriorating=deteriorating))
     return obs
 
 
@@ -282,6 +388,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--audit", action="store_true",
+                    help="check the generated series for contradictions (scripts/audit_weekly_monitoring.py); "
+                         "writes nothing")
     a = ap.parse_args()
 
     print("=" * 74)
@@ -410,6 +519,10 @@ def main():
 
         prev_adj, prev_score = 0.0, base
         prev_obs, prev_drv = None, None
+        # The appointment, the pharmacy supply and any antibiotic course carry
+        # from week to week - see PatientCourse.
+        course = PatientCourse(grp["group"], bool(deteriorating[i]), rng)
+        last_contact = 0
         for wk in range(1, a.weeks + 1):
             # The first week always has its readings: there is nothing earlier to
             # carry forward, so a "no contact" first week used to be scored on new
@@ -419,19 +532,24 @@ def main():
             if contacted:
                 obs = observe_week(wk, a.weeks, bool(deteriorating[i]),
                                    float(severity[i]), rng, group=grp["group"],
-                                   groups=conditions)
+                                   groups=conditions, course=course)
                 # Phrasing varies per patient-week so four consecutive cards do
                 # not repeat one sentence; the POINTS are variant-independent,
                 # so the scores this writes are identical either way.
                 score, adj, contribs = score_week(base, obs, CARRY * prev_adj,
                                                   variant=variant_for(pid, wk),
                                                   group=grp["group"], groups=conditions,
-                                                  prev_score=prev_score)
+                                                  prev_score=prev_score,
+                                                  flag_floor=thresholds["low"])
                 drivers = [c[1] for c in contribs[:3]]
                 prev_obs, prev_drv, prev_adj = obs, drivers, adj
+                last_contact = wk
             else:
                 # No contact this week: hold the last score and say so, rather
-                # than inventing readings the programme never took.
+                # than inventing readings the programme never took. The readings
+                # kept here are the LAST ones taken, shown as such (week
+                # `last_contact_week`), and the appointment and pharmacy clock
+                # does not advance - nobody heard how they went.
                 obs, drivers, score = prev_obs, prev_drv, prev_score
 
             wdate = (pd.Timestamp(d0) + timedelta(days=7 * wk)) if pd.notna(d0) else None
@@ -441,11 +559,13 @@ def main():
                 "week_date": wdate.strftime("%Y-%m-%d") if wdate is not None else "",
                 "risk_score": score, "risk_band": _band(score, thresholds),
                 "observed": bool(contacted),
+                "last_contact_week": last_contact,
                 "driver_1": drivers[0], "driver_2": drivers[1], "driver_3": drivers[2],
                 "monitoring": obs,
                 # Readings that need assessing today whatever else improved;
-                # they make the week "Action required" (api/main.py).
-                "red_flags": red_flags(obs),
+                # they make the week "Action required" (api/main.py). A week
+                # nobody reported raises none: last week's flag was last week's.
+                "red_flags": red_flags(obs) if contacted else [],
                 "monitoring_groups": conditions,
                 "model_version": MODEL_VERSION, "source": SOURCE,
                 "scored_by": "monitoring_rules",
@@ -476,6 +596,12 @@ def main():
     for k in ("driver_1", "driver_2", "driver_3"):
         print(f"    {sample[k]}")
 
+    if a.audit:
+        from scripts.audit_weekly_monitoring import audit, report
+        print()
+        report(audit(docs))
+        print("\n  AUDIT - nothing written")
+        return
     if a.dry_run:
         print("\n  DRY RUN - nothing written")
         return

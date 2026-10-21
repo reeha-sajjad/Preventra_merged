@@ -1323,7 +1323,8 @@ def weights_for(groups) -> dict:
 
 
 def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
-               group: str = "general", groups=None, prev_score=None) -> tuple:
+               group: str = "general", groups=None, prev_score=None,
+               flag_floor=None) -> tuple:
     """
     Apply the monitoring rules to one week of observations.
 
@@ -1346,6 +1347,11 @@ def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
 
     `prev_score` is last week's score. While a red flag is present the score
     cannot fall below it - see RED_FLAGS.
+
+    `flag_floor` is where the Medium band starts. A red flag means "assess
+    today", and a card that says that beside a Low band contradicts itself: a
+    patient with a low discharge score plus the minimum red-flag points could
+    still land under it. Pass it and a flagged week reads at least Medium.
     """
     profile = profile_for(group)
     weights = weights_for(groups) if groups else profile["weights"]
@@ -1409,6 +1415,8 @@ def score_week(baseline: float, obs: dict, carry: float, variant: int = 0,
     score = float(np.clip(baseline + normalised + flag_total + carry, SCORE_FLOOR, SCORE_CEIL))
     if flagged and prev_score is not None:
         score = max(score, float(prev_score))
+    if flagged and flag_floor is not None:
+        score = max(score, float(flag_floor))
     contributions.sort(key=lambda c: abs(c[0]), reverse=True)
     # Red flags lead the card: they are what someone must act on today.
     flag_contribs.sort(key=lambda c: c[0], reverse=True)
@@ -1424,3 +1432,43 @@ def variant_for(patient_id: str, week_number: int) -> int:
     """
     digest = hashlib.md5(f"{patient_id}|{week_number}".encode("utf-8")).hexdigest()
     return int(digest[:8], 16)
+
+
+# Bands whose silence is a reason to act rather than to wait.
+CONTACT_WATCH_BANDS = ("Medium", "High")
+
+
+def contact_gap(weeks: list) -> dict:
+    """
+    Whether the latest monitoring weeks went without contact, and whether that
+    silence needs someone to act.
+
+    `weeks` are one patient's weekly documents, oldest first, each with
+    `week_number`, `observed`, `risk_band` and `red_flags`. Week 0 is the
+    discharge and always counts as contact.
+
+    A week without contact holds the last score: nothing new was measured, so
+    the number is not moved either way. But holding it is not the same as
+    reassurance. A patient whose last readings put them at Medium or High, or
+    raised a red flag, and who then cannot be reached, is overdue for contact -
+    the warning signs are open and nobody knows how they have gone since. The
+    trend page, the worklist status and the "needs attention" list all read
+    this one answer.
+
+    Returns {"weeks_without_contact": n, "last_contact_week": k,
+    "last_contact_band": band, "overdue": bool}; n is 0 when the latest week
+    was observed.
+    """
+    silent, last = 0, None
+    for w in reversed(weeks or []):
+        if int(w.get("week_number", 0) or 0) > 0 and w.get("observed") is False:
+            silent += 1
+            continue
+        last = w
+        break
+    band = (last or {}).get("risk_band")
+    open_signs = band in CONTACT_WATCH_BANDS or bool((last or {}).get("red_flags"))
+    return {"weeks_without_contact": silent,
+            "last_contact_week": int((last or {}).get("week_number", 0) or 0),
+            "last_contact_band": band,
+            "overdue": silent > 0 and open_signs}
