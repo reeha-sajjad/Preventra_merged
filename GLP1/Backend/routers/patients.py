@@ -127,6 +127,12 @@ async def get_patients(
                                       case_manager=case_manager)
     if care is not None:
         match["$and"] = match.get("$and", []) + [{"patient_idx": {"$in": care}}]
+    # A doctor's or nurse's emergency-access patients are not "my patients":
+    # left out of the list and its counts, and returned apart (core/access.py).
+    from core.access import emergency_only               # avoid an import cycle
+    emergency = await emergency_only(user, scope)
+    if emergency:
+        match["$and"] = match.get("$and", []) + [{"patient_idx": {"$nin": list(emergency)}}]
     direction = -1 if sort_dir.lower() == "desc" else 1
 
     high_risk_filter = {**match, "dropout_prob": {"$gte": _HIGH_RISK_THRESHOLD}}
@@ -164,6 +170,7 @@ async def get_patients(
         "patients":  rows,
         "summary":   {"high_risk_count": high_risk, "financial_barrier_count": financial_cnt},
         "redacted":  redacted,
+        "emergency": [{"patient_idx": i, "expires_at": at.isoformat()} for i, at in sorted(emergency.items())],
     }
 
 

@@ -229,6 +229,26 @@ async def patient_scope(user: dict) -> Optional[list]:
     return mine
 
 
+async def emergency_only(user: dict, scope: Optional[list]) -> dict:
+    """{patient_idx: expires_at} - patients a doctor or nurse reaches only by an
+    emergency grant, not their care team. Lists and counts leave these out (they
+    are not "my patients"); the patient list shows them apart, with when the
+    access ends."""
+    from datetime import datetime, timezone
+    if user["role"] not in CARE_TEAM_ROLES:
+        return {}
+    docs = await get_shared_identity_db()[EMERGENCY_COLLECTION].find(
+        {"app": "glp1", "user_id": user["id"], "expires_at": {"$gt": datetime.now(timezone.utc)}},
+        {"_id": 0, "patient_id": 1, "expires_at": 1}).to_list(length=None)
+    out = {}
+    for d in docs:
+        idx = int(d["patient_id"])
+        if not await on_care_team(user, idx):
+            at = d["expires_at"] if d["expires_at"].tzinfo else d["expires_at"].replace(tzinfo=timezone.utc)
+            out[idx] = max(out.get(idx, at), at)
+    return out
+
+
 async def emergency_patients(user: dict) -> set:
     """Patients this doctor or nurse holds an unexpired emergency grant for."""
     from datetime import datetime, timezone

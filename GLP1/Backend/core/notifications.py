@@ -133,6 +133,10 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
             items = items + await caretaker_home.dose_missed_items(scope)
         return items
     db = get_db()
+    # Their own patients only: an emergency-access patient is not theirs to watch.
+    from core.access import emergency_only                # avoid an import cycle
+    emergency = await emergency_only(user, scope)
+    scope = [i for i in scope if i not in emergency] if (scope is not None and emergency) else scope
     mine = scope_query(scope)
     patients = await db.patients.find(mine, {"_id": 0, "patient_idx": 1, "dropout_prob": 1,
                                              "driver_1": 1}).to_list(length=None)

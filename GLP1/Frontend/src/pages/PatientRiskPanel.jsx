@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Search, Filter, ChevronLeft, ChevronRight, DollarSign, ChevronUp, ChevronDown, Settings2, X, Building2, Users, UserCheck } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, DollarSign, ChevronUp, ChevronDown, Settings2, X, Building2, Users, UserCheck, ShieldAlert } from 'lucide-react';
 import MemberLookup from '../components/insurance/MemberLookup';
 import CareTeamDialog from '../components/hospital/CareTeamDialog';
 import { SegmentDot } from '../components/shared';
@@ -198,7 +198,7 @@ export default function PatientRiskPanel() {
   const navigate = useNavigate();
   const { isCostView, needsReason, canAssign, isCareTeam, isCaseManager, findsMemberIds, isInsurer } = useRole();
   const { user } = useAuth();
-  const { patients, loading, redacted, reload } = usePatients();
+  const { patients, loading, redacted, emergency = [], reload } = usePatients();
   // Filters the Overview and the Staff page link in with.
   const [searchParams, setSearchParams] = useSearchParams();
   const care = { doctor: searchParams.get('doctor'), nurse: searchParams.get('nurse'),
@@ -435,6 +435,28 @@ export default function PatientRiskPanel() {
           <div className="flex flex-wrap items-center gap-3 text-xs font-semibold flex-shrink-0">
             <Link to="/cost" className="hover:underline underline-offset-2" style={{ color: '#1B4F8A' }}>Cost-Effectiveness →</Link>
             <Link to="/budget" className="hover:underline underline-offset-2" style={{ color: '#1B4F8A' }}>Budget Simulator →</Link>
+          </div>
+        </div>
+      )}
+
+      {/* ── Emergency access: reachable for 24h, but not on this list ── */}
+      {emergency.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 rounded-xl text-sm mb-4 animate-fade-up"
+          style={{ background: '#FFF5F5', color: '#9B2C2C', border: '1px solid #FED7D7' }}>
+          <span className="flex items-center gap-2 font-semibold whitespace-nowrap">
+            <ShieldAlert size={15} /> Emergency access
+          </span>
+          <span className="text-xs" style={{ color: '#C53030' }}>
+            Not your patients - open for 24 hours, every view is logged.
+          </span>
+          <div className="flex flex-wrap gap-2 sm:ml-auto">
+            {emergency.map(e => (
+              <button key={e.patient_idx} type="button" onClick={() => navigate(`/patients/${e.patient_idx}`)}
+                className="text-xs font-semibold px-2.5 py-1 rounded-md bg-white hover:underline"
+                style={{ border: '1px solid #FEB2B2', color: '#9B2C2C' }}>
+                Patient #{e.patient_idx} · until {new Date(e.expires_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+              </button>
+            ))}
           </div>
         </div>
       )}

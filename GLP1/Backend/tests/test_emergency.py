@@ -174,3 +174,18 @@ def test_a_doctor_with_emergency_access_can_record_a_change(world):
     assert change(world, idx=2).status_code == 404
     open_glass(world)
     assert change(world, idx=2).status_code == 201
+
+# ------------------------------------------------ not "my patients"
+def test_an_emergency_patient_stays_off_my_list_and_my_bell(world):
+    doc = client(world, "doc@a.test")
+    before = doc.get("/api/patients").json()
+    assert 2 not in [p["patient_idx"] for p in before["patients"]] and before["emergency"] == []
+    open_glass(world)
+    after = doc.get("/api/patients").json()
+    assert 2 not in [p["patient_idx"] for p in after["patients"]]
+    assert [e["patient_idx"] for e in after["emergency"]] == [2]
+    assert after["total"] == before["total"]
+    assert doc.get("/api/patients/2").status_code == 200        # still reachable by the grant
+    # Once the grant closes, the strip is empty too.
+    grants(world).update_many({}, {"$set": {"expires_at": datetime.now(timezone.utc) - timedelta(minutes=1)}})
+    assert doc.get("/api/patients").json()["emergency"] == []
