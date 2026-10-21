@@ -61,43 +61,69 @@ SCHEDULE = {
 FACTORS = {
     "Financial pressure relative to income": (
         "Paying for your medicine",
-        "Cost is one of the main reasons people stop - and stopping early throws away what you have already "
-        "paid for. Don't skip or stretch doses to save money. Tell your case manager this week: savings and "
-        "copay programmes can lower what you pay.",
-        "Paying for your medicine is manageable for you, so cost is no reason to miss a dose."),
+        "Medicine costs can add up, and you're not alone if that's on your mind. If it ever feels hard to "
+        "afford, your case manager can look into savings and copay programmes with you.",
+        "The cost of your medicine looks manageable for you, which makes it easier to keep going."),
     "Out-of-pocket medication cost": (
         "What you pay for your medicine",
-        "You pay more out of pocket than most. Don't let that make you skip a refill - ask your case manager "
-        "now about copay and savings programmes before your next one is due.",
-        "What you pay out of pocket is low, so there's nothing in the way of taking every dose."),
+        "What you pay at the pharmacy may be higher than for many people. If that's ever a worry, your case "
+        "manager can check whether a savings or copay programme could help.",
+        "What you pay out of pocket is on the lower side, which makes staying on treatment easier."),
     "Provider & pharmacy refill reliability": (
-        "Getting your refills on time",
-        "Late refills are where treatment breaks down. Pick up every refill on the day it is due, and if your "
-        "pharmacy can't supply it, tell your care team straight away rather than waiting.",
-        "Your refills have been on time - keep it that way. A missed refill is the easiest way to fall off "
-        "treatment."),
+        "Getting your refills",
+        "Keeping refills on schedule helps your medicine work its best. If a refill is ever late or your "
+        "pharmacy is short on stock, let your care team know - they're happy to help sort it out.",
+        "Your refills look steady - that's a great help in keeping your treatment on track."),
     "Side effect intensity (GI friction)": (
-        "Stomach side effects",
-        "Nausea and an upset stomach are common at first and usually settle within weeks. Do not stop on your "
-        "own - call your care team, who can adjust things so you can keep going.",
-        "Side effects are unlikely to be a problem with your medicine, so keep taking it exactly as prescribed."),
+        "How you're feeling on your medicine",
+        "Some people feel a little sick or have an upset stomach at first, and it usually eases within a few "
+        "weeks. If it bothers you, talk to your care team before changing anything - they can often help.",
+        "Your medicine is usually easy on the stomach, which helps make treatment more comfortable."),
     "Blood sugar control (HbA1c)": (
         "Your blood sugar",
-        "Your blood sugar only comes down if you take every dose. Missed doses undo the progress, so stay on "
-        "schedule.",
-        "Your blood sugar results show the treatment working - keep every dose on schedule to hold on to it."),
+        "Taking your medicine regularly is what helps bring your blood sugar down over time. Your care team "
+        "can talk through your results with you whenever you like.",
+        "Your blood sugar results are an encouraging sign that treatment is working for you."),
     "Body weight / BMI severity": (
         "Your weight",
-        "People who stop early usually regain most of the weight they lost. Progress often slows after a few "
-        "months - that is normal, not a reason to stop. Keep going, and talk to your care team if it feels "
-        "stuck.",
-        "Your weight goals depend on staying on treatment - keep going even when progress slows."),
+        "Progress often slows after the first few months - that's normal and part of the journey. Staying "
+        "with your treatment helps you keep the progress you've made.",
+        "Your weight goals are part of why this treatment can do a lot of good for you."),
     "Overall disease burden": (
         "Your other health conditions",
-        "With several conditions to manage, this medicine matters more, not less. Keep it on your schedule "
-        "alongside the others, and ask your care team to help you plan.",
-        "This treatment helps your other conditions too - one more reason not to miss a dose."),
+        "Managing more than one condition can be a lot. This medicine can help with several of them, and your "
+        "care team can help you fit it in alongside your other medicines.",
+        "This treatment can help your other health conditions too."),
+    "Drug generation (newer = higher barriers)": (
+        "Your medicine",
+        "Newer medicines sometimes need extra paperwork with insurance. If anything holds up a refill, your "
+        "case manager can help sort it out.",
+        "Your medicine is usually straightforward to get, which helps keep treatment on track."),
+    "On a newer generation drug": (
+        "Your medicine",
+        "Newer medicines sometimes need extra paperwork with insurance. If anything holds up a refill, your "
+        "case manager can help sort it out.",
+        "Your medicine is usually straightforward to get, which helps keep treatment on track."),
+    "High cholesterol diagnosis": (
+        "Your cholesterol",
+        "Looking after your heart health is one more way this treatment can help. Your care team can talk "
+        "it through with you.",
+        "Your cholesterol picture is working in your favour."),
+    "Impaired glucose diagnosis": (
+        "Your blood sugar",
+        "This treatment can help keep your blood sugar in a healthier range. Your care team can talk "
+        "through your results with you.",
+        "Your blood sugar picture is working in your favour."),
 }
+
+# A factor about the person rather than something they can act on (age, sex,
+# which medicine) - shown gently, never as a warning.
+GENTLE = ("Something your care team keeps in mind",
+          "Your care team takes this into account when planning your support.",
+          "This is working in your favour.")
+DRUG_FACTOR = ("Your medicine",
+               "Your care team is keeping an eye on how {drug} is working for you. Ask them anything, any time.",
+               "{drug} is a good fit for you so far.")
 
 SAFETY = ("If you have severe stomach pain that won't go away, trouble breathing, or swelling of your face or "
           "throat, call 911 or go to the emergency department.")
@@ -135,8 +161,13 @@ def factors_of(doc: dict) -> list:
         if not feature:
             continue
         helping = "increases" not in str(doc.get(f"driver_{n}_direction") or "")
-        title, against, works_for = FACTORS.get(str(feature), (str(feature), "Your care team can tell you more.",
-                                                               "This is working in your favour."))
+        name = str(feature)
+        if name.startswith("Prescribed "):
+            drug = name[len("Prescribed "):]
+            title, against, works_for = (DRUG_FACTOR[0], DRUG_FACTOR[1].format(drug=drug),
+                                         DRUG_FACTOR[2].format(drug=drug))
+        else:
+            title, against, works_for = FACTORS.get(name, GENTLE)
         out.append({"title": title, "helping": helping, "text": works_for if helping else against})
     return out
 
