@@ -17,6 +17,7 @@ from typing import Optional
 
 from pymongo import DESCENDING
 
+from api import access
 from api.db_utils import get_latest_batch_date
 # Collection names and the condition->specialty map live with the clinician
 # code. doctor_service imports this module only inside functions, so importing
@@ -196,6 +197,12 @@ def get_patient_details(db, patient_id: str) -> dict:
     )
     if not row:
         raise LookupError(f"No patient found with patient_id '{patient_id}'.")
+    # Every condition the patient has, by the names the screen uses. As keys
+    # ("cardiac_other") the answer to "what other conditions do they have"
+    # passed them over for the secondary diagnoses.
+    row["conditions"] = [GROUP_LABELS.get(g, g) for g in row.pop("clinical_groups", None) or []]
+    row["monitored_as"] = row.pop("group_label", None)
+    row.pop("clinical_group", None)            # the key of monitored_as
 
     try:
         team = hospital.care_teams(db, [row["patient_id"]]).get(str(row["patient_id"])) or {}
@@ -293,10 +300,15 @@ SCORE_MIN, SCORE_MAX = 0.0, 100.0
 
 def _cohort_filter(db, band: Optional[str] = None,
                    min_score: Optional[float] = None,
-                   max_score: Optional[float] = None) -> tuple:
+                   max_score: Optional[float] = None,
+                   filters: Optional[list] = None) -> tuple:
     """
     Build the MongoDB match for a cohort question, and a plain-English
     description of it so the answer can restate what was actually counted.
+
+    `filters` are run_cohort_query's {field, op, value}. Without them "drivers
+    for patients who went from Low to High" had only a score range to reach
+    for, and the answer named the wrong group - everyone above 70.
     """
     batch_date = _latest_batch_or_raise(db)
     match: dict = {"batch_date": batch_date}
@@ -321,6 +333,12 @@ def _cohort_filter(db, band: Optional[str] = None,
         described.append(f"{word} {value:g}%")
     if score:
         match["current_score"] = score
+    if filters:
+        extra, more = _validate_filters(db, filters)
+        match["$and"] = [extra]          # batch_date stays a top-level key; callers read it
+        described += more
+        if _names_a_diagnosis(filters) and db["patient_worklist"].count_documents(match) == 0:
+            _no_such_diagnosis(filters)
 
     return match, (" and ".join(described) if described else "in the current batch")
 
@@ -334,7 +352,8 @@ def _capped_top_n(top_n: Optional[int]) -> int:
 
 def count_patients(db, band: Optional[str] = None,
                    min_score: Optional[float] = None,
-                   max_score: Optional[float] = None) -> dict:
+                   max_score: Optional[float] = None,
+                   filters: Optional[list] = None) -> dict:
     """
     How many patients match a cohort filter.
 
@@ -342,7 +361,7 @@ def count_patients(db, band: Optional[str] = None,
     result at 200 rows: asking that function "how many patients score above 60"
     and counting what came back would answer 200 no matter the truth.
     """
-    match, described = _cohort_filter(db, band, min_score, max_score)
+    match, described = _cohort_filter(db, band, min_score, max_score, filters)
     count = db["patient_worklist"].count_documents(match)
     total = db["patient_worklist"].count_documents({"batch_date": match["batch_date"]})
 
@@ -380,6 +399,7 @@ def _aggregate_or_suppress(db, match: dict, described: str, pipeline_tail: list,
 def get_common_conditions(db, band: Optional[str] = None,
                           min_score: Optional[float] = None,
                           max_score: Optional[float] = None,
+                          filters: Optional[list] = None,
                           top_n: Optional[int] = None) -> dict:
     """
     The most common monitoring conditions in a cohort.
@@ -388,7 +408,7 @@ def get_common_conditions(db, band: Optional[str] = None,
     diabetes counts toward both, so percentages sum above 100. That is the
     honest reading - 22% of patients carry more than one condition.
     """
-    match, described = _cohort_filter(db, band, min_score, max_score)
+    match, described = _cohort_filter(db, band, min_score, max_score, filters)
     n = _capped_top_n(top_n)
     out = _aggregate_or_suppress(db, match, described, [
         {"$unwind": "$clinical_groups"},
@@ -405,6 +425,7 @@ def get_common_conditions(db, band: Optional[str] = None,
 def get_common_diagnoses(db, band: Optional[str] = None,
                          min_score: Optional[float] = None,
                          max_score: Optional[float] = None,
+                         filters: Optional[list] = None,
                          top_n: Optional[int] = None) -> dict:
     """
     The most common principal diagnoses in a cohort, by coded diagnosis text.
@@ -413,7 +434,7 @@ def get_common_diagnoses(db, band: Optional[str] = None,
     get_common_conditions: MIMIC codes thousands of distinct diagnoses, so the
     leader here is usually a few percent rather than a majority.
     """
-    match, described = _cohort_filter(db, band, min_score, max_score)
+    match, described = _cohort_filter(db, band, min_score, max_score, filters)
     n = _capped_top_n(top_n)
     return _aggregate_or_suppress(db, match, described, [
         {"$group": {"_id": "$primary_diagnosis", "count": {"$sum": 1}}},
@@ -425,6 +446,7 @@ def get_common_diagnoses(db, band: Optional[str] = None,
 def get_common_drivers(db, band: Optional[str] = None,
                        min_score: Optional[float] = None,
                        max_score: Optional[float] = None,
+                       filters: Optional[list] = None,
                        top_n: Optional[int] = None) -> dict:
     """
     The risk factors that recur most across a cohort.
@@ -434,7 +456,7 @@ def get_common_drivers(db, band: Optional[str] = None,
     Only the part before the colon is the factor; the rest is this patient's
     value and is not comparable across patients, so it is dropped here.
     """
-    match, described = _cohort_filter(db, band, min_score, max_score)
+    match, described = _cohort_filter(db, band, min_score, max_score, filters)
     n = _capped_top_n(top_n)
 
     cohort_size = db["patient_worklist"].count_documents(match)
@@ -476,6 +498,7 @@ def get_common_drivers(db, band: Optional[str] = None,
 def get_condition_overlap(db, band: Optional[str] = None,
                           min_score: Optional[float] = None,
                           max_score: Optional[float] = None,
+                          filters: Optional[list] = None,
                           top_n: Optional[int] = None) -> dict:
     """
     How many patients carry more than one condition, and which conditions
@@ -488,7 +511,7 @@ def get_condition_overlap(db, band: Optional[str] = None,
     """
     from itertools import combinations
 
-    match, described = _cohort_filter(db, band, min_score, max_score)
+    match, described = _cohort_filter(db, band, min_score, max_score, filters)
     n = _capped_top_n(top_n)
 
     cohort_size = db["patient_worklist"].count_documents(match)
@@ -534,7 +557,8 @@ SHARP_CHANGE_POINTS = 20.0
 
 def get_risk_change_since_discharge(db, band: Optional[str] = None,
                                     min_change: Optional[float] = None,
-                                    direction: str = "increase") -> dict:
+                                    direction: str = "increase",
+                                    filters: Optional[list] = None) -> dict:
     """
     How many patients have moved materially since discharge, and by how much.
 
@@ -549,7 +573,7 @@ def get_risk_change_since_discharge(db, band: Optional[str] = None,
     if not 0 <= threshold <= SCORE_MAX:
         raise ValueError(f"min_change must be between 0 and {SCORE_MAX:g}.")
 
-    match, described = _cohort_filter(db, band=band)
+    match, described = _cohort_filter(db, band=band, filters=filters)
     match["trend_delta"] = (
         {"$gte": threshold} if direction == "increase" else
         {"$lte": -threshold} if direction == "decrease" else
@@ -594,13 +618,14 @@ class Field:
 
     def __init__(self, kind: str, label: str, groupable: bool = True,
                  aggregatable: bool = False, array: bool = False,
-                 values: Optional[tuple] = None):
+                 values: Optional[tuple] = None, stored: bool = True):
         self.kind = kind                  # "number" | "string"
         self.label = label                # how to name it back to the user
         self.groupable = groupable
         self.aggregatable = aggregatable  # avg/min/max only make sense on some
         self.array = array                # needs $unwind before grouping
         self.values = values              # closed vocabulary, if there is one
+        self.stored = stored              # False: not a worklist column (see DOCTOR)
 
 
 FIELDS = {
@@ -627,7 +652,14 @@ FIELDS = {
     "primary_diagnosis": Field("string", "principal diagnosis"),
     "monitoring_status": Field("string", "monitoring status"),
     "group_confidence":  Field("string", "how the condition was matched"),
+    # The care team lives in care_actions, not on the worklist row, so this one
+    # is resolved separately (_doctor_condition, _doctor_names) - but it is
+    # asked about like any other field: "Dr Carter's High-risk patients",
+    # "which doctor has the most High-risk patients".
+    "doctor":            Field("string", "assigned doctor", stored=False),
 }
+DOCTOR = "doctor"
+NO_DOCTOR = "No doctor assigned"
 
 FILTER_OPS = {
     "eq": "$eq", "ne": "$ne", "gt": "$gt", "gte": "$gte",
@@ -725,6 +757,13 @@ def describe_vocabularies(db) -> str:
         if values:
             shown = _condition_names(values) if field == "clinical_groups" else values
             lines.append(f"- {field}: {', '.join(shown)}")
+    try:
+        doctors = _doctors_with_patients(db) if db is not None else []
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[chatbot] could not read the doctors for the vocabulary: {exc}")
+        doctors = []
+    if 0 < len(doctors) <= VOCABULARY_LIMIT:
+        lines.append(f"- {DOCTOR}: {', '.join(doctors)}")
     return "\n".join(lines)
 
 
@@ -756,7 +795,7 @@ def _resolve_categorical(db, field: str, value):
 
 def _validate_filters(db, filters) -> tuple:
     """Turn a list of {field, op, value} into a Mongo match, rejecting anything unlisted."""
-    match: dict = {}
+    conditions: list = []
     described = []
     for f in filters or []:
         if not isinstance(f, dict):
@@ -770,6 +809,12 @@ def _validate_filters(db, filters) -> tuple:
             raise ValueError(f"'{op}' is not a valid comparison. Use one of {', '.join(FILTER_OPS)}.")
         if value is None:
             raise ValueError(f"Filter on '{name}' is missing a value.")
+
+        if name == DOCTOR:
+            condition, named = _doctor_condition(db, op, value)
+            conditions.append(condition)
+            described.append(f"{spec.label} {op} {named}")
+            continue
 
         if spec.kind == "number":
             if op == "in":
@@ -790,14 +835,120 @@ def _validate_filters(db, filters) -> tuple:
         # Case-insensitive equality on closed vocabularies: the data stores
         # "High" but a question says "high", and refusing on that is absurd.
         if spec.kind == "string" and spec.values and op == "eq":
-            match[name] = {"$regex": f"^{value}$", "$options": "i"}
+            conditions.append({name: {"$regex": f"^{value}$", "$options": "i"}})
         else:
-            match.setdefault(name, {})[FILTER_OPS[op]] = value
+            conditions.append({name: {FILTER_OPS[op]: value}})
 
         named = ([GROUP_LABELS.get(v, v) for v in value] if isinstance(value, list) else GROUP_LABELS.get(value, value)) \
             if name == "clinical_groups" else value
         described.append(f"{spec.label} {op} {named}")
-    return match, described
+    # Every filter must hold. Two on one field - "heart disease" and "diabetes" -
+    # are both kept: merged into one dict, the second replaced the first, and
+    # the answer was about diabetes alone.
+    if len(conditions) > 1:
+        return {"$and": conditions}, described
+    return (conditions[0] if conditions else {}), described
+
+
+def _names_a_diagnosis(filters) -> bool:
+    return any(isinstance(f, dict) and f.get("field") == "primary_diagnosis"
+               and f.get("op", "eq") in ("eq", "in") for f in filters or [])
+
+
+def _no_such_diagnosis(filters) -> None:
+    """
+    Raise when an empty answer came from naming a principal diagnosis by a
+    short name. Diagnoses are stored as full ICD descriptions, so "heart attack"
+    matches nothing and "no patients" would read as the truth; the error goes
+    back to the model, which asks again by condition.
+    """
+    if not _names_a_diagnosis(filters):
+        return
+    raise ValueError(
+        "No principal diagnosis is exactly that. Diagnoses are stored as full ICD "
+        "descriptions (e.g. 'Acute myocardial infarction, unspecified'), so a short name finds "
+        "nothing. For a kind of illness filter clinical_groups instead: "
+        + ", ".join(sorted(set(GROUP_LABELS.values()))) + ".")
+
+
+# ---------------------------------------------------------------------------
+# The assigned doctor
+# ---------------------------------------------------------------------------
+# Who looks after a patient is in care_actions (assigned_doctor_id) and the
+# doctor's name in the doctors registry - the same records the Patients and
+# Staff pages read (api/hospital.care_teams). Both come through the caller's
+# scoped view, so a doctor's name only ever brings back patients they may see.
+
+_NO_DOCTOR_WORDS = {"none", "unassigned", "no doctor", "no doctor assigned", "nobody"}
+
+
+def _name_words(name: str) -> list:
+    return [w for w in re.sub(r"[.,]", " ", str(name).lower()).split() if w not in ("dr", "doctor")]
+
+
+def _doctors_named(db, value) -> tuple:
+    """([registry doctors], how they were found) for a name as someone typed it:
+    "Dr Emily Carter", "emily carter", "Carter" - and a misspelling, when one
+    registered name is close."""
+    wanted = _name_words(value)
+    if not wanted:
+        raise ValueError("Say which doctor, by name.")
+    roster = list(db[DOCTORS].find({}, {"_id": 0, "doctor_id": 1, "name": 1, "specialty": 1}))
+    found = [d for d in roster if set(wanted) <= set(_name_words(d.get("name", "")))]
+    if found:
+        return found, None
+    close = _closest_names(db, " ".join(wanted)) or []
+    if len(close) == 1:
+        return [d for d in roster if d.get("name") == close[0]], f"closest match to '{value}'"
+    raise ValueError(f"No doctor is registered as '{value}'."
+                     + (f" Did you mean {' or '.join(close)}?" if close else ""))
+
+
+def _doctor_condition(db, op: str, value) -> tuple:
+    """A filter on the assigned doctor, as a match on patient_id, and its description."""
+    if op not in ("eq", "ne", "in"):
+        raise ValueError("The assigned doctor takes eq, ne or in.")
+    values = [str(v) for v in value] if isinstance(value, list) else [str(value)]
+    if any(v.strip().lower() in _NO_DOCTOR_WORDS for v in values):
+        assigned = db["care_actions"].distinct("patient_id",
+                                               {"assigned_doctor_id": {"$nin": [None, ""]}})
+        wanted_op = "$in" if op == "ne" else "$nin"   # "no doctor" is everyone not assigned
+        return {"patient_id": {wanted_op: access.id_variants(assigned)}}, NO_DOCTOR.lower()
+    doctors, how = [], []
+    for v in values:
+        found, note = _doctors_named(db, v)
+        doctors += found
+        if note:
+            how.append(note)
+    ids = sorted({d["doctor_id"] for d in doctors})
+    pids = db["care_actions"].distinct("patient_id", {"assigned_doctor_id": {"$in": ids}})
+    named = " or ".join(sorted({d.get("name", d["doctor_id"]) for d in doctors}))
+    if how:
+        named += f" ({'; '.join(how)})"
+    return {"patient_id": {"$nin" if op == "ne" else "$in": access.id_variants(pids)}}, named
+
+
+def _doctor_names(db, patient_ids) -> dict:
+    """patient_id (as a string) -> the assigned doctor's name, or NO_DOCTOR."""
+    from api import hospital
+    own = hospital.owners(db, patient_ids)
+    ids = {o["assigned_doctor_id"] for o in own.values() if o.get("assigned_doctor_id")}
+    names = {d["doctor_id"]: d.get("name") or d["doctor_id"]
+             for d in db[DOCTORS].find({"doctor_id": {"$in": sorted(ids)}},
+                                       {"_id": 0, "doctor_id": 1, "name": 1})}
+    out = {}
+    for pid in patient_ids:
+        doctor_id = (own.get(str(pid)) or {}).get("assigned_doctor_id")
+        out[str(pid)] = names.get(doctor_id, doctor_id) if doctor_id else NO_DOCTOR
+    return out
+
+
+def _doctors_with_patients(db) -> list:
+    """The names of the doctors looking after at least one of the caller's patients."""
+    ids = [i for i in db["care_actions"].distinct("assigned_doctor_id") if i]
+    return sorted(d.get("name") or d["doctor_id"]
+                  for d in db[DOCTORS].find({"doctor_id": {"$in": ids}},
+                                            {"_id": 0, "doctor_id": 1, "name": 1}))
 
 
 def run_cohort_query(db, filters: Optional[list] = None,
@@ -833,6 +984,7 @@ def run_cohort_query(db, filters: Optional[list] = None,
     cohort_size = db["patient_worklist"].count_documents(match)
     filter_text = " and ".join(described) if described else "the current batch"
     if cohort_size == 0:
+        _no_such_diagnosis(filters)
         return {"cohort_size": 0, "filter": filter_text, "results": [],
                 "note": "No patients match that filter."}
 
@@ -871,6 +1023,10 @@ def run_cohort_query(db, filters: Optional[list] = None,
         raise ValueError(
             f"Cannot group by '{group_by}'. Available: "
             + ", ".join(k for k, v in FIELDS.items() if v.groupable))
+    if group_by == DOCTOR:
+        if bucket_size is not None:
+            raise ValueError("The assigned doctor is not a number, so it cannot be bucketed.")
+        return _cohort_by_doctor(db, match, cohort_size, filter_text, metric, metric_field, n)
 
     pipeline: list = [{"$match": match}]
     if spec.array:
@@ -918,6 +1074,38 @@ def run_cohort_query(db, filters: Optional[list] = None,
 
     return {"cohort_size": cohort_size, "filter": filter_text,
             "grouped_by": spec.label, "results": results}
+
+
+def _cohort_by_doctor(db, match: dict, cohort_size: int, filter_text: str,
+                      metric: str, metric_field: Optional[str], n: int) -> dict:
+    """run_cohort_query grouped by the assigned doctor. The doctor is not on the
+    worklist row, so the grouping is done here rather than in the database."""
+    projection = {"_id": 0, "patient_id": 1, **({metric_field: 1} if metric != "count" else {})}
+    rows = list(db["patient_worklist"].find(match, projection))
+    names = _doctor_names(db, [r["patient_id"] for r in rows])
+    groups: dict = defaultdict(list)
+    for r in rows:
+        groups[names.get(str(r["patient_id"]), NO_DOCTOR)].append(r.get(metric_field))
+    label = FIELDS[DOCTOR].label
+    results = []
+    for doctor, values in groups.items():
+        entry = {label: doctor, "patients": len(values)}
+        if metric == "count":
+            entry["percent_of_cohort"] = round(len(values) / cohort_size * 100, 1)
+            entry["_rank"] = len(values)
+        else:
+            numbers = [v for v in values if isinstance(v, (int, float))]
+            value = ({"avg": lambda x: sum(x) / len(x), "min": min, "max": max}[metric](numbers)
+                     if numbers else None)
+            entry[f"{metric} {FIELDS[metric_field].label}"] = (
+                round(value, 1) if value is not None else None)
+            entry["_rank"] = value if value is not None else float("-inf")
+        results.append(entry)
+    results.sort(key=lambda e: e["_rank"], reverse=True)
+    for e in results:
+        e.pop("_rank")
+    return {"cohort_size": cohort_size, "filter": filter_text, "grouped_by": label,
+            "results": results[:min(n, MAX_GROUPS)]}
 
 
 # ---------------------------------------------------------------------------
@@ -973,10 +1161,10 @@ def list_patients(db, filters: Optional[list] = None,
         raise ValueError("order must be 'asc' or 'desc'.")
 
     sort_spec = FIELDS.get(sort_by)
-    if sort_spec is None or sort_spec.array:
+    if sort_spec is None or sort_spec.array or not sort_spec.stored:
         raise ValueError(
             f"Cannot sort by '{sort_by}'. Available: "
-            + ", ".join(k for k, v in FIELDS.items() if not v.array))
+            + ", ".join(k for k, v in FIELDS.items() if not v.array and v.stored))
 
     requested = list(fields) if fields else list(DEFAULT_LIST_FIELDS)
     # The field being sorted on belongs in the output - a "top 5 by risk" list
@@ -1005,23 +1193,27 @@ def list_patients(db, filters: Optional[list] = None,
     count_matching = db["patient_worklist"].count_documents(match)
     filter_text = " and ".join(described) if described else "the current batch"
     if count_matching == 0:
+        _no_such_diagnosis(filters)
         return {"count_matching": 0, "filter": filter_text, "patients": [],
                 "note": "No patients match that filter."}
 
     projection = {"_id": 0, "patient_id": 1}
     for name in chosen:
-        projection[name] = 1
+        if name != DOCTOR:
+            projection[name] = 1
 
     cursor = (db["patient_worklist"]
               .find(match, projection)
               .sort(sort_by, DESCENDING if order == "desc" else 1)
               .limit(resolved_limit))
 
+    rows = list(cursor)
+    doctors = _doctor_names(db, [r.get("patient_id") for r in rows]) if DOCTOR in chosen else {}
     patients = []
-    for row in cursor:
+    for row in rows:
         entry = {"patient_id": row.get("patient_id")}
         for name in chosen:
-            value = row.get(name)
+            value = doctors.get(str(row.get("patient_id"))) if name == DOCTOR else row.get(name)
             if isinstance(value, list):
                 value = [GROUP_LABELS.get(v, v) for v in value] or None
             entry[LISTABLE_FIELDS[name]] = value
@@ -1088,7 +1280,7 @@ def list_registered_doctors(db, name: Optional[str] = None,
     mapped_specialty = None
     key = None
     if clinical_group:
-        key = str(clinical_group).strip().lower().replace(" ", "_")
+        key = _condition_key(clinical_group)
         if key not in SPECIALTY_FOR_GROUP:
             raise ValueError(
                 f"'{clinical_group}' is not a condition this system tracks. Available: "
@@ -1176,15 +1368,24 @@ def _closest_names(db, name: str, limit: int = 3) -> Optional[list]:
 
 def get_doctor_workload(db, doctor_name: Optional[str] = None) -> dict:
     """
-    How many alerts are waiting on each clinician, and how many are critical.
+    What is on each doctor's plate: the patients assigned to them on the current
+    list, how many of those are High risk today, and the early-warning alerts
+    waiting on them.
 
-    Counts alerts, not patients. A doctor with 40 open alerts may be looking at
-    fewer than 40 people, because a patient can raise one alert per monitoring
-    week - saying "40 patients" would overstate it.
+    Alerts are counted as alerts, not patients. A doctor with 40 open alerts may
+    be looking at fewer than 40 people, because a patient can raise one alert
+    per monitoring week - saying "40 patients" would overstate it.
     """
     match: dict = {"status": {"$in": list(OPEN_ALERT_STATUSES)}}
+    wanted_ids, found_as = None, None
     if doctor_name:
-        match["doctor_name"] = {"$regex": re.escape(str(doctor_name).strip()), "$options": "i"}
+        # The same name matching as the patient filters, misspellings included:
+        # a regex on the name found nothing for "Emely Carter" and reported an
+        # empty inbox as if that were the answer.
+        doctors, found_as = _doctors_named(db, doctor_name)
+        wanted_ids = {d["doctor_id"] for d in doctors}
+        match["$or"] = [{"doctor_id": {"$in": sorted(wanted_ids)}},
+                        {"doctor_name": {"$in": [d["name"] for d in doctors if d.get("name")]}}]
 
     rows = list(db[CLINICAL_ALERTS].aggregate([
         {"$match": match},
@@ -1195,16 +1396,41 @@ def get_doctor_workload(db, doctor_name: Optional[str] = None) -> dict:
             "unacknowledged": {"$sum": {"$cond": [{"$eq": ["$status", "pending"]}, 1, 0]}},
             "patients": {"$addToSet": "$patient_id"},
         }},
-        {"$sort": {"critical": DESCENDING, "open_alerts": DESCENDING}},
     ], maxTimeMS=MAX_QUERY_MS))
 
-    workload = [{
-        "doctor": r["_id"].get("doctor_name") or "unrouted",
-        "open_alerts": r["open_alerts"],
-        "critical": r["critical"],
-        "awaiting_acknowledgement": r["unacknowledged"],
-        "distinct_patients": len(r["patients"]),
-    } for r in rows]
+    # The patient load, from the care team of everyone on the current list.
+    load: dict = defaultdict(lambda: {"assigned_patients": 0, "high_risk_patients": 0})
+    batch = get_latest_batch_date(db, "patient_worklist")
+    if batch:
+        from api import hospital
+        current = list(db["patient_worklist"].find({"batch_date": batch},
+                                                   {"_id": 0, "patient_id": 1, "current_band": 1}))
+        own = hospital.owners(db, [r["patient_id"] for r in current])
+        for r in current:
+            doctor_id = (own.get(str(r["patient_id"])) or {}).get("assigned_doctor_id")
+            if doctor_id and (wanted_ids is None or doctor_id in wanted_ids):
+                load[doctor_id]["assigned_patients"] += 1
+                load[doctor_id]["high_risk_patients"] += str(r.get("current_band")).lower() == "high"
+    names = {d["doctor_id"]: d.get("name") or d["doctor_id"]
+             for d in db[DOCTORS].find({"doctor_id": {"$in": sorted(load)}},
+                                       {"_id": 0, "doctor_id": 1, "name": 1})}
+
+    entries: dict = {}
+    for doctor_id, counts in load.items():
+        entries[doctor_id] = {"doctor": names.get(doctor_id, doctor_id), **counts,
+                              "open_alerts": 0, "critical": 0, "awaiting_acknowledgement": 0,
+                              "patients_with_open_alerts": 0}
+    for r in rows:
+        key = r["_id"].get("doctor_id") or r["_id"].get("doctor_name") or "unrouted"
+        entry = entries.setdefault(key, {
+            "doctor": r["_id"].get("doctor_name") or "unrouted",
+            "assigned_patients": 0, "high_risk_patients": 0})
+        entry.update(open_alerts=r["open_alerts"], critical=r["critical"],
+                     awaiting_acknowledgement=r["unacknowledged"],
+                     patients_with_open_alerts=len(r["patients"]))
+    workload = sorted(entries.values(), key=lambda e: (e["critical"], e["open_alerts"],
+                                                       e["high_risk_patients"],
+                                                       e["assigned_patients"]), reverse=True)
 
     unrouted = db[CLINICAL_ALERTS].count_documents({"status": "unrouted"})
     responded = db[CLINICAL_ALERTS].count_documents({"status": "responded"})
@@ -1213,12 +1439,23 @@ def get_doctor_workload(db, doctor_name: Optional[str] = None) -> dict:
         "workload": workload,
         "unrouted_alerts": unrouted,
         "responded_alerts": responded,
-        "filter": f"matching '{doctor_name}'" if doctor_name else "all clinicians",
-        "counts": "open alerts, not patients; one patient can raise an alert each week",
+        "filter": (" or ".join(sorted({e["doctor"] for e in workload}) or [str(doctor_name)])
+                   + (f" ({found_as})" if found_as else "")) if doctor_name else "all clinicians",
+        "counts": ("assigned_patients and high_risk_patients are the doctor's patients on the "
+                   "current list; open_alerts counts alerts, not patients - one patient can raise "
+                   "an alert each week"),
         "note": (None if workload else
-                 "No open alerts match. Either none have been raised yet, or every one "
-                 "has already been answered."),
+                 "No patients are assigned and no alerts are open for that. Either none have "
+                 "been raised yet, or every one has already been answered."),
     }
+
+
+def _condition_key(value) -> str:
+    """A condition as a routing key, whether given as a key or as the screen
+    names it: "heart_failure", "Heart failure", "heart disease"."""
+    wanted = str(value).strip().lower()
+    by_label = {label.lower(): key for key, label in GROUP_LABELS.items()}
+    return by_label.get(wanted, wanted.replace(" ", "_"))
 
 
 def get_alert_routing(db, clinical_group: Optional[str] = None) -> dict:
@@ -1231,8 +1468,7 @@ def get_alert_routing(db, clinical_group: Optional[str] = None) -> dict:
     """
     from api.doctor_service import route  # local: doctor_service imports this module
 
-    groups = ([str(clinical_group).strip().lower().replace(" ", "_")]
-              if clinical_group else sorted(SPECIALTY_FOR_GROUP))
+    groups = [_condition_key(clinical_group)] if clinical_group else sorted(SPECIALTY_FOR_GROUP)
     for g in groups:
         if g not in SPECIALTY_FOR_GROUP:
             raise ValueError(

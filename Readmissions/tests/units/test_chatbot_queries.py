@@ -728,7 +728,7 @@ def test_workload_distinguishes_alerts_from_patients():
     hart = next(w for w in get_doctor_workload(_directory_db())["workload"]
                 if w["doctor"] == "Dr. Hart")
     assert hart["open_alerts"] == 2
-    assert hart["distinct_patients"] == 1
+    assert hart["patients_with_open_alerts"] == 1
 
 
 def test_workload_surfaces_unrouted_alerts():
@@ -857,11 +857,14 @@ def test_the_in_operator_validates_every_value():
 
 
 def test_free_text_fields_are_not_constrained():
-    """primary_diagnosis has thousands of values; there is no set to enforce."""
-    result = run_cohort_query(_vocab_db(),
-                              filters=[{"field": "primary_diagnosis", "op": "eq",
-                                        "value": "Anything At All"}])
-    assert result["cohort_size"] == 0
+    """primary_diagnosis has thousands of values; there is no set to enforce.
+    The value reaches the database, and an empty answer comes back as advice to
+    ask by condition, not as a list of every diagnosis."""
+    with pytest.raises(ValueError) as caught:
+        run_cohort_query(_vocab_db(), filters=[{"field": "primary_diagnosis", "op": "eq",
+                                                "value": "Anything At All"}])
+    assert "filter clinical_groups instead" in str(caught.value)
+    assert "Valid values" not in str(caught.value)
 
 
 def test_the_catalog_lists_every_enumerable_field():
@@ -997,3 +1000,95 @@ def test_patient_details_carry_the_care_team(conditions_db):
     assert team == {"doctor": "Dr Emily Carter (Cardiology)", "nurses": ["Grace Taylor"]}
     assert get_patient_details(conditions_db, "DM-1")["care_team"] == {
         "doctor": "no doctor assigned", "nurses": "no nurse assigned"}
+
+
+# ---------------------------------------------------------------------------
+# The assigned doctor, as a field like any other: filter, group and list by it.
+
+@pytest.fixture
+def care_team_db(conditions_db):
+    conditions_db["patient_worklist"].insert_many([
+        {"patient_id": f"P-{i}", "batch_date": LATEST_BATCH, "current_score": 50 + i,
+         "current_band": "High", "clinical_groups": ["cardiac_other", "diabetes"]} for i in range(5)])
+    conditions_db["doctors"].insert_many([
+        {"doctor_id": "DR-1", "name": "Dr Emily Carter", "specialty": "Cardiology", "active": True},
+        {"doctor_id": "DR-2", "name": "Dr Michael Turner", "specialty": "Internal Medicine", "active": True}])
+    conditions_db["care_actions"].insert_many(
+        [{"patient_id": "HF-1", "assigned_doctor_id": "DR-1"},
+         {"patient_id": "HD-1", "assigned_doctor_id": "DR-1"}]
+        + [{"patient_id": f"P-{i}", "assigned_doctor_id": "DR-2"} for i in range(5)])
+    return conditions_db
+
+
+def test_two_conditions_both_hold(care_team_db):
+    """'Heart disease and diabetes' used to become diabetes alone: the second
+    filter on the same field replaced the first."""
+    both = run_cohort_query(care_team_db, filters=[
+        {"field": "clinical_groups", "op": "eq", "value": "Heart disease"},
+        {"field": "clinical_groups", "op": "eq", "value": "Diabetes"}])
+    assert both["value"] == 5                  # P-0..4; not DM-1, which has no heart disease
+
+
+def test_which_doctor_has_the_most_high_risk_patients(care_team_db):
+    result = run_cohort_query(care_team_db, filters=[{"field": "current_band", "op": "eq", "value": "High"}],
+                              group_by="doctor")
+    assert [(r["assigned doctor"], r["patients"]) for r in result["results"]] == [
+        ("Dr Michael Turner", 5), ("Dr Emily Carter", 2), ("No doctor assigned", 1)]
+
+
+def test_a_doctor_by_name_finds_their_patients_misspelt_or_not(care_team_db):
+    for name in ("Dr Emily Carter", "emily carter", "Carter", "Emely Carter"):
+        result = list_patients(care_team_db, filters=[{"field": "doctor", "op": "eq", "value": name}],
+                               fields=["current_score", "doctor"])
+        assert [p["patient_id"] for p in result["patients"]] == ["HF-1", "HD-1"], name
+        assert {p["assigned doctor"] for p in result["patients"]} == {"Dr Emily Carter"}
+    assert "closest match" in list_patients(
+        care_team_db, filters=[{"field": "doctor", "op": "eq", "value": "Emely Carter"}])["filter"]
+    with pytest.raises(ValueError, match="No doctor is registered as 'Dr Zhivago'"):
+        list_patients(care_team_db, filters=[{"field": "doctor", "op": "eq", "value": "Dr Zhivago"}])
+    with pytest.raises(ValueError, match="Cannot sort by 'doctor'"):
+        list_patients(care_team_db, sort_by="doctor")
+
+
+def test_patients_with_no_doctor(care_team_db):
+    result = list_patients(care_team_db, filters=[{"field": "doctor", "op": "eq", "value": "none"}])
+    assert [p["patient_id"] for p in result["patients"]] == ["DM-1"]
+
+
+def test_workload_counts_each_doctors_patients_and_matches_a_misspelling(care_team_db):
+    result = get_doctor_workload(care_team_db, doctor_name="Emely Carter")
+    assert [(w["doctor"], w["assigned_patients"], w["high_risk_patients"], w["open_alerts"])
+            for w in result["workload"]] == [("Dr Emily Carter", 2, 2, 0)]
+    assert result["filter"] == "Dr Emily Carter (closest match to 'Emely Carter')"
+
+
+def test_routing_takes_a_condition_by_its_name():
+    assert get_alert_routing(_directory_db(), clinical_group="Heart failure")["routing"][0]["routes_to"] \
+        == "Dr. Hart"
+
+
+def test_the_cohort_summaries_take_field_filters(care_team_db):
+    """'Drivers for patients who went from Low to High' had only a score range
+    to reach for, and the answer described everyone above 70."""
+    care_team_db["patient_worklist"].update_many({"patient_id": {"$regex": "^P-"}},
+                                                {"$set": {"risk_band": "Low", "driver_1": "Albumin: 2.1"}})
+    moved = [{"field": "risk_band", "op": "eq", "value": "Low"},
+             {"field": "current_band", "op": "eq", "value": "High"}]
+    result = get_common_drivers(care_team_db, filters=moved)
+    assert result["cohort_size"] == 5 and result["results"][0]["driver"] == "Albumin"
+    assert "risk band at discharge eq Low" in result["filter"]
+    assert count_patients(care_team_db, filters=[{"field": "doctor", "op": "eq", "value": "Carter"}])[
+        "count"] == 2
+
+
+def test_patient_details_name_every_condition(conditions_db):
+    details = get_patient_details(conditions_db, "HF-1")
+    assert details["conditions"] == ["Heart failure", "Heart disease"]
+    assert details["monitored_as"] == "Heart failure" and "clinical_groups" not in details
+
+
+def test_a_diagnosis_by_a_short_name_asks_again_by_condition(conditions_db):
+    attack = [{"field": "primary_diagnosis", "op": "eq", "value": "heart attack"}]
+    for ask in (run_cohort_query, list_patients, count_patients, get_common_drivers):
+        with pytest.raises(ValueError, match="filter clinical_groups instead"):
+            ask(conditions_db, filters=attack)

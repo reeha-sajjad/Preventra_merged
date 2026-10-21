@@ -104,10 +104,12 @@ def _cohort_args(args: dict) -> dict:
         value = args.get(key)
         return None if value is None else float(value)
 
+    filters = args.get("filters")
     return {
         "band": args.get("band"),
         "min_score": num("min_score"),
         "max_score": num("max_score"),
+        "filters": list(filters) if isinstance(filters, list) and filters else None,
     }
 
 
@@ -162,8 +164,10 @@ def _report_ungrounded(answer: str, payload, function_name: str) -> None:
 # lists always; a patient's diagnoses and drivers once that patient is open.
 # The view passed in says which applies - `redacted` and `opened` are set on
 # access.ScopedDB; anything else (a test's raw database) is unrestricted.
+# The assigned doctor is the care team the Patients and Staff pages already
+# show these roles, not part of the clinical layer.
 OVERVIEW_FIELDS = frozenset({"current_score", "discharge_score", "trend_delta", "weeks_tracked",
-                             "current_band", "risk_band", "monitoring_status"})
+                             "current_band", "risk_band", "monitoring_status", "doctor"})
 _ONE_PATIENT = ("get_patient_drivers", "get_patient_details")
 
 NEEDS_REASON_MESSAGE = ("That is part of the patient's clinical details. Open the patient from "
@@ -238,7 +242,8 @@ def _dispatch(name: str, args: dict, db):
         return chatbot_queries.get_risk_change_since_discharge(
             db, band=args.get("band"),
             min_change=float(min_change) if min_change is not None else None,
-            direction=args.get("direction") or "increase")
+            direction=args.get("direction") or "increase",
+            filters=_cohort_args(args)["filters"])
 
     if name in ("get_common_conditions", "get_common_diagnoses", "get_common_drivers",
                 "get_condition_overlap"):

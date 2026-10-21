@@ -136,6 +136,33 @@ FUNCTION_DECLARATIONS = [
 ]
 
 
+def _filters_schema(description: str) -> types.Schema:
+    """The {field, op, value} filters run_cohort_query and list_patients take."""
+    return types.Schema(
+        type=types.Type.ARRAY,
+        description=description,
+        items=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "field": types.Schema(type=types.Type.STRING,
+                                      description="Field name, as listed for run_cohort_query."),
+                "op": types.Schema(
+                    type=types.Type.STRING,
+                    enum=["eq", "ne", "gt", "gte", "lt", "lte", "in"],
+                    description="Comparison. Text fields take eq, ne or in only."),
+                "value": types.Schema(
+                    type=types.Type.STRING,
+                    description="Value to compare against, as text."),
+            },
+            required=["field", "value"]))
+
+
+_COHORT_FILTERS = ("Optional. Any other conditions, all of which must hold - the same fields as "
+                   "run_cohort_query, e.g. risk_band eq Low with current_band eq High for "
+                   "'moved from Low to High', clinical_groups eq Heart disease, doctor eq "
+                   "Emily Carter, anchor_age gt 80.")
+
+
 # The cohort functions all take the same optional filter. Declaring it once
 # keeps the four descriptions consistent - the model is far more reliable at
 # choosing arguments when "patients above 80" looks the same everywhere.
@@ -143,6 +170,7 @@ def _cohort_params(extra_description: str) -> types.Schema:
     return types.Schema(
         type=types.Type.OBJECT,
         properties={
+            "filters": _filters_schema(_COHORT_FILTERS),
             "band": types.Schema(
                 type=types.Type.STRING, enum=_RISK_BAND_ENUM,
                 description="Optional. Restrict to one risk band."),
@@ -170,6 +198,7 @@ FUNCTION_DECLARATIONS += [
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
+                "filters": _filters_schema(_COHORT_FILTERS),
                 "band": types.Schema(
                     type=types.Type.STRING, enum=_RISK_BAND_ENUM,
                     description="Optional. Restrict to one risk band."),
@@ -222,10 +251,12 @@ FUNCTION_DECLARATIONS += [
         description=(
             "How many patients have moved materially up or down in risk since they were "
             "discharged. Use this for 'how many patients got worse', 'sharp increase in risk', "
-            "'who has deteriorated since discharge', or 'how many improved'."),
+            "'who has deteriorated since discharge', or 'how many improved'. For one doctor's "
+            "patients, or any other group, add filters."),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
+                "filters": _filters_schema(_COHORT_FILTERS),
                 "band": types.Schema(
                     type=types.Type.STRING, enum=_RISK_BAND_ENUM,
                     description="Optional. Restrict to one current risk band."),
@@ -248,10 +279,16 @@ FUNCTION_DECLARATIONS += [
             "Filterable and groupable fields: current_score, discharge_score, trend_delta "
             "(change in risk since discharge, negative means improved), anchor_age, los_days, "
             "n_prior_adm, n_diagnoses_coded, weeks_tracked, current_band, risk_band, gender, "
-            "group_label, clinical_groups, primary_diagnosis, monitoring_status.\n"
+            "group_label, clinical_groups, primary_diagnosis, monitoring_status, doctor.\n"
             "'High risk' means current_band, the risk the patient carries today. Use risk_band "
             "only when the user explicitly asks about risk at discharge.\n"
-            "Conditions: clinical_groups is EVERY condition the patient has - use it for 'patients with heart disease' and anything about a condition; it is what the patient list's Condition filter matches. group_label is the one condition their weekly monitoring follows - use it only when asked what a patient is monitored as. A condition may be given by its name, e.g. 'Heart disease'.\n"
+            "Conditions: clinical_groups is EVERY condition the patient has - use it for 'patients with heart disease' and anything about a condition; it is what the patient list's Condition filter matches. group_label is the one condition their weekly monitoring follows - use it only when asked what a patient is monitored as. A condition may be given by its name, e.g. 'Heart disease'. Two conditions ('heart disease and diabetes') are two filters, both of which must hold.\n"
+            "doctor is the patient's assigned doctor, by name ('Emily Carter' or 'Dr Emily Carter'); "
+            "the value 'none' means no doctor assigned. Which doctor has the most High-risk "
+            "patients -> filters [{field:'current_band',op:'eq',value:'High'}], group_by 'doctor'.\n"
+            "To compare groups - men against women, one band against another - group_by that "
+            "field in one call, rather than filtering to one of them. trend_delta is the change "
+            "since discharge; there is no week-on-week change, so never call it 'this week'.\n"
             "Examples: average age of high-risk patients -> filters "
             "[{field:'current_band',op:'eq',value:'High'}], metric 'avg', metric_field "
             "'anchor_age'. Age distribution -> group_by 'anchor_age' with bucket_size 10. "
@@ -311,12 +348,16 @@ FUNCTION_DECLARATIONS += [
             "Filterable, sortable and displayable fields: current_score, discharge_score, "
             "trend_delta, anchor_age, los_days, n_prior_adm, n_diagnoses_coded, weeks_tracked, "
             "current_band, risk_band, gender, group_label, clinical_groups, primary_diagnosis, "
-            "monitoring_status. Also displayable: driver_1, driver_2, driver_3 (the sentences "
+            "monitoring_status. Also filterable and displayable, not sortable: doctor (the "
+            "assigned doctor, by name - 'Dr Carter's High-risk patients', 'the top 3 and their "
+            "doctors'). Also displayable: driver_1, driver_2, driver_3 (the sentences "
             "explaining that patient\'s risk).\n"
             "'High risk' means current_band, the risk the patient carries today. Use risk_band "
             "only when the user explicitly asks about risk at discharge.\n"
             "Conditions: clinical_groups is EVERY condition the patient has - use it for 'patients with heart disease' and anything about a condition; it is what the patient list's Condition filter matches. group_label is the one condition their weekly monitoring follows - use it only when asked what a patient is monitored as. A condition may be given by its name, e.g. 'Heart disease'.\n"
-            "'Top N patients' means sort_by \'current_score\' with order \'desc\'. Put every "
+            "'Top N patients' means sort_by \'current_score\' with order \'desc\'. A question "
+            "about the top N - even 'which doctor has the most of them' - is answered from this "
+            "list with limit N, never from a count of everyone. Put every "
             "detail the question asks for into fields. Do NOT use this to count — use "
             "count_patients — and do not use it to summarise a group — use the cohort "
             "functions, which read every matching patient rather than the first few."),
@@ -395,10 +436,11 @@ FUNCTION_DECLARATIONS += [
     types.FunctionDeclaration(
         name="get_doctor_workload",
         description=(
-            "How many early-warning alerts are open for each clinician, how many are "
-            "critical, and how many are still unacknowledged. Use for 'who has the most "
-            "alerts', 'how many alerts is Dr Whitfield waiting on', 'is anything unrouted', "
-            "'how busy is the cardiology inbox'."),
+            "What is on each doctor's plate: the patients assigned to them, how many of those "
+            "are High risk today, and how many early-warning alerts are open, critical and "
+            "unacknowledged. Use for 'is Dr Carter overloaded', 'how many patients does each "
+            "doctor have', 'who has the most alerts', 'is anything unrouted'. A misspelt name "
+            "is matched to the closest registered doctor."),
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
@@ -419,7 +461,8 @@ FUNCTION_DECLARATIONS += [
             properties={
                 "clinical_group": types.Schema(
                     type=types.Type.STRING,
-                    description="Optional. One condition key. Omit for every condition."),
+                    description="Optional. One condition, by key or name (e.g. 'Heart "
+                                "failure'). Omit for every condition."),
             },
         ),
     ),
@@ -485,6 +528,12 @@ _ANSWER_SYSTEM_INSTRUCTION = (
     "hyphens as bullets, no backticks. The only bullet character is '• '.\n\n"
     "ACCURACY\n"
     "- Never invent, estimate or round beyond what the data says.\n"
+    "- Describe the group exactly as the data's 'filter' says. Never add a condition it does "
+    "not contain - a doctor, a time period such as 'this week', a condition. If the question "
+    "asked for something the filter left out, say in one line that the figures are not "
+    "narrowed by it. 'Change in risk since discharge' is never 'this week'.\n"
+    "- If the question asks two things and the data answers one, answer that one and say in "
+    "one line which part to ask separately.\n"
     "- Report what the data says; never turn it into a recommendation or a decision about a "
     "patient. A risk score is not a discharge decision, a diagnosis, or a plan. If the question "
     "asks whether to discharge, admit, treat or medicate someone, give the figures and say in "
