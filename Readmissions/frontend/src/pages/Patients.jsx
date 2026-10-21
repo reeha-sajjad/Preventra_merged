@@ -4,9 +4,8 @@ import { X } from 'lucide-react';
 import FilterBar from '../components/dashboard/FilterBar';
 import PatientWorklist from '../components/dashboard/PatientWorklist';
 import PatientDetailPanel from '../components/dashboard/PatientDetailPanel';
-import RisingRiskPanel from '../components/dashboard/RisingRiskPanel';
 import { getStaff } from '../api';
-import { can, STAFF_ROLES, WATCH_ROLES, MY_PATIENTS_ROLES, MEMBER_LOOKUP_ROLES } from '../roles';
+import { can, STAFF_ROLES, MY_PATIENTS_ROLES, MEMBER_LOOKUP_ROLES } from '../roles';
 import MemberLookup from '../components/insurance/MemberLookup';
 import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
@@ -63,7 +62,6 @@ export default function Patients() {
       {can(MEMBER_LOOKUP_ROLES) && (
         <div className="mb-4 flex justify-end"><MemberLookup /></div>
       )}
-      {can(WATCH_ROLES) && !careFilter && <RisingRiskPanel />}
       <FilterBar />
       {careFilter && (
         <div className="mb-4 -mt-2 flex items-center gap-2 text-sm">

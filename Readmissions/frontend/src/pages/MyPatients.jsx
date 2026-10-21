@@ -8,7 +8,6 @@ import { getMyPatients } from '../api';
 import { readClaims } from '../api/auth';
 import RiskBadge from '../components/shared/RiskBadge';
 import TrendStatusBadge from '../components/shared/TrendStatusBadge';
-import RisingRiskPanel from '../components/dashboard/RisingRiskPanel';
 import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
 /**
@@ -177,10 +176,6 @@ export default function MyPatients() {
           sub={isDoctor ? 'waiting for your reply' : 'on your patients'}
           to={isDoctor ? '/doctor' : undefined} />
       </div>
-
-      {/* Patients whose latest week got worse - the same panel as on the
-          patient list, so they can be dealt with from here. */}
-      {data.rising > 0 && <RisingRiskPanel />}
 
       <Section icon={ListOrdered} title="Needs attention"
         sub={data.attention_total
