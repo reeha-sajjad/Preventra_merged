@@ -216,6 +216,22 @@ def test_claude_gets_alternating_turns_and_json_through_a_required_tool(monkeypa
     assert sent["tool_choice"] == {"type": "tool", "name": "answer"} and sent["system"] == "sys"
 
 
+def test_claude_is_never_sent_a_temperature(monkeypatch):
+    """Model Studio asks for 0.2; current Claude models refuse any temperature
+    with a 400, which sent every studio run to the name/type rules."""
+    sent = {}
+
+    class Messages:
+        def create(self, **kwargs):
+            sent.update(kwargs)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"a": 1}')])
+    claude = llm_providers.Anthropic("key")
+    monkeypatch.setattr(claude, "_client", lambda timeout_s: Held(messages=Messages()))
+    reply = claude.complete("claude-sonnet-5-5", "sys", [{"role": "user", "content": "q"}],
+                            json_schema=True, temperature=0.2)
+    assert reply.text == '{"a": 1}' and "temperature" not in sent
+
+
 def test_openai_and_ollama_tool_calls_and_addresses(monkeypatch):
     sent = {}
     call = SimpleNamespace(function=SimpleNamespace(name="count", arguments='{"band": "high"}'))
