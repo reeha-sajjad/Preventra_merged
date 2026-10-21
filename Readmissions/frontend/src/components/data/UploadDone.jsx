@@ -4,6 +4,7 @@ import { Loader2, CheckCircle2, AlertTriangle, FlaskConical, Upload } from 'luci
 import { getTrainingStatus, trainFromData } from '../../api';
 import { panel, button, ghost } from './dataFormat';
 import { Notice } from './dataParts';
+import RescoreCard from './RescoreCard';
 
 /**
  * Step 5 of an upload: the import as it runs, what came of it, and - once a
@@ -47,7 +48,8 @@ export default function UploadDone({ draft, onAgain }) {
           {(r.accepted || 0).toLocaleString()} {discharges ? 'discharge' : 'check-in'}{r.accepted === 1 ? '' : 's'} stored
           {r.rejected > 0 && <>, <span className="text-red-700">{r.rejected.toLocaleString()} not stored</span></>}.{' '}
           {r.history_only ? 'Kept as history: for training your own model and as earlier admissions of future patients.'
-            : 'They are being scored now and appear on the worklist within a minute or two.'}
+            : 'They are being scored now and appear on the patient list within a minute or two. If no deployed model '
+              + 'can read them yet, they wait - see Scoring below - and are scored as soon as you deploy one.'}
         </p>
         {r.rejected > 0 && (
           <Examples title="Not stored" tone="red" items={(r.rejected_examples || []).map((x) => ({
@@ -64,6 +66,7 @@ export default function UploadDone({ draft, onAgain }) {
         </div>
       </div>
 
+      {discharges && !r.history_only && <RescoreCard />}
       {discharges && <TrainCard key={draft.draft_id} />}
     </div>
   );
@@ -124,9 +127,16 @@ function TrainCard() {
               Past discharges with an outcome column, or with admission and discharge dates, give it.
             </p>
           )}
-          <button type="button" className={`${button} mt-3`} disabled={!status.ready || busy} onClick={train}>
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />} Train a model on your data
-          </button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className={button} disabled={!status.ready || busy} onClick={train}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />} Train on the stored history
+            </button>
+            {/* A model can also be trained on a file - the hospital's own export - in Model Studio; current
+                patients uploaded here are then scored on their rows exactly as sent. */}
+            <button type="button" className={ghost} onClick={() => navigate('/model-studio')}>
+              <FlaskConical size={15} /> Train on a file in Model Studio
+            </button>
+          </div>
         </>
       )}
       {error && <div className="mt-3"><Notice tone="red">{error}</Notice></div>}

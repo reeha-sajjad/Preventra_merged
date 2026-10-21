@@ -72,6 +72,16 @@ MISSING_TOKENS = {"?", "na", "n/a", "null", "#n/a", "nan", "-", "--"}
 # Never kept as a model input, whatever the profile says: they identify people.
 _PERSONAL = re.compile(r"name|address|phone|email|street|postcode|zip|ssn|passport|national_?id|cnic", re.I)
 _AGE_BAND = re.compile(r"^\s*[\[(]\s*(\d+)\s*-\s*(\d+)\s*[\])]\s*$")
+# A current patient's discharge row is also kept exactly as it was sent: every
+# column, the raw values ("[70-80)", "Female", "?"). A model trained in Model
+# Studio on the hospital's own export learned those columns and those values;
+# what the rest of Preventra stores (age 75, sex F, x_ columns) is a translation
+# it has never seen. Scoring it on the row as sent is scoring it on what it
+# learned (api/scoring_service._choose_model). Columns that identify a person
+# are left out here too, and so is the outcome - it is what the model predicts.
+# Past discharges sent only as history do not keep it: they train from what is
+# stored, and a hundred thousand of them would double the space they take.
+SOURCE_TABLES = ("encounters",)
 
 DATE_FIELDS = {"admit_datetime", "discharge_datetime", "ed_arrival_datetime", "ed_departure_datetime",
                "date_of_birth", "death_date", "coded_datetime", "result_datetime", "order_start_datetime",
@@ -289,10 +299,13 @@ def reported_outcome(value, positive: list) -> Optional[bool]:
     return str(value).strip().lower() in {str(p).strip().lower() for p in positive}
 
 
-def apply(table: str, rows: list, profile: Optional[dict]) -> list:
+def apply(table: str, rows: list, profile: Optional[dict], keep_source: bool = False) -> list:
     """Their rows -> ours: renamed, dates in ISO, units converted, age bands
     read, the outcome column turned into `reported_outcome`, the hospital's
-    other columns kept under `extras` (kept()), everything else dropped."""
+    other columns kept under `extras` (kept()), everything else dropped.
+
+    With `keep_source` a discharge also keeps its row exactly as sent, under
+    `source` - see SOURCE_TABLES."""
     profile = profile or {}
     if not rows:
         return []
@@ -307,8 +320,15 @@ def apply(table: str, rows: list, profile: Optional[dict]) -> list:
     outcome = profile.get("outcome") or {}
     outcome_col = outcome.get("column") if outcome.get("table", "encounters") == table else None
     out = []
+    source_ok = keep_source and table in SOURCE_TABLES
     for row in rows:
         new, extras = {}, {}
+        if source_ok:
+            source = [(str(col), value) for col, value in row.items()
+                      if value is not None and value != "" and col != outcome_col
+                      and not _PERSONAL.search(str(col))]
+            if source:
+                new["source"] = source[:schema.MAX_SOURCE]
         for col, value in row.items():
             if value is None or value == "" or str(value).strip().lower() in MISSING_TOKENS:
                 continue

@@ -252,3 +252,106 @@ def test_the_mapping_tab_keeps_every_column_but_the_dropped_ones(main, world):
     assert profile["drop"] == {"encounters": ["bed"]} and "encounters" not in profile["extras"]
     both = admin.put("/api/ingest/profile", json={"drop": {"encounters": []}, "extras": {"encounters": []}})
     assert both.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Train in Model Studio on the export, upload current patients, see them scored
+# ---------------------------------------------------------------------------
+# The workflow a hospital expects: a model trained on its own export (the raw
+# columns and values), then this week's patients uploaded on the Data page and
+# scored by it - including the ones uploaded before any model existed.
+RAW_FEATURES = ["time_in_hospital", "num_lab_procedures", "num_medications", "number_inpatient",
+                "number_emergency", "age", "gender", "insulin"]
+RAW_CATEGORICAL = ["age", "gender", "insulin"]
+
+
+def _raw_model(tmp_path):
+    from tests.units.test_ingest_scoring import _train
+    frame = pd.read_csv(DIABETIC, nrows=2000)
+    frame["outcome"] = (frame["readmitted"] == "<30").astype(int)
+    return _train(tmp_path, "raw", frame[RAW_FEATURES + ["outcome"]], RAW_FEATURES, RAW_CATEGORICAL)
+
+
+def _register(db, model_id, config, blob):
+    from api import model_studio
+    from api.studio_templates import STANDARD_PIPELINE
+    model_studio._registry(db).insert_one({
+        "model_id": model_id, "name": "Trained on the export", "target": "discharge",
+        "hospital_id": "hosp-a", "algorithm": "logistic_regression", "config": config,
+        "code": STANDARD_PIPELINE, "artifact_id": model_studio._gridfs(db).put(blob),
+        "bands": {"high_score_threshold": 20.0, "low_score_threshold": 10.0},
+        "data": {"history": False, "id_column": None, "time_column": None},
+        "can_score": True, "created_at": "2026-10-21 00:00:00"})
+
+
+def _current(admin, flat, rows=30):
+    small = "\n".join(flat.splitlines()[:rows + 1]) + "\n"
+    draft = upload(admin, **{"this_week.csv": small}).json()
+    # Current patients: what happens to them next is not known yet, so no outcome.
+    started = confirm(admin, draft, patient_prefix="DIA", history_only=False, outcome=None)
+    assert started.status_code == 202, started.text
+    return wait(admin, draft["draft_id"])
+
+
+def test_current_patients_keep_their_row_as_sent_and_history_does_not(main, world, flat):
+    db = world["db"]
+    admin = as_user(main, world, "admin@a.test")
+    _current(admin, flat, rows=5)
+    stay = db[ingest.STAYS].find_one({"encounter_key": "149190"})
+    sent = dict(stay["source"])
+    assert sent["age"] == "[10-20)" and sent["gender"] == "Female" and sent["diag_1"] == "276"
+    assert stay["dates_assumed"] and stay["encounter"]["discharge_datetime"].date() == pd.Timestamp.now().date()
+    assert (stay["encounter"]["discharge_datetime"] - stay["encounter"]["admit_datetime"]).days == 3   # time_in_hospital
+
+    draft = upload(admin, **{"history.csv": flat}).json()
+    confirm(admin, draft, patient_prefix="DIA", history_only=True)
+    wait(admin, draft["draft_id"])
+    old = db[ingest.STAYS].find_one({"encounter_key": "64410"})
+    assert old["history"] and not old.get("source") and not old.get("dates_assumed")
+    assert old["encounter"].get("discharge_datetime") is None
+
+
+def test_a_model_trained_on_the_export_scores_current_patients_as_sent(main, studio, flat, tmp_path):
+    db = studio["db"]
+    config, blob = _raw_model(tmp_path)
+    _register(db, "m-raw", config, blob)
+    from api import model_studio
+    model_studio.deploy_model(db, "m-raw", model_studio.system_actor("hosp-a"))
+    admin = as_user(main, studio, "admin@a.test")
+    _current(admin, flat)
+    worker.run(db, once=True)
+    rows = list(db["patient_worklist"].find({"patient_id": {"$regex": "^DIA-"}}))
+    assert len(rows) >= 25
+    assert {r["model_version"] for r in rows} == {"studio:m-raw"}
+    assert all(r["dates_assumed"] and r["discharge_date"] == pd.Timestamp.now().strftime("%Y-%m-%d") for r in rows)
+    assert all(0 <= r["risk_score"] <= 100 and r["driver_1"] for r in rows)
+
+
+def test_patients_waiting_for_a_model_are_scored_when_one_is_deployed(main, studio, flat, tmp_path):
+    db = studio["db"]
+    admin = as_user(main, studio, "admin@a.test")
+    _current(admin, flat)
+    worker.run(db, once=True)
+    assert db["patient_worklist"].count_documents({"patient_id": {"$regex": "^DIA-"}}) == 0
+    waiting = admin.get("/api/ingest/scoring").json()["waiting"]
+    assert waiting >= 25
+
+    config, blob = _raw_model(tmp_path)
+    _register(db, "m-raw", config, blob)
+    deployed = admin.post("/api/studio/models/m-raw/deploy")
+    assert deployed.status_code == 200, deployed.text
+    assert deployed.json()["rescore"]["queued"] == waiting      # queued by the deploy itself
+    worker.run(db, once=True)
+    assert db["patient_worklist"].count_documents({"patient_id": {"$regex": "^DIA-"},
+                                                   "model_version": "studio:m-raw"}) == waiting
+    assert admin.get("/api/ingest/scoring").json()["waiting"] == 0
+
+
+def test_the_row_as_sent_leaves_out_the_outcome_and_anything_personal():
+    from ingestion import profile
+    rows = [{"encounter_id": "1", "patient_nbr": "9", "age": "[70-80)", "readmitted": "<30",
+             "patient_name": "Ann Smith", "phone": "0300", "insulin": "Up"}]
+    prof = {"outcome": {"table": "encounters", "column": "readmitted", "positive": ["<30"]}}
+    sent = dict(profile.apply("encounters", rows, prof, keep_source=True)[0]["source"])
+    assert sent == {"encounter_id": "1", "patient_nbr": "9", "age": "[70-80)", "insulin": "Up"}
+    assert "source" not in profile.apply("encounters", rows, prof)[0]          # history keeps none

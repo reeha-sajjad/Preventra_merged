@@ -189,13 +189,15 @@ export default function UploadReview({ report, prefix, onConfirm, onCancel }) {
               <label className="flex items-start gap-2 text-gray-700">
                 <input type="radio" className="mt-0.5" checked={state.historyOnly}
                        onChange={() => setState((s) => ({ ...s, historyOnly: true }))} />
-                <span><strong>No, these are past discharges.</strong> Keep them to train your own model and as earlier
-                  admissions of future patients. They do not go on the worklist.</span>
+                <span><strong>No, these are past discharges (history).</strong> Keep them to train your own model and as
+                  earlier admissions of future patients. They do not go on the patient list.</span>
               </label>
               <label className="flex items-start gap-2 text-gray-700">
                 <input type="radio" className="mt-0.5" checked={!state.historyOnly}
                        onChange={() => setState((s) => ({ ...s, historyOnly: false }))} />
-                <span><strong>Yes, current patients.</strong> Score them and put them on the worklist.</span>
+                <span><strong>Yes, current patients.</strong> Score them and put them on the patient list. If no model
+                  can read them yet, they wait here and are scored as soon as you deploy one in Model Studio. Without
+                  dates, they are taken as discharged today.</span>
               </label>
             </fieldset>
           )}

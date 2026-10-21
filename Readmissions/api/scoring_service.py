@@ -146,13 +146,40 @@ def _ingested(hospital_id: str) -> dict:
     return {"hospital_id": hospital_id, "source": SOURCE}
 
 
+def waiting_for_a_model(db, hospital_id: str) -> list:
+    """The latest discharge of each current patient that was stored but never
+    scored - no model could read it yet. Without this they were stranded: a
+    re-score only looked at patients already on the worklist, so deploying the
+    model that could score them changed nothing. Past discharges sent as
+    history, and stays that are never scored (died in hospital, hospice,
+    observation), are not waiting."""
+    on_list = set(db["patient_worklist"].distinct("patient_id", _ingested(hospital_id)))
+    latest: dict = {}
+    for s in db[STAYS].find({"hospital_id": hospital_id, "history": {"$ne": True}},
+                            {"_id": 0, "patient_id": 1, "encounter_key": 1, "received_at": 1,
+                             "encounter.discharge_datetime": 1, "encounter.died_in_hospital": 1,
+                             "encounter.discharge_disposition": 1, "encounter.admission_type": 1,
+                             "encounter.observation_stay": 1}):
+        enc = s.get("encounter") or {}
+        if (s.get("patient_id") in on_list or enc.get("died_in_hospital") or enc.get("observation_stay")
+                or enc.get("discharge_disposition") in ("DIED", "HOSPICE")
+                or enc.get("admission_type") == "OBSERVATION"):
+            continue
+        when = enc.get("discharge_datetime") or s.get("received_at") or datetime.min
+        if s["patient_id"] not in latest or when >= latest[s["patient_id"]][0]:
+            latest[s["patient_id"]] = (when, str(s["encounter_key"]))
+    return [key for _, key in latest.values()]
+
+
 def due_for_rescore(db, hospital_id: str) -> list:
     """The latest discharge of every ingested patient of this hospital whose
-    worklist row was scored under other models than the ones deployed now."""
+    worklist row was scored under other models than the ones deployed now, and
+    of every current patient still waiting for a model that can read them."""
     fingerprint = deployed_fingerprint(db, hospital_id)
     rows = db["patient_worklist"].find({**_ingested(hospital_id), "scored_for": {"$ne": fingerprint}},
                                        {"encounter_key": 1})
-    return list(dict.fromkeys(str(r["encounter_key"]) for r in rows if r.get("encounter_key")))
+    keys = [str(r["encounter_key"]) for r in rows if r.get("encounter_key")]
+    return list(dict.fromkeys(keys + waiting_for_a_model(db, hospital_id)))
 
 
 def rescore_status(db, hospital_id: str) -> dict:
@@ -166,21 +193,34 @@ def rescore_status(db, hospital_id: str) -> dict:
     return {"models": models,
             "patients": db["patient_worklist"].count_documents(_ingested(hospital_id)),
             "due": db["patient_worklist"].count_documents({**_ingested(hospital_id),
-                                                           "scored_for": {"$ne": fingerprint}})}
+                                                           "scored_for": {"$ne": fingerprint}}),
+            "waiting": len(waiting_for_a_model(db, hospital_id))}
 
 
-def _choose_model(db, hospital_id: str, rows: pd.DataFrame) -> tuple:
-    """(model, note). The hospital's deployed discharge model when the rows
-    carry enough of its inputs; the built-in model otherwise, with the reason."""
+def _choose_model(db, hospital_id: str, rows: pd.DataFrame, source_columns=()) -> tuple:
+    """(model, note, inputs). The hospital's deployed discharge model when the
+    stays carry enough of its inputs; the built-in model otherwise, with the
+    reason.
+
+    `inputs` says which form the model reads. "features": Preventra's own
+    columns (the 94 inputs and the x_ columns) - a model trained from stored
+    discharges. "source": the discharge rows exactly as the hospital sent them -
+    a model trained in Model Studio on the hospital's own export, whose inputs
+    are that export's columns and raw values (ingestion/profile.SOURCE_TABLES)."""
     model = model_studio.active_model_for(db, hospital_id, "discharge")
     if not model or model["model_id"] == model_studio.BUILTIN_MIMIC:
-        return None, None
+        return None, None, None
     wanted = model_studio.comp_features(model)
+    need = MIN_COVERAGE * max(len(wanted), 1)
     have = [c for c in wanted if c in rows.columns]
-    if len(have) < MIN_COVERAGE * max(len(wanted), 1):
-        return None, (f"{model['name']} needs inputs these discharges do not carry "
-                      f"({len(have)} of {len(wanted)}); scored by the built-in model instead")
-    return model, None
+    if len(have) >= need:
+        return model, None, "features"
+    as_sent = [c for c in wanted if c in set(source_columns)]
+    if len(as_sent) >= need:
+        return model, None, "source"
+    best = max(len(have), len(as_sent))
+    return None, (f"{model['name']} needs inputs these discharges do not carry "
+                  f"({best} of {len(wanted)}); scored by the built-in model instead"), None
 
 
 # -------------------------------------------------------------- outcomes
@@ -238,7 +278,10 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
         return {"scored": 0, "not_scored": not_scored}
 
     fingerprint = deployed_fingerprint(db, hospital_id)
-    model, note = _choose_model(db, hospital_id, feats)
+    scoring_keys = list(feats.loc[scorable, "encounter_key"])
+    sent = {k: dict(targets[k].get("source") or []) for k in scoring_keys}
+    model, note, inputs = _choose_model(db, hospital_id, feats,
+                                        {c for row in sent.values() for c in row})
     if model is None:
         # The built-in model reads only what it was trained on: a stay without
         # those fields (or a child's) waits for the hospital's own model.
@@ -253,6 +296,14 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
             return {"scored": 0, "not_scored": not_scored, **({"note": note} if note else {})}
         results = _builtin_scores(feats[scorable])
         version, bands = BUILTIN_VERSION, model_studio._mimic_bands()
+    elif inputs == "source":
+        # The rows as sent, in the order the stays are written below. Only the
+        # discharges being scored: a model trained on a flat export reads one
+        # row per discharge and no earlier admissions.
+        rows = pd.DataFrame([sent[k] for k in scoring_keys])
+        results = _studio_scores(db, model, rows, pd.Series([True] * len(rows)))
+        version = f"studio:{model['model_id']}"
+        bands = model.get("bands") or model_studio._mimic_bands()
     else:
         results = _studio_scores(db, model, feats.drop(columns=["excluded"]), scorable)
         version = f"studio:{model['model_id']}"
@@ -294,6 +345,8 @@ def _write_discharge(db, hospital_id: str, stay: dict, row: pd.Series, result: d
               "primary_diagnosis": title, "primary_icd_code": code, "n_diagnoses_coded": n_dx,
               "los_days": _number(row["los_days"], lambda v: round(max(v, 0.0), 1)),
               "n_prior_adm": _number(row["n_prior_adm"], int), "model_version": version,
+              # Dates taken as the day the patient was sent (api/ingest._assume_dates).
+              "dates_assumed": bool(stay.get("dates_assumed")),
               "hospital_id": hospital_id, "encounter_key": stay["encounter_key"], "source": SOURCE}
 
     db["risk_registry"].update_one(

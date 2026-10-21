@@ -223,6 +223,37 @@ def _dates(doc):
     return doc
 
 
+# Length-of-stay columns hospitals send, compared lower-case with only letters
+# kept ("time_in_hospital", "LOS days", "Length of stay").
+_LOS_NAMES = {"timeinhospital", "los", "losdays", "lengthofstay", "lengthofstaydays", "daysinhospital",
+              "staydays", "lengthofstayindays"}
+
+
+def _assume_dates(stay: dict, today: datetime) -> bool:
+    """A current patient sent without a discharge date was discharged when the
+    hospital sent them: the discharge is today, and the admission that many days
+    earlier when the row carries a length of stay. Returns whether dates were
+    assumed. Never for past discharges - stamping a hospital's history with
+    today would make every repeat patient look readmitted the same day."""
+    enc = stay["encounter"]
+    if enc.get("discharge_datetime"):
+        return False
+    discharge = datetime(today.year, today.month, today.day)
+    enc["discharge_datetime"] = discharge
+    if not enc.get("admit_datetime"):
+        for name, value in list(stay.get("source") or []) + list((stay.get("extras") or {}).items()):
+            if re.sub(r"[^a-z]", "", str(name).lower()) not in _LOS_NAMES:
+                continue
+            try:
+                days = float(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= days <= 365:
+                enc["admit_datetime"] = discharge - timedelta(days=days)
+                break
+    return True
+
+
 def take_encounters(db, client: dict, bundles: list, idempotency_key: Optional[str] = None,
                     history_only: bool = False) -> dict:
     """Check, store and queue discharges. With `history_only` they are stored
@@ -244,10 +275,14 @@ def take_encounters(db, client: dict, bundles: list, idempotency_key: Optional[s
             rejected.append({"index": i, "encounter_key": key, "errors": errors})
             continue
         enc = stay["encounter"]
+        # A current patient with no dates is taken as discharged today, and the
+        # stay says so (see _assume_dates).
+        assumed = not history_only and _assume_dates(stay, _now())
         doc = _dates({**stay, "hospital_id": hospital, "encounter_key": enc["encounter_key"],
                       "patient_key": enc["patient_key"],
                       "patient_id": f"{prefix}-{enc['patient_key']}", "received_at": _now(),
-                      "warnings": warns, **({"history": True} if history_only else {})})
+                      "warnings": warns, **({"history": True} if history_only else {}),
+                      **({"dates_assumed": True} if assumed else {})})
         ops.append(ReplaceOne({"hospital_id": hospital, "encounter_key": enc["encounter_key"]},
                               doc, upsert=True))
         accepted.append(enc["encounter_key"])
@@ -416,6 +451,8 @@ def bundles_from_files(files: dict) -> tuple:
                                         "icd_version": version, "sequence": start + i + 1})
         if row.get("reported_outcome") is not None:
             bundle["reported_outcome"] = row["reported_outcome"]
+        if row.get("source"):
+            bundle["source"] = row["source"]
         if key in drg:
             bundle["drg"] = drg[key]
         if vitals:
@@ -482,7 +519,10 @@ def take_files(db, client: dict, files: dict, idempotency_key: Optional[str] = N
     request limits and each kind returns a list of batches; otherwise one batch
     per kind, as the machine route has always answered."""
     prof = profile_of(db, client["hospital_id"])
-    mapped = {t: data_profile.apply(t, rows, prof) for t, rows in files.items() if rows}
+    # Current patients keep their rows as sent, for a model trained on the
+    # hospital's own export (ingestion/profile.SOURCE_TABLES); history does not.
+    mapped = {t: data_profile.apply(t, rows, prof, keep_source=not history_only)
+              for t, rows in files.items() if rows}
     bundles, week_rows = bundles_from_files(mapped)
     out = {}
     if not chunked:

@@ -132,6 +132,7 @@ class DischargeVitals(_In):
 
 PERSON_FIELDS = ("sex", "marital_status", "race_ethnicity")
 MAX_EXTRAS = 150
+MAX_SOURCE = 300            # columns of a discharge row kept as sent (ingestion/profile.py)
 # What the built-in model needs of a stay (besides diagnoses, labs and the
 # rest, which it reads when they are there). A stay without any of these is
 # stored as incomplete: the hospital's own Model Studio model can score it, the
@@ -159,6 +160,20 @@ class Bundle(_In):
     # (ingestion/profile.py). One value per discharge; never read by the
     # built-in model.
     extras: dict[str, Union[float, int, bool, str, None]] = Field(default_factory=dict)
+    # The discharge row exactly as the hospital sent it, for a model trained in
+    # Model Studio on the hospital's own export (ingestion/profile.SOURCE_TABLES).
+    # Pairs rather than a mapping: a hospital's headers may hold "." or "$",
+    # which are not safe as stored field names.
+    source: list[tuple[str, Union[float, int, bool, str, None]]] = Field(default_factory=list)
+
+    @field_validator("source")
+    @classmethod
+    def _source(cls, value: list) -> list:
+        if len(value) > MAX_SOURCE:
+            raise ValueError(f"at most {MAX_SOURCE} source columns")
+        if any(len(k) > 200 or (isinstance(v, str) and len(v) > 500) for k, v in value):
+            raise ValueError("source column names must be at most 200 characters and values at most 500")
+        return value
 
     @field_validator("extras")
     @classmethod

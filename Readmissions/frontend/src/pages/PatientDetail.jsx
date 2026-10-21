@@ -138,7 +138,9 @@ export default function PatientDetail() {
             <MemberLine summary={summary} />
             <div className="flex items-center space-x-2 text-gray-500">
               <Calendar size={18} />
-              <span>Discharged: <strong>{summary.discharge_date}</strong></span>
+              <span>Discharged: <strong>{summary.discharge_date}</strong>
+                {summary.dates_assumed && <span className="text-xs"> (assumed: the day this patient was uploaded)</span>}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-6 bg-gray-50 px-8 py-4 rounded-xl border border-gray-100">
@@ -191,7 +193,9 @@ export default function PatientDetail() {
           <MemberLine summary={summary} />
           <div className="flex items-center space-x-2 text-gray-500">
             <Calendar size={18} />
-            <span>Discharged: <strong>{patient.discharge_date}</strong></span>
+            <span>Discharged: <strong>{patient.discharge_date}</strong>
+              {patient.dates_assumed && <span className="text-xs"> (assumed: the day this patient was uploaded)</span>}
+            </span>
           </div>
           <button
             onClick={() => navigate(`/patients/${patient.id}/trend`)}

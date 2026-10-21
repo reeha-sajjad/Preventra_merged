@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Loader2, Moon, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Loader2, Moon, Download, FlaskConical } from 'lucide-react';
 import { getIngestScoring, rescoreNow, downloadTrainingFile } from '../../api';
 import { panel, button, ghost, when } from './dataFormat';
 import { StatusPill } from './dataParts';
@@ -11,6 +12,7 @@ import { StatusPill } from './dataParts';
  * and in Model Studio, next to where a model is deployed.
  */
 export default function RescoreCard({ compact = false, reloadKey = 0 }) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -55,7 +57,7 @@ export default function RescoreCard({ compact = false, reloadKey = 0 }) {
     return compact ? null : <div className={`${panel} text-sm text-red-700`}>{error}</div>;
   }
   if (!status) return null;
-  if (compact && !status.due && !running) return null;
+  if (compact && !status.due && !status.waiting && !running) return null;
 
   const models = status.models || {};
   return (
@@ -68,6 +70,14 @@ export default function RescoreCard({ compact = false, reloadKey = 0 }) {
             {models.discharge?.builtin && <span className="text-gray-400"> (built-in)</span>}
             {' · '}Weekly: <strong>{models.weekly?.name || '—'}</strong>
           </p>
+          {/* Current patients stored but not scored: no deployed model can read them yet. They are scored
+              when one is deployed (api/scoring_service.waiting_for_a_model). */}
+          {status.waiting > 0 && (
+            <p className="mt-1 text-sm font-medium text-amber-700">
+              {status.waiting} patient{status.waiting === 1 ? ' is' : 's are'} waiting for a model that can read them.
+              Train one in Model Studio on your history file; they are scored as soon as you deploy it.
+            </p>
+          )}
           <p className="mt-1 text-sm">
             {status.due > 0 ? (
               <span className="font-medium text-amber-700">
@@ -87,7 +97,12 @@ export default function RescoreCard({ compact = false, reloadKey = 0 }) {
               <Download size={15} /> Training file
             </button>
           )}
-          <button type="button" className={button} onClick={rescore} disabled={busy || !status.due}>
+          {status.waiting > 0 && (
+            <button type="button" className={ghost} onClick={() => navigate('/model-studio')}>
+              <FlaskConical size={15} /> Model Studio
+            </button>
+          )}
+          <button type="button" className={button} onClick={rescore} disabled={busy || !(status.due || status.waiting)}>
             {busy ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Re-score now
           </button>
         </div>

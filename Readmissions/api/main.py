@@ -1042,6 +1042,8 @@ def get_patient(patient_id: str, request: Request):
         "monitoring_status": row.get("monitoring_status", ""),
         "discharge_date": row.get("discharge_date", ""),
         "admit_date": row.get("admit_date", ""),
+        # Sent without dates, so taken as discharged the day it was uploaded.
+        "dates_assumed": bool(row.get("dates_assumed")),
         "primary_diagnosis": row.get("primary_diagnosis", ""),
         "primary_icd_code": row.get("primary_icd_code", ""),
         "secondary_diagnoses": row.get("secondary_diagnoses", []),
@@ -2152,7 +2154,18 @@ def studio_model(model_id: str, request: Request):
 
 @app.post("/api/studio/models/{model_id}/deploy")
 def studio_deploy(model_id: str, request: Request):
-    return _studio_call(model_studio.deploy_model, db, model_id, _studio_user(request))
+    user = _studio_user(request)
+    out = _studio_call(model_studio.deploy_model, db, model_id, user)
+    # The patients waiting for a model, and those scored by the one replaced,
+    # are scored by this one now rather than at the nightly check - deploying is
+    # the moment someone expects to see them on the worklist.
+    hospital = model_studio._user_hospital(user)
+    if hospital:
+        try:
+            out["rescore"] = ingest.queue_rescore(db, hospital, user.get("email", ""))
+        except Exception as exc:                                         # noqa: BLE001
+            out["rescore"] = {"queued": 0, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    return out
 
 
 @app.delete("/api/studio/models/{model_id}")
@@ -3044,7 +3057,7 @@ def get_care_team_history(patient_id: str, request: Request):
 
 _SUMMARY_FIELDS = {"_id": 0, "patient_id": 1, "risk_score": 1, "risk_band": 1,
                    "current_score": 1, "current_band": 1, "monitoring_status": 1,
-                   "trend_delta": 1, "weeks_tracked": 1, "discharge_date": 1}
+                   "trend_delta": 1, "weeks_tracked": 1, "discharge_date": 1, "dates_assumed": 1}
 
 
 @app.get("/api/patients/{patient_id}/summary")
