@@ -144,8 +144,9 @@ class Anthropic:
         kwargs = {"model": model, "max_tokens": MAX_TOKENS, "messages": self._turns(messages)}
         if system:
             kwargs["system"] = system
-        if temperature is not None:
-            kwargs["temperature"] = temperature
+        # No temperature: the current Claude models (Haiku, Sonnet and Opus 5.5,
+        # Fable 5.1 and others) refuse any non-default value with a 400 on every
+        # request, and older ones work at the default.
         if isinstance(json_schema, dict):
             # Claude has no JSON mode: a single required tool whose input is the
             # answer gives a well-formed object every time.
