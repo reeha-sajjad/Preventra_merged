@@ -92,9 +92,9 @@ def test_a_caretaker_can_ask_the_case_manager_and_step_away(world, fresh):
     r = carer.post("/api/my-home/ask", json={"reason": "refill", "note": "Pharmacy out of pens"})
     assert r.status_code == 201
     doc = world["db"][COLLECTION].find_one({"patient_idx": 3})
-    assert doc["requested_by"]["name"] == "The caretaker" and "email" not in doc["requested_by"]
+    assert doc["requested_by"]["name"] == "Sam Carer (caretaker)" and "email" not in doc["requested_by"]
     listed = client(world, "cm@a.test").get("/api/followups").json()["items"]
-    assert next(i for i in listed if i["patient_idx"] == 3)["patient_requests"][0]["by"] == "The caretaker"
+    assert next(i for i in listed if i["patient_idx"] == 3)["patient_requests"][0]["by"] == "Sam Carer (caretaker)"
     # A caretaker can remove only themselves.
     other = str(world["store"][settings.shared_identity_db_name].users.find_one({"email": "carer@home.test"})["_id"])
     assert carer.delete(f"/api/caretakers/{other}?patient=3").status_code == 403

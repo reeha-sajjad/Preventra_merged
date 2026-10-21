@@ -164,7 +164,7 @@ def public(doc: dict, risk: Optional[float] = None) -> dict:
         # Asked for by the patient: why.
         "patient_requests": [{"reason": p["reason"], "note": p.get("note", ""), "at": _aware(p["at"]).isoformat(),
                               "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"]),
-                              "by": CARETAKER_NAME if p.get("by") == "caretaker" else PATIENT_NAME}
+                              "by": p.get("by_name") or (CARETAKER_NAME if p.get("by") == "caretaker" else PATIENT_NAME)}
                              for p in doc.get("patient_requests", [])],
         "overdue": doc["status"] != "done" and now - asked > timedelta(days=OVERDUE_DAYS),
         "days_open": (now - asked).days,
@@ -365,16 +365,23 @@ async def patient_request(user: dict, scope: Optional[list], reason: str, note: 
     open (and the case manager holding it hears of it, as for a pharmacy
     report)."""
     patient_idx = own_patient(user, scope, patient_idx)
-    signed = CARETAKER_NAME if user["role"] == "caretaker" else PATIENT_NAME
+    me = await _who(user)
+    if user["role"] == "caretaker":
+        # The case manager sees which caretaker asked (staff already see the
+        # patient's caretakers by name on the patient's page) - never an email.
+        has_name = me["name"] and me["name"] != user.get("email", "")
+        signed = f"{me['name']} (caretaker)" if has_name else CARETAKER_NAME
+    else:
+        signed = PATIENT_NAME
     if reason not in PATIENT_REASONS:
         raise HTTPException(status_code=422, detail="Choose what it's about")
     note = _clean_note(note)
     if reason == "other" and len(note) < 5:
         raise HTTPException(status_code=422, detail="Say briefly what it's about")
     await ensure_indexes()
-    who, now = {**(await _who(user)), "name": signed}, _now()
+    who, now = {**me, "name": signed}, _now()
     who.pop("email", None)                         # staff screens never need the patient's login
-    entry = {"reason": reason, "note": note, "at": now, "by": user["role"]}
+    entry = {"reason": reason, "note": note, "at": now, "by": user["role"], "by_name": signed}
     label = PATIENT_REASONS[reason] + (f" - {note}" if note else "")
     existing = await _collection().find_one({"active_patient": patient_idx})
     if existing:
