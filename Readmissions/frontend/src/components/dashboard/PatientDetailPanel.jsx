@@ -8,7 +8,8 @@ import DiagnosisList from '../shared/DiagnosisList';
 import AiInsightsPanel from '../shared/AiInsightsPanel';
 import WeeklyTrendPanel from './WeeklyTrendPanel';
 import CareCoordination from './CareCoordination';
-import { X, Calendar, AlertCircle } from 'lucide-react';
+import { X, Calendar, AlertCircle, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 // ---------------------------------------------------------------------------
 // Skeleton
@@ -117,6 +118,10 @@ export default function PatientDetailPanel({ patientId, onClose, onChanged }) {
         {/* Header */}
         <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
           <h2 className="text-xl font-bold text-ns-navy">Patient Details</h2>
+          <Link to={`/patients/${encodeURIComponent(patientId)}`}
+            className="ml-auto mr-2 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-ns-navy hover:bg-gray-50">
+            Open full page <ExternalLink size={14} />
+          </Link>
           <button onClick={handleClose} className="p-2 -mr-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
             <X size={20} />
           </button>
