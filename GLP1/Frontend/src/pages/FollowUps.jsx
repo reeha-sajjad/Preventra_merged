@@ -24,7 +24,8 @@ export default function FollowUps() {
   const [busy, setBusy] = useState(null);
   const [doneFor, setDoneFor] = useState(null);
   const [handFor, setHandFor] = useState(null);
-  // "Only mine": the requests the caller has taken (?mine=1 from the Today page).
+  // "Only mine": requests on the caller's own patients (they are the patient's
+  // case manager) and any they have taken (?mine=1 from the Today page).
   const [searchParams, setSearchParams] = useSearchParams();
   const mine = searchParams.get('mine') === '1';
   const setMine = (on) => setSearchParams(on ? { mine: '1' } : {}, { replace: true });
@@ -57,7 +58,7 @@ export default function FollowUps() {
 
   const counts = data?.counts ?? { open: 0, in_progress: 0, overdue: 0 };
   const all = data?.items ?? [];
-  const items = mine ? all.filter((i) => i.mine) : all;
+  const items = mine ? all.filter((i) => i.mine || i.my_patient) : all;
   const tile = (Icon, label, value, sub, color) => (
     <div className="rounded-xl border border-gray-100 p-3">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
@@ -99,7 +100,8 @@ export default function FollowUps() {
               {label}
             </button>
           ))}
-          <label className="ml-auto mb-1 inline-flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer select-none">
+          <label title="Requests on your own patients, and any you have taken"
+            className="ml-auto mb-1 inline-flex items-center gap-2 text-xs font-medium text-gray-600 cursor-pointer select-none">
             <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="accent-blue-700" />
             Only mine
           </label>
