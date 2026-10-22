@@ -62,68 +62,77 @@ FACTORS = {
     "Financial pressure relative to income": (
         "Paying for your medicine",
         "Medicine costs can add up, and you're not alone if that's on your mind. If it ever feels hard to "
-        "afford, your case manager can look into savings and copay programmes with you.",
-        "The cost of your medicine looks manageable for you, which makes it easier to keep going."),
+        "afford, your case manager or your insurance company can help you look at savings and copay options.",
+        "If paying for your medicine ever gets hard, you don't have to manage it alone - your case manager or "
+        "your insurance company can help you look at savings and copay options."),
     "Out-of-pocket medication cost": (
         "What you pay for your medicine",
         "What you pay at the pharmacy may be higher than for many people. If that's ever a worry, your case "
         "manager can check whether a savings or copay programme could help.",
-        "What you pay out of pocket is on the lower side, which makes staying on treatment easier."),
+        "If what you pay at the pharmacy ever becomes a worry, your case manager or your insurance company "
+        "can check whether a savings or copay programme could help."),
     "Provider & pharmacy refill reliability": (
         "Getting your refills",
         "Keeping refills on schedule helps your medicine work its best. If a refill is ever late or your "
         "pharmacy is short on stock, let your care team know - they're happy to help sort it out.",
-        "Your refills look steady - that's a great help in keeping your treatment on track."),
+        "Keeping refills on schedule helps your medicine work its best. If a refill is ever late or out of "
+        "stock, your care team is happy to help sort it out."),
     "Side effect intensity (GI friction)": (
         "How you're feeling on your medicine",
         "Some people feel a little sick or have an upset stomach at first, and it usually eases within a few "
         "weeks. If it bothers you, talk to your care team before changing anything - they can often help.",
-        "Your medicine is usually easy on the stomach, which helps make treatment more comfortable."),
+        "If you ever feel sick or have an upset stomach, talk to your care team before changing anything - "
+        "they can often help."),
     "Blood sugar control (HbA1c)": (
         "Your blood sugar",
         "Taking your medicine regularly is what helps bring your blood sugar down over time. Your care team "
         "can talk through your results with you whenever you like.",
-        "Your blood sugar results are an encouraging sign that treatment is working for you."),
+        "Taking your medicine regularly helps keep your blood sugar on track. Your care team can go through "
+        "your results with you any time."),
     "Body weight / BMI severity": (
         "Your weight",
         "Progress often slows after the first few months - that's normal and part of the journey. Staying "
         "with your treatment helps you keep the progress you've made.",
-        "Your weight goals are part of why this treatment can do a lot of good for you."),
+        "Progress can slow after the first few months - that's normal. Your care team is there if you'd like "
+        "to talk it through."),
     "Overall disease burden": (
         "Your other health conditions",
         "Managing more than one condition can be a lot. This medicine can help with several of them, and your "
         "care team can help you fit it in alongside your other medicines.",
-        "This treatment can help your other health conditions too."),
+        "This treatment can help with your other health conditions too. Your care team can help you fit it in "
+        "alongside your other medicines."),
     "Drug generation (newer = higher barriers)": (
         "Your medicine",
         "Newer medicines sometimes need extra paperwork with insurance. If anything holds up a refill, your "
         "case manager can help sort it out.",
-        "Your medicine is usually straightforward to get, which helps keep treatment on track."),
+        "If anything ever holds up a refill, your case manager can help sort it out with your insurance."),
     "On a newer generation drug": (
         "Your medicine",
         "Newer medicines sometimes need extra paperwork with insurance. If anything holds up a refill, your "
         "case manager can help sort it out.",
-        "Your medicine is usually straightforward to get, which helps keep treatment on track."),
+        "If anything ever holds up a refill, your case manager can help sort it out with your insurance."),
     "High cholesterol diagnosis": (
         "Your cholesterol",
         "Looking after your heart health is one more way this treatment can help. Your care team can talk "
         "it through with you.",
-        "Your cholesterol picture is working in your favour."),
+        "Looking after your heart health is one more way this treatment can help. Your care team can talk it "
+        "through with you."),
     "Impaired glucose diagnosis": (
         "Your blood sugar",
         "This treatment can help keep your blood sugar in a healthier range. Your care team can talk "
         "through your results with you.",
-        "Your blood sugar picture is working in your favour."),
+        "This treatment can help keep your blood sugar in a healthy range. Your care team can talk through your "
+        "results with you."),
 }
 
 # A factor about the person rather than something they can act on (age, sex,
 # which medicine) - shown gently, never as a warning.
 GENTLE = ("Something your care team keeps in mind",
           "Your care team takes this into account when planning your support.",
-          "This is working in your favour.")
+          "Your care team takes this into account when planning your support.")
 DRUG_FACTOR = ("Your medicine",
                "Your care team is keeping an eye on how {drug} is working for you. Ask them anything, any time.",
-               "{drug} is a good fit for you so far.")
+               "Your care team is keeping an eye on how {drug} is working for you. Ask them anything, any time.")
 
 SAFETY = ("If you have severe stomach pain that won't go away, trouble breathing, or swelling of your face or "
           "throat, call 911 or go to the emergency department.")
