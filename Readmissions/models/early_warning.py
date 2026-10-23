@@ -129,6 +129,28 @@ def _flag(code, stream, severity, title, detail, rationale) -> dict:
             "title": title, "detail": detail, "rationale": rationale}
 
 
+def _red_flag_trigger(obs: dict, triggers: list) -> list:
+    """
+    A reading the weekly check calls a red flag - "assess today" on the
+    patient's card (models/monitoring_rules.RED_FLAGS) - is a same-day alert
+    here too. The two disagreed: a saturation of 89% was a red flag on the card
+    and only "moderate" here, so no alert was raised for the week it appeared.
+    Added only when nothing already makes the week critical, so the same
+    reading is not listed twice.
+    """
+    from models.monitoring_rules import RED_FLAGS, red_flags
+    flagged = red_flags(obs)
+    if not flagged or any(t["severity"] == "critical" for t in triggers):
+        return []
+    labels = [RED_FLAGS[k][1] for k in flagged]
+    return [_flag(
+        "red_flag", "vitals", "critical",
+        "Red flag on this week's readings: " + "; ".join(labels),
+        "; ".join(f"{k.replace('_', ' ')} {obs.get(k)}" for k in flagged) + ".",
+        "The weekly check marks this reading for assessment today, so the alert is same-day "
+        "whatever the trend.")]
+
+
 # ---------------------------------------------------------------------------
 # Condition-specific red flags
 # ---------------------------------------------------------------------------
@@ -469,6 +491,7 @@ def forecast(weeks: list, group: str = "general",
     current_week = int(current.get("week_number", len(observed) - 1))
 
     triggers = _universal_flags(obs, prev_obs) + _group_flags(group, obs, prev_obs)
+    triggers += _red_flag_trigger(obs, triggers)
 
     # ---- trajectory --------------------------------------------------------
     window = observed[-TREND_WINDOW:]

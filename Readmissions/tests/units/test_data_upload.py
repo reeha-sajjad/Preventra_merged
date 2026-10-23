@@ -300,7 +300,7 @@ def test_current_patients_keep_their_row_as_sent_and_history_does_not(main, worl
     stay = db[ingest.STAYS].find_one({"encounter_key": "149190"})
     sent = dict(stay["source"])
     assert sent["age"] == "[10-20)" and sent["gender"] == "Female" and sent["diag_1"] == "276"
-    assert stay["dates_assumed"] and stay["encounter"]["discharge_datetime"].date() == pd.Timestamp.now().date()
+    assert stay["dates_assumed"] and stay["encounter"]["discharge_datetime"].date() == ingest._hospital_today().date()
     assert (stay["encounter"]["discharge_datetime"] - stay["encounter"]["admit_datetime"]).days == 3   # time_in_hospital
 
     draft = upload(admin, **{"history.csv": flat}).json()
@@ -323,7 +323,7 @@ def test_a_model_trained_on_the_export_scores_current_patients_as_sent(main, stu
     rows = list(db["patient_worklist"].find({"patient_id": {"$regex": "^DIA-"}}))
     assert len(rows) >= 25
     assert {r["model_version"] for r in rows} == {"studio:m-raw"}
-    assert all(r["dates_assumed"] and r["discharge_date"] == pd.Timestamp.now().strftime("%Y-%m-%d") for r in rows)
+    assert all(r["dates_assumed"] and r["discharge_date"] == ingest._hospital_today().strftime("%Y-%m-%d") for r in rows)
     assert all(0 <= r["risk_score"] <= 100 and r["driver_1"] for r in rows)
 
 

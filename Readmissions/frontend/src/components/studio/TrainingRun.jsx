@@ -193,7 +193,7 @@ export default function TrainingRun({ jobId, onClose, onModelsChanged }) {
           {deployed && (
             <p className="mt-3 text-sm text-emerald-700">
               {deployed.name} is now the active {TARGET_LABELS[deployed.target].toLowerCase()} model for your
-              hospital. Files in "Score patients" and current patients uploaded on the Data page use it
+              hospital. Files in "Score patients" and the current patients the hospital sends in use it
               {deployed.rescore?.queued > 0
                 ? `; ${deployed.rescore.queued} patient${deployed.rescore.queued === 1 ? ' is' : 's are'} being scored with it now and will appear on the patient list within a minute or two.`
                 : '.'}

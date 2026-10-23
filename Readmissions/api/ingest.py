@@ -87,6 +87,15 @@ def _now() -> datetime:
     return datetime.utcnow()
 
 
+def _hospital_today() -> datetime:
+    """Now on the hospital's clock - NIGHTLY_TZ, the zone the nightly run keeps
+    (ingestion/scheduler.zone) - for the date an undated patient is given. On
+    the server's UTC, an upload at half past midnight in Karachi was dated the
+    day before."""
+    from ingestion import scheduler
+    return datetime.now(scheduler.zone()).replace(tzinfo=None)
+
+
 _indexed: dict = {}
 
 
@@ -277,7 +286,7 @@ def take_encounters(db, client: dict, bundles: list, idempotency_key: Optional[s
         enc = stay["encounter"]
         # A current patient with no dates is taken as discharged today, and the
         # stay says so (see _assume_dates).
-        assumed = not history_only and _assume_dates(stay, _now())
+        assumed = not history_only and _assume_dates(stay, _hospital_today())
         doc = _dates({**stay, "hospital_id": hospital, "encounter_key": enc["encounter_key"],
                       "patient_key": enc["patient_key"],
                       "patient_id": f"{prefix}-{enc['patient_key']}", "received_at": _now(),

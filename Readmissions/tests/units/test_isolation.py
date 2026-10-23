@@ -281,6 +281,27 @@ def test_a_red_flag_in_the_latest_week_means_action_required(main, world):
     assert body["weeks"][0]["red_flags"] == []
 
 
+def test_each_week_says_what_became_of_its_alert_for_the_care_team_only(main, world):
+    """A red flag said "assess today" with no sign of whether anyone was told."""
+    db = world["db"]
+    db["weekly_monitoring"].delete_many({"patient_id": A1})
+    db["weekly_monitoring"].insert_many([
+        {"patient_id": A1, "week_number": 0, "risk_score": 60, "risk_band": "High"},
+        {"patient_id": A1, "week_number": 1, "risk_score": 70, "risk_band": "High", "red_flags": ["spo2"]},
+        {"patient_id": A1, "week_number": 2, "risk_score": 75, "risk_band": "High", "red_flags": ["spo2"]}])
+    db["clinical_alerts"].insert_one({"alert_id": "AL-1", "patient_id": A1, "week_number": 2,
+                                      "severity": "critical", "status": "pending", "doctor_name": "Dr A",
+                                      "created_at": "2026-10-01 09:00:00"})
+    weeks = as_user(main, world, "doc.a@a.test").get(f"/api/patients/{A1}/trend").json()["weeks"]
+    assert weeks[1]["alert"] is None                                  # a red flag nobody was told about
+    assert (weeks[2]["alert"]["doctor"], weeks[2]["alert"]["status"]) == ("Dr A", "pending")
+    db["weekly_monitoring"].update_many({"patient_id": A1}, {"$set": {"patient_id": A4}})
+    db["clinical_alerts"].update_one({"alert_id": "AL-1"}, {"$set": {"patient_id": A4}})
+    for email in ("me@patient.test", "carer@home.test"):
+        weeks = as_user(main, world, email).get(f"/api/patients/{A4}/trend").json()["weeks"]
+        assert all("alert" not in w for w in weeks), email
+
+
 # Every function the chatbot can call, with arguments that try to reach other
 # patients: their ids by name, cohort-wide questions, and filters that would
 # match everyone.

@@ -2,7 +2,8 @@
 The ingestion worker: takes queued jobs (ingest_jobs) and runs them -
 scoring discharges and weekly check-ins, and pulling from hospital databases
 (api/ingest_connections.py). It also keeps the clock (ingestion/scheduler.py):
-the nightly re-score after a new model is deployed, and scheduled pulls.
+the nightly re-score after a new model is deployed, the nightly alert sweep,
+and scheduled pulls.
 
     python -m ingestion.worker           run until stopped (a Railway service)
     python -m ingestion.worker --once    drain the queue and exit (no clock)
@@ -50,6 +51,11 @@ def handle(db, job: dict) -> dict:
     if job["kind"] == "pull":
         from api import ingest_connections
         return ingest_connections.run_pull(db, job)
+    if job["kind"] == "alerts":
+        from api import forecasting
+        done = forecasting.raise_alerts(db)
+        return {"scored": done["scanned"], "not_scored": [], "alerts_created": done["alerts_created"],
+                "alerts_updated": done["alerts_updated"]}
     raise ValueError(f"unknown job kind '{job['kind']}'")
 
 
@@ -91,6 +97,8 @@ def tick(db) -> None:
     from ingestion import scheduler
     try:
         started = scheduler.tick(db)
+        if started.get("alerts"):
+            print("[worker] scheduled: the nightly alert sweep")
         if started["rescored"] or started["pulls"]:
             print(f"[worker] scheduled: re-score {sum(started['rescored'].values())} patient(s) in "
                   f"{len(started['rescored'])} hospital(s), {len(started['pulls'])} database pull(s)")

@@ -194,6 +194,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
           <span className="font-semibold">Red flag - assess today:</span> {week.red_flags.join(', ')}
         </div>
       )}
+      <WeekAlert week={week} />
       {/* Silence after warning signs is a reason to call, not to wait: the
           score is held, not improved. */}
       {silent && week.contact_overdue && (
@@ -288,6 +289,36 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
         )}
       </div>
     </div>
+  );
+}
+
+// What became of this week's alert, for the care team (the API sends `alert`
+// only to them): who it went to and whether they have seen it. A red flag
+// with no alert says so, rather than leaving the reader to assume someone knows.
+const ALERT_STATUS = {
+  pending: 'not yet acknowledged',
+  acknowledged: 'acknowledged',
+  responded: 'answered',
+  dismissed: 'dismissed',
+};
+
+function WeekAlert({ week }) {
+  if (!('alert' in week) || week.week_number === 0) return null;
+  const { alert } = week;
+  if (!alert) {
+    if (!week.red_flags?.length) return null;
+    return (
+      <p className="mb-3 text-xs text-amber-800">No alert was raised for this week.</p>
+    );
+  }
+  const open = alert.status === 'pending' || alert.status === 'unrouted';
+  return (
+    <p className={`mb-3 text-xs ${open ? 'text-amber-800' : 'text-gray-600'}`}>
+      <span className="font-semibold">{alert.severity === 'critical' ? 'Same-day alert' : 'Alert'}</span>
+      {alert.doctor
+        ? <> sent to {alert.doctor} - {ALERT_STATUS[alert.status] || alert.status}</>
+        : <> raised, but no doctor covers this patient yet</>}
+    </p>
   );
 }
 

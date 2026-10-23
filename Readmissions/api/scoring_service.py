@@ -500,7 +500,7 @@ def scored_weeks(db, hospital_id: str, stay: dict, week0: dict) -> list:
 
 
 def score_weeks(db, hospital_id: str, patient_ids: list) -> dict:
-    scored, not_scored, notes = 0, [], set()
+    scored, not_scored, notes, written = 0, [], set(), []
     batch = _batch(db)
     weekly_model = model_studio.active_model_for(db, hospital_id, "weekly")
     if weekly_model and not weekly_model.get("can_score", True):
@@ -529,8 +529,29 @@ def score_weeks(db, hospital_id: str, patient_ids: list) -> dict:
             db["weekly_monitoring"].update_one({"patient_id": pid, "week_number": d["week_number"]},
                                                {"$set": d}, upsert=True)
         scored += len(docs)
+        written.append(pid)
     refresh_summaries(db, batch, [str(p) for p in patient_ids])
-    return {"scored": scored, "not_scored": not_scored, **({"note": "; ".join(sorted(notes))} if notes else {})}
+    return {"scored": scored, "not_scored": not_scored, "alerts": _alerts_for(db, written),
+            **({"note": "; ".join(sorted(notes))} if notes else {})}
+
+
+def _alerts_for(db, patient_ids: list) -> Optional[dict]:
+    """
+    Raise the alerts these new weeks call for, as soon as they are scored. The
+    forecast scan used to run only when a superadmin pressed it, so a red flag
+    that arrived by upload sat on the patient's card with nobody told. A failed
+    check is logged and the nightly sweep tries again; it never fails scoring.
+    """
+    if not patient_ids:
+        return None
+    try:
+        from api import forecasting
+        done = forecasting.raise_alerts(db, patient_ids)
+        return {"created": done["alerts_created"], "updated": done["alerts_updated"],
+                "unrouted": done["unrouted"]}
+    except Exception as exc:                                       # noqa: BLE001
+        print(f"[scoring] alert check failed: {type(exc).__name__}")
+        return None
 
 
 def _score_weeks_with_model(db, model: dict, stay: dict, week0: dict, docs: list) -> Optional[str]:

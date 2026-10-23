@@ -164,7 +164,7 @@ def deactivate_doctor(db, doctor_id: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def route(db, clinical_group: str, assigned_doctor_id: Optional[str] = None,
-          roster: Optional[list] = None) -> tuple:
+          roster: Optional[list] = None, hospital_id: Optional[str] = None) -> tuple:
     """
     Choose the clinician for an alert. Returns (doctor|None, reason).
 
@@ -181,6 +181,11 @@ def route(db, clinical_group: str, assigned_doctor_id: Optional[str] = None,
     """
     if roster is None:
         roster = list_doctors(db, active_only=True)
+    if hospital_id:
+        # Only the patient's own hospital's clinicians. Across the whole
+        # registry, a heart-failure alert for one hospital's patient went to an
+        # internist registered with no hospital at all.
+        roster = [d for d in roster if d.get("hospital_id") == hospital_id]
 
     group = clinical_group or "general"
     specialty = SPECIALTY_FOR_GROUP.get(group, "Internal Medicine")
@@ -310,7 +315,8 @@ def create_alert(db, patient_id: str, forecast_result: dict,
 
     week = forecast_result.get("as_of_week")
     doctor, reason = route(db, forecast_result.get("clinical_group", "general"),
-                           assigned_doctor_id, roster=roster)
+                           assigned_doctor_id, roster=roster,
+                           hospital_id=(patient_meta or {}).get("hospital_id"))
 
     existing = db[CLINICAL_ALERTS].find_one({"patient_id": patient_id, "week_number": week})
     if existing:
@@ -330,7 +336,7 @@ def create_alert(db, patient_id: str, forecast_result: dict,
 
 
 def scan_cohort(db, forecast_fn, limit: Optional[int] = None,
-                progress=None) -> dict:
+                progress=None, patient_ids: Optional[list] = None) -> dict:
     """
     Run the forecast across every monitored patient and raise what it finds.
 
@@ -345,7 +351,8 @@ def scan_cohort(db, forecast_fn, limit: Optional[int] = None,
     """
     from pymongo import InsertOne, UpdateOne
 
-    patient_ids = db["weekly_monitoring"].distinct("patient_id")
+    if patient_ids is None:
+        patient_ids = db["weekly_monitoring"].distinct("patient_id")
     if limit:
         patient_ids = patient_ids[:limit]
 
@@ -398,14 +405,14 @@ def scan_cohort(db, forecast_fn, limit: Optional[int] = None,
             alert_ops.append(UpdateOne({"alert_id": prior["alert_id"]}, {"$set": update}))
             if escalated:
                 doctor, _ = route(db, result.get("clinical_group", "general"),
-                                  assigned, roster=roster)
+                                  assigned, roster=roster, hospital_id=meta.get("hospital_id"))
                 notifications.append(_notification_document(
                     doctor, patient_id, severity, prior["alert_id"], escalation=True))
             updated += 1
             continue
 
         doctor, reason = route(db, result.get("clinical_group", "general"),
-                               assigned, roster=roster)
+                               assigned, roster=roster, hospital_id=meta.get("hospital_id"))
         alert = _alert_document(patient_id, result, meta, doctor, reason)
         alert_ops.append(InsertOne(alert))
         notifications.append(_notification_document(
@@ -429,6 +436,47 @@ def scan_cohort(db, forecast_fn, limit: Optional[int] = None,
         "by_severity": by_severity,
         "completed_at": _now(),
     }
+
+
+def reroute_open_alerts(db, patient_ids: list, doctor_id: Optional[str]) -> int:
+    """
+    Move a patient's open alerts to the doctor now assigned to them, and tell
+    that doctor. Without this an alert stayed with whoever it reached first -
+    in the demo data an internist with no hospital, still unread weeks after
+    the patient was given a doctor of their own. A cleared assignment routes by
+    the condition rules again, inside the patient's hospital. Returns how many
+    alerts moved.
+    """
+    from api import access
+    ids = access.id_variants(list(patient_ids))
+    alerts = list(db[CLINICAL_ALERTS].find(
+        {"patient_id": {"$in": ids}, "status": {"$in": list(_STATUS_OPEN) + ["unrouted"]}},
+        {"_id": 1, "alert_id": 1, "patient_id": 1, "doctor_id": 1, "severity": 1,
+         "forecast.clinical_group": 1}))
+    if not alerts:
+        return 0
+    hospitals = {str(c["patient_id"]): c.get("hospital_id") for c in db["care_actions"].find(
+        {"patient_id": {"$in": ids}}, {"_id": 0, "patient_id": 1, "hospital_id": 1})}
+    roster = list_doctors(db, active_only=True)
+    moved = 0
+    for a in alerts:
+        doctor, reason = route(db, (a.get("forecast") or {}).get("clinical_group", "general"),
+                               doctor_id or None, roster=roster,
+                               hospital_id=hospitals.get(str(a["patient_id"])))
+        if (doctor or {}).get("doctor_id") == a.get("doctor_id"):
+            continue
+        db[CLINICAL_ALERTS].update_one({"_id": a["_id"]}, {"$set": {
+            "doctor_id": doctor["doctor_id"] if doctor else None,
+            "doctor_name": doctor["name"] if doctor else None,
+            "routing_reason": reason,
+            # Whoever acknowledged it is no longer the one responsible.
+            "status": "pending" if doctor else "unrouted",
+            "rerouted_at": _now(), "updated_at": _now()}})
+        if doctor:
+            db[NOTIFICATIONS].insert_one(_notification_document(
+                doctor, a["patient_id"], a.get("severity", "high"), a["alert_id"]))
+        moved += 1
+    return moved
 
 
 # ---------------------------------------------------------------------------

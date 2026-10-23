@@ -6,7 +6,6 @@ import TrainSetup from '../components/studio/TrainSetup';
 import TrainingRun from '../components/studio/TrainingRun';
 import ModelLibrary from '../components/studio/ModelLibrary';
 import ScorePanel from '../components/studio/ScorePanel';
-import RescoreCard from '../components/data/RescoreCard';
 import { TARGET_LABELS, fmt } from '../components/studio/studioFormat';
 
 const TABS = [
@@ -25,8 +24,7 @@ export default function ModelStudio() {
   const [overview, setOverview] = useState(null);
   const [models, setModels] = useState(null);
   const [error, setError] = useState(null);
-  // A run started elsewhere (the Data page's "Train a model on your data")
-  // arrives as ?job=ID and opens straight away.
+  // A link to a run (?job=ID) opens it straight away.
   const [searchParams] = useSearchParams();
   const [jobId, setJobId] = useState(() => searchParams.get('job'));
   const [preset, setPreset] = useState(null);
@@ -100,9 +98,6 @@ export default function ModelStudio() {
           })}
         </div>
       )}
-
-      {/* After a deploy: patients still scored by the earlier model, and Re-score now. */}
-      <RescoreCard compact reloadKey={reloadKey} />
 
       <div className="mb-5 flex gap-1 border-b border-gray-200">
         {TABS.map((t) => (

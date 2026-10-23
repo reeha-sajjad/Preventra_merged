@@ -88,7 +88,7 @@ def tick(db, now: Optional[datetime] = None) -> dict:
     """Start whatever has fallen due. Returns what it started."""
     from api import ingest
     now = now or datetime.utcnow()
-    started = {"rescored": {}, "pulls": []}
+    started = {"rescored": {}, "pulls": [], "alerts": False}
 
     db[SCHEDULE].update_one({"_id": NIGHTLY}, {"$setOnInsert": {"next_run_at": next_run(nightly_at(), now)}},
                             upsert=True)
@@ -98,6 +98,9 @@ def tick(db, now: Optional[datetime] = None) -> dict:
                 done = ingest.queue_rescore(db, hospital, "nightly")
                 if done.get("queued"):
                     started["rescored"][hospital] = done["queued"]
+        # Every monitored patient's latest week, forecast again: an alert the
+        # upload path missed, or a care team that changed, is caught overnight.
+        started["alerts"] = bool(ingest._queue(db, "alerts", "", ["all"], ""))
 
     for conn in db[CONNECTIONS].find({"enabled": True, "next_run_at": {"$lte": now}},
                                      {"_id": 1, "hospital_id": 1, "schedule_at": 1}):

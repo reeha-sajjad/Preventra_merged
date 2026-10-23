@@ -327,3 +327,18 @@ def test_unknown_group_falls_back_to_universal_rules_only():
 def test_missing_observations_are_not_treated_as_normal():
     """An unreported vital must produce no flag, not a reassuring one."""
     assert forecast(steady(30.0, 30.1, 30.2))["triggers"] == []
+
+
+def test_a_red_flag_on_the_weekly_card_is_a_same_day_alert():
+    """SpO2 89% was a red flag on the card ("assess today") and only moderate
+    here, so the week it appeared raised no alert."""
+    from models import early_warning as ew
+    weeks = [{"week_number": 0, "risk_score": 40.0, "monitoring": {}},
+             {"week_number": 1, "risk_score": 41.0, "monitoring": {"spo2": 89}}]
+    result = ew.forecast(weeks, "mental_health")
+    assert result["severity"] == "critical"
+    assert result["triggers"][0]["code"] == "red_flag"
+    assert "oxygen saturation below 90%" in result["triggers"][0]["title"]
+    # already critical for the same reading: not listed twice
+    weeks[1]["monitoring"] = {"spo2": 86}
+    assert "red_flag" not in [t["code"] for t in ew.forecast(weeks, "mental_health")["triggers"]]

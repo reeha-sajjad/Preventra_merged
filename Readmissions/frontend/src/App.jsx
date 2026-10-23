@@ -17,14 +17,13 @@ import PatientHome from './pages/PatientHome';
 import MyPeople from './pages/MyPeople';
 import InsurerHome from './pages/InsurerHome';
 import ModelStudio from './pages/ModelStudio';
-import DataIngest from './pages/DataIngest';
 import MyPatients from './pages/MyPatients';
 import FollowUps from './pages/FollowUps';
 import PharmacyHome from './pages/PharmacyHome';
 import { MANUAL_ENTRY_ENABLED } from './api';
 import { readClaims } from './api/auth';
 import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES,
-         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, DATA_ROLES } from './roles';
+         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES } from './roles';
 import LoadingScreen from './components/LoadingScreen';
 import { useAppLoader } from './hooks/useAppLoader';
 
@@ -106,7 +105,6 @@ function AppRoutes() {
           <Route path="/analytics" element={<Analytics />} />
           {can(CONSOLE_ROLES) && <Route path="/doctor" element={<DoctorConsole />} />}
           {can(STUDIO_ROLES) && <Route path="/model-studio" element={<ModelStudio />} />}
-          {can(DATA_ROLES) && <Route path="/data" element={<DataIngest />} />}
           {/* Off by default. The backend refuses the create endpoints too, so
               typing the URL gets you a form that cannot save. */}
           {MANUAL_ENTRY_ENABLED && <Route path="/manual-entry" element={<ManualEntry />} />}

@@ -208,9 +208,10 @@ def test_a_due_run_starts_once_however_many_workers_look(world, monkeypatch):
     db[scheduler.CONNECTIONS].insert_one({"_id": "dc_1", "hospital_id": "hosp-a", "enabled": True,
                                           "next_run_at": past, "schedule_at": "01:30"})
     first = scheduler.tick(db)
-    assert first == {"rescored": {"hosp-a": 1}, "pulls": ["dc_1"]}
-    assert scheduler.tick(db) == {"rescored": {}, "pulls": []}
+    assert first == {"rescored": {"hosp-a": 1}, "pulls": ["dc_1"], "alerts": True}
+    assert scheduler.tick(db) == {"rescored": {}, "pulls": [], "alerts": False}
     assert db[ingest.JOBS].count_documents({"kind": "pull"}) == 1
+    assert db[ingest.JOBS].count_documents({"kind": "alerts"}) == 1     # the nightly alert sweep, once
     assert db[scheduler.CONNECTIONS].find_one({"_id": "dc_1"})["next_run_at"] > datetime.utcnow()
 
 

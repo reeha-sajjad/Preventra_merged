@@ -397,3 +397,67 @@ def test_patient_history_is_newest_first(db, cardiologist):
         ds.create_alert(db, "P1", a_forecast(week=week))
     history = ds.patient_alerts(db, "P1")
     assert [a["week_number"] for a in history][0] == 3
+
+
+# ---------------------------------------------------------------------------
+# Inside the patient's hospital, and following the care team
+# ---------------------------------------------------------------------------
+
+def _in_hospital(db, doctor, hospital):
+    db[ds.DOCTORS].update_one({"doctor_id": doctor["doctor_id"]}, {"$set": {"hospital_id": hospital}})
+
+
+def test_routing_stays_inside_the_patients_hospital(db, cardiologist, generalist):
+    """A heart-failure alert for one hospital's patient went to an internist
+    registered with no hospital at all."""
+    _in_hospital(db, cardiologist, "other")
+    doctor, reason = ds.route(db, "heart_failure", hospital_id="mine")
+    assert doctor is None and "no active doctor" in reason
+    _in_hospital(db, generalist, "mine")
+    doctor, _ = ds.route(db, "heart_failure", hospital_id="mine")
+    assert doctor["name"] == "Dr. Gen"
+
+
+def test_a_sweep_routes_inside_each_patients_hospital(db, cardiologist, generalist):
+    _in_hospital(db, cardiologist, "other")
+    _in_hospital(db, generalist, "mine")
+    _seed_weeks(db, ["P1"])
+    ds.scan_cohort(db, lambda pid: (a_forecast(), {"hospital_id": "mine"}, None))
+    assert db[ds.CLINICAL_ALERTS].find_one({"patient_id": "P1"})["doctor_name"] == "Dr. Gen"
+
+
+def test_open_alerts_follow_a_newly_assigned_doctor(db, cardiologist, generalist):
+    _in_hospital(db, cardiologist, "mine")
+    _in_hospital(db, generalist, "mine")
+    db["care_actions"].insert_one({"patient_id": "P1", "hospital_id": "mine"})
+    alert, _ = ds.create_alert(db, "P1", a_forecast(), {"hospital_id": "mine"})
+    assert alert["doctor_name"] == "Dr. Hart"
+    db[ds.CLINICAL_ALERTS].update_one({"alert_id": alert["alert_id"]}, {"$set": {"status": "acknowledged"}})
+
+    assert ds.reroute_open_alerts(db, ["P1"], generalist["doctor_id"]) == 1
+    moved = db[ds.CLINICAL_ALERTS].find_one({"alert_id": alert["alert_id"]})
+    assert (moved["doctor_name"], moved["status"]) == ("Dr. Gen", "pending")   # the new doctor has not seen it
+    assert db[ds.NOTIFICATIONS].count_documents({"doctor_id": generalist["doctor_id"]}) == 1
+
+    # an answered alert stays with whoever answered it
+    db[ds.CLINICAL_ALERTS].update_one({"alert_id": alert["alert_id"]}, {"$set": {"status": "responded"}})
+    assert ds.reroute_open_alerts(db, ["P1"], cardiologist["doctor_id"]) == 0
+
+
+def test_new_weeks_raise_their_alerts_for_the_patients_own_doctor(db, cardiologist, generalist):
+    """api/forecasting.raise_alerts, which runs after weekly readings are scored
+    and every night - the scan used to wait for a superadmin's button."""
+    from api import forecasting
+    _in_hospital(db, cardiologist, "mine")
+    _in_hospital(db, generalist, "mine")
+    db["patient_worklist"].insert_one({"patient_id": "P1", "batch_date": "2026-10-01",
+                                       "clinical_groups": ["mental_health"]})
+    db["care_actions"].insert_one({"patient_id": "P1", "hospital_id": "mine",
+                                   "assigned_doctor_id": cardiologist["doctor_id"]})
+    db["weekly_monitoring"].insert_many([
+        {"patient_id": "P1", "week_number": 0, "risk_score": 40.0, "monitoring": {}},
+        {"patient_id": "P1", "week_number": 1, "risk_score": 42.0, "monitoring": {"spo2": 89}}])
+    done = forecasting.raise_alerts(db, ["P1"])
+    assert done["alerts_created"] == 1
+    alert = db[ds.CLINICAL_ALERTS].find_one({"patient_id": "P1"})
+    assert (alert["week_number"], alert["severity"], alert["doctor_name"]) == (1, "critical", "Dr. Hart")

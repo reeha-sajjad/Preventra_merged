@@ -46,6 +46,7 @@ from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.ai_insights import generate_roi_and_counterfactual, generate_week_narrative
 from models import early_warning
+from api.forecasting import ForecastContext, mimic_scoring_bands  # noqa: E402
 from models.monitoring_rules import (RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
                                      LABEL_TO_SIGNAL, MODEL_SOURCE, SIGNAL_RULES,
                                      contact_gap, score_week, signal_plan, signals_for,
@@ -1541,6 +1542,25 @@ _WEEKLY_STATUS_ACTIONS = {
 }
 
 
+def _with_week_alerts(request: Request, patient_id: str, body: dict) -> dict:
+    """
+    Each week's alert - who it went to and where it stands - for the care team.
+    A red flag on the card said "assess today" with no sign of whether anyone
+    had been told. The patient and their caretaker are not shown the inbox.
+    """
+    if request.state.user.get("role") not in access.ACTIONS["edit_patients"]:
+        return body
+    alerts = {a.get("week_number"): a for a in db[doctor_service.CLINICAL_ALERTS].find(
+        _patient_id_filter(patient_id),
+        {"_id": 0, "week_number": 1, "severity": 1, "status": 1, "doctor_name": 1, "created_at": 1})}
+    for week in body.get("weeks") or []:
+        a = alerts.get(week.get("week_number"))
+        week["alert"] = ({"severity": a.get("severity"), "status": a.get("status"),
+                          "doctor": a.get("doctor_name"), "raised_at": a.get("created_at")}
+                         if a else None)
+    return body
+
+
 @app.get("/api/patients/{patient_id}/trend")
 def get_patient_trend(patient_id: str, request: Request):
     _require_detail(request, patient_id)
@@ -1556,7 +1576,8 @@ def get_patient_trend(patient_id: str, request: Request):
         .sort("week_number", 1)
     )
     if weekly_docs:
-        return _hide_costs(request, _weekly_trend_response(patient_id, weekly_docs))
+        return _hide_costs(request, _with_week_alerts(
+            request, patient_id, _weekly_trend_response(patient_id, weekly_docs)))
 
     registry_docs = list(
         db["risk_registry"]
@@ -3155,6 +3176,8 @@ def assign_coordinator(patient_id: str, payload: AssignCoordinatorRequest, reque
             db, [(patient_id, (before or {}).get("hospital_id"), old,
                   {**old, "doctor_id": fields["assigned_doctor_id"]})],
             request.state.user, via="assign")
+        # Open alerts go to the doctor now responsible for the patient.
+        doctor_service.reroute_open_alerts(db, [patient_id], fields["assigned_doctor_id"])
     return {"status": "assigned", "patient_id": patient_id,
             "coordinator_name": payload.coordinator_name,
             "assigned_doctor_id": fields.get("assigned_doctor_id")}
@@ -3227,83 +3250,6 @@ class ScanRequest(BaseModel):
     limit: Optional[int] = None
 
 
-def _patient_group(row: dict) -> str:
-    """The clinical group a forecast should be judged against."""
-    groups = row.get("clinical_groups") or []
-    if groups:
-        return groups[0]
-    return row.get("clinical_group") or "general"
-
-
-_FORECAST_META_FIELDS = {
-    "_id": 0, "patient_id": 1, "group_label": 1, "clinical_group": 1,
-    "clinical_groups": 1, "primary_diagnosis": 1, "anchor_age": 1,
-    "gender": 1, "discharge_date": 1,
-}
-
-
-class ForecastContext:
-    """
-    The inputs a forecast needs, loaded in bulk.
-
-    A cohort sweep over 4,000 patients reading three collections one patient at
-    a time is 12,000 round trips to Atlas, which takes minutes and fails halfway
-    through on a flaky connection. Loading the three collections once and
-    forecasting from memory turns that into three queries. The whole weekly
-    series is about 20,000 small documents, which fits comfortably.
-
-    Built with no patient_ids it loads the whole cohort; with one id it is the
-    cheap path for a single patient's page.
-    """
-
-    def __init__(self, db, patient_ids=None):
-        week_query = {} if patient_ids is None else {"patient_id": {"$in": patient_ids}}
-        self.weeks = {}
-        # Only the four fields a forecast reads. The stored week also carries
-        # three driver sentences and a narrative, which together are most of the
-        # document's bytes and none of its arithmetic - pulling all 20,000 in
-        # full times the cursor out against Atlas.
-        #
-        # Deliberately unsorted: week_number has no index, so asking the server
-        # to sort the whole collection is a blocking in-memory sort for an
-        # ordering forecast() re-establishes per patient anyway.
-        cursor = db[WEEKLY_COLLECTION].find(
-            week_query,
-            {"_id": 0, "patient_id": 1, "week_number": 1, "risk_score": 1,
-             "monitoring": 1},
-        ).batch_size(2000)
-        for doc in cursor:
-            self.weeks.setdefault(str(doc.get("patient_id")), []).append(doc)
-
-        batch_date = get_latest_batch_date(db, "patient_worklist")
-        row_query = {"batch_date": batch_date} if batch_date else {}
-        if patient_ids is not None:
-            row_query["patient_id"] = {"$in": patient_ids}
-        self.rows = {str(r.get("patient_id")): r
-                     for r in db["patient_worklist"].find(row_query, _FORECAST_META_FIELDS)}
-
-        care_query = {} if patient_ids is None else {"patient_id": {"$in": patient_ids}}
-        self.care = {str(c.get("patient_id")): c for c in
-                     db["care_actions"].find(care_query,
-                                             {"_id": 0, "patient_id": 1,
-                                              "assigned_doctor_id": 1})}
-        self.bands = mimic_scoring_bands()
-
-    def for_patient(self, patient_id: str) -> tuple:
-        key = str(patient_id)
-        row = self.rows.get(key) or {}
-        result = early_warning.forecast(
-            self.weeks.get(key, []), group=_patient_group(row), bands=self.bands)
-        meta = {
-            "group_label": row.get("group_label"),
-            "primary_diagnosis": row.get("primary_diagnosis"),
-            "anchor_age": row.get("anchor_age"),
-            "gender": row.get("gender"),
-            "discharge_date": row.get("discharge_date"),
-        }
-        return result, meta, (self.care.get(key) or {}).get("assigned_doctor_id")
-
-
 def _forecast_for(patient_id: str) -> tuple:
     """
     Forecast one patient. Returns (forecast, patient_meta, assigned_doctor_id).
@@ -3318,16 +3264,6 @@ def _forecast_for(patient_id: str) -> tuple:
     resolved = row.get("patient_id") if row else patient_id
     ctx = ForecastContext(db, patient_ids=[resolved, str(resolved)])
     return ctx.for_patient(resolved)
-
-
-def mimic_scoring_bands() -> dict:
-    """Band edges, read from the same file the scorer uses so they cannot drift."""
-    try:
-        with open(os.path.join(BASE_DIR, "docs", "mimic",
-                               "band_thresholds_mimic.json")) as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return early_warning.DEFAULT_BANDS
 
 
 # ---- registry -------------------------------------------------------------

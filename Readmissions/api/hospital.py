@@ -268,7 +268,10 @@ def assign(db, user: dict, scope: Optional[list], patient_ids: list,
             after["nurse_ids"] = list(dict.fromkeys(before["nurse_ids"] + [str(n) for n in add_nurse_ids]))
         changes.append((pid, hospital, before, after))
     archive_care_team_changes(db, changes, user, via="care_team")
-    return {"updated": result.matched_count, "patient_ids": patient_ids}
+    # Open alerts go to the doctor now responsible for the patient.
+    rerouted = (doctor_service.reroute_open_alerts(db, patient_ids, doctor_id or None)
+                if doctor_id is not None else 0)
+    return {"updated": result.matched_count, "patient_ids": patient_ids, "alerts_rerouted": rerouted}
 
 
 # --------------------------------------------------------------- overview
