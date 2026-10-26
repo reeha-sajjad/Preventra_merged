@@ -52,6 +52,20 @@ def _latest_batch_or_raise(db) -> str:
     return batch_date
 
 
+def _current_score_dates(db, patient_ids) -> dict:
+    """patient_id (as a string) -> the date of the weekly reading their current
+    score comes from. "Risk score 96.0" said neither which score nor when; the
+    current one is the latest week's, and this is that week's date."""
+    latest: dict = {}
+    for w in db["weekly_monitoring"].find(
+            {"patient_id": {"$in": access.id_variants(list(patient_ids))}},
+            {"_id": 0, "patient_id": 1, "week_number": 1, "week_date": 1}):
+        key = str(w.get("patient_id"))
+        if w.get("week_date") and w.get("week_number", -1) >= latest.get(key, (-1, None))[0]:
+            latest[key] = (w.get("week_number", -1), w["week_date"])
+    return {k: v[1] for k, v in latest.items()}
+
+
 def _patient_id_filter(patient_id: str) -> dict:
     """patient_id is stored as an int in MongoDB, but callers (including the LLM)
     always pass it as a string. Match either representation."""
@@ -121,7 +135,7 @@ def list_patients_by_risk_threshold(
     )
 
     return [
-        {"patient_id": row.get("patient_id"), "risk_score": row.get("current_score")}
+        {"patient_id": row.get("patient_id"), "current risk score": row.get("current_score")}
         for row in cursor
     ]
 
@@ -138,19 +152,24 @@ def get_top_risk_patients(db, n: int) -> list:
         db["patient_worklist"]
         .find(
             {"batch_date": batch_date},
-            {"_id": 0, "patient_id": 1, "current_score": 1, "current_band": 1},
+            {"_id": 0, "patient_id": 1, "current_score": 1, "current_band": 1,
+             "discharge_score": 1, "risk_score": 1, "discharge_date": 1},
         )
         .sort("current_score", DESCENDING)
         .limit(n)
     )
-
+    rows = list(cursor)
+    dates = _current_score_dates(db, [r.get("patient_id") for r in rows])
     return [
         {
             "patient_id": row.get("patient_id"),
-            "risk_score": row.get("current_score"),
-            "risk_band": row.get("current_band"),
+            "current risk score": row.get("current_score"),
+            "current band": row.get("current_band"),
+            "current score as of": dates.get(str(row.get("patient_id"))),
+            "risk score at discharge": row.get("discharge_score", row.get("risk_score")),
+            "discharge date": row.get("discharge_date"),
         }
-        for row in cursor
+        for row in rows
     ]
 
 
@@ -175,8 +194,10 @@ def get_patient_drivers(db, patient_id: str) -> dict:
 
     return {
         "patient_id": row.get("patient_id"),
-        "risk_score": row.get("current_score"),
-        "risk_band": row.get("current_band"),
+        "current risk score": row.get("current_score"),
+        "current band": row.get("current_band"),
+        "current score as of": _current_score_dates(db, [row.get("patient_id")]).get(
+            str(row.get("patient_id"))),
         "driver_1": row.get("driver_1"),
         "driver_2": row.get("driver_2"),
         "driver_3": row.get("driver_3"),
@@ -201,6 +222,15 @@ def get_patient_details(db, patient_id: str) -> dict:
     # ("cardiac_other") the answer to "what other conditions do they have"
     # passed them over for the secondary diagnoses.
     row["conditions"] = [GROUP_LABELS.get(g, g) for g in row.pop("clinical_groups", None) or []]
+    # Two scores, named apart: on the row they were risk_score (at discharge)
+    # beside current_score, and an answer quoted whichever it saw first.
+    at_discharge = row.pop("discharge_score", None)
+    row["risk score at discharge"] = at_discharge if at_discharge is not None else row.get("risk_score")
+    row["band at discharge"] = row.pop("risk_band", None)
+    row.pop("risk_score", None)
+    row["current risk score"] = row.pop("current_score", None)
+    row["current band"] = row.pop("current_band", None)
+    row["current score as of"] = _current_score_dates(db, [row["patient_id"]]).get(str(row["patient_id"]))
     row["monitored_as"] = row.pop("group_label", None)
     row.pop("clinical_group", None)            # the key of monitored_as
 
@@ -657,6 +687,9 @@ FIELDS = {
     # asked about like any other field: "Dr Carter's High-risk patients",
     # "which doctor has the most High-risk patients".
     "doctor":            Field("string", "assigned doctor", stored=False),
+    # Particular patients, by id - the ones an earlier answer listed. Without it
+    # "which of those has changed most" could only look at one of them.
+    "patient_id":        Field("string", "patient", groupable=False),
 }
 DOCTOR = "doctor"
 NO_DOCTOR = "No doctor assigned"
@@ -815,6 +848,13 @@ def _validate_filters(db, filters) -> tuple:
             conditions.append(condition)
             described.append(f"{spec.label} {op} {named}")
             continue
+        if name == "patient_id":
+            if op not in ("eq", "ne", "in"):
+                raise ValueError("A patient id takes eq, ne or in.")
+            ids = _id_list(value)
+            conditions.append({"patient_id": {"$nin" if op == "ne" else "$in": access.id_variants(ids)}})
+            described.append(f"patient {'not ' if op == 'ne' else ''}{', '.join(ids)}")
+            continue
 
         if spec.kind == "number":
             if op == "in":
@@ -823,7 +863,8 @@ def _validate_filters(db, filters) -> tuple:
         else:
             if op in ("gt", "gte", "lt", "lte"):
                 raise ValueError(f"'{name}' holds text, so it cannot be compared with '{op}'.")
-            value = [str(v) for v in value] if op == "in" else str(value)
+            value = ([str(v).strip() for v in (value if isinstance(value, list) else str(value).split(","))]
+                     if op == "in" else str(value))
             # Resolve against the field's real vocabulary before it reaches the
             # database, so a near-miss becomes a correctable error instead of an
             # empty result that reads like an answer.
@@ -853,6 +894,12 @@ def _validate_filters(db, filters) -> tuple:
 def _names_a_diagnosis(filters) -> bool:
     return any(isinstance(f, dict) and f.get("field") == "primary_diagnosis"
                and f.get("op", "eq") in ("eq", "in") for f in filters or [])
+
+
+def _id_list(value) -> list:
+    """Patient ids however they arrive: a list, or text separated by commas."""
+    items = value if isinstance(value, list) else str(value).split(",")
+    return [str(v).strip() for v in items if str(v).strip()]
 
 
 def _no_such_diagnosis(filters) -> None:
@@ -1197,7 +1244,7 @@ def list_patients(db, filters: Optional[list] = None,
         return {"count_matching": 0, "filter": filter_text, "patients": [],
                 "note": "No patients match that filter."}
 
-    projection = {"_id": 0, "patient_id": 1}
+    projection = {"_id": 0, "patient_id": 1, "discharge_date": 1}
     for name in chosen:
         if name != DOCTOR:
             projection[name] = 1
@@ -1209,6 +1256,11 @@ def list_patients(db, filters: Optional[list] = None,
 
     rows = list(cursor)
     doctors = _doctor_names(db, [r.get("patient_id") for r in rows]) if DOCTOR in chosen else {}
+    # Each score shown comes with its date: the current one from the latest
+    # weekly reading, the discharge one (and a change since it) from discharge.
+    dates = (_current_score_dates(db, [r.get("patient_id") for r in rows])
+             if {"current_score", "trend_delta"} & set(chosen) else {})
+    with_discharge = bool({"discharge_score", "trend_delta"} & set(chosen))
     patients = []
     for row in rows:
         entry = {"patient_id": row.get("patient_id")}
@@ -1217,6 +1269,10 @@ def list_patients(db, filters: Optional[list] = None,
             if isinstance(value, list):
                 value = [GROUP_LABELS.get(v, v) for v in value] or None
             entry[LISTABLE_FIELDS[name]] = value
+        if dates:
+            entry["current score as of"] = dates.get(str(row.get("patient_id")))
+        if with_discharge:
+            entry["discharge date"] = row.get("discharge_date")
         patients.append(entry)
 
     return {

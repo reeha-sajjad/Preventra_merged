@@ -121,7 +121,7 @@ def test_list_gt_threshold(db):
 
 def test_list_eq_threshold(db):
     result = list_patients_by_risk_threshold(db, "eq", 90)
-    assert result == [{"patient_id": "PT-5", "risk_score": 90}]
+    assert result == [{"patient_id": "PT-5", "current risk score": 90}]
 
 
 def test_list_default_and_cap_limit(db):
@@ -171,8 +171,9 @@ def test_get_patient_drivers_found(db):
     result = get_patient_drivers(db, "PT-5")
     assert result == {
         "patient_id": "PT-5",
-        "risk_score": 90,
-        "risk_band": "High",
+        "current risk score": 90,
+        "current band": "High",
+        "current score as of": None,          # no weekly readings in this fixture
         "driver_1": "d1e",
         "driver_2": "d2e",
         "driver_3": "d3e",
@@ -188,7 +189,7 @@ def test_get_patient_drivers_matches_int_stored_id(db):
     """patient_id is stored as an int in production data; a string lookup must still match."""
     result = get_patient_drivers(db, "999888")
     assert result["patient_id"] == 999888
-    assert result["risk_band"] == "medium"
+    assert result["current band"] == "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ def test_get_patient_drivers_matches_int_stored_id(db):
 def test_get_patient_details_found(db):
     result = get_patient_details(db, "PT-3")
     assert result["patient_id"] == "PT-3"
-    assert result["risk_score"] == 55
+    assert result["risk score at discharge"] == 55
     assert result["discharge_date"] == "2026-04-22"
     assert "_id" not in result
 
@@ -1092,3 +1093,40 @@ def test_a_diagnosis_by_a_short_name_asks_again_by_condition(conditions_db):
     for ask in (run_cohort_query, list_patients, count_patients, get_common_drivers):
         with pytest.raises(ValueError, match="filter clinical_groups instead"):
             ask(conditions_db, filters=attack)
+
+
+
+# ---------------------------------------------------------------------------
+# Which score, and when; and follow-ups on the patients an answer listed.
+
+@pytest.fixture
+def scored_db(conditions_db):
+    conditions_db["patient_worklist"].update_many({}, {"$set": {"discharge_date": "2011-01-27",
+                                                               "discharge_score": 57.5, "trend_delta": 10.0}})
+    conditions_db["patient_worklist"].update_one({"patient_id": "HF-1"}, {"$set": {"trend_delta": 38.5}})
+    conditions_db["weekly_monitoring"].insert_many([
+        {"patient_id": "HF-1", "week_number": 0, "week_date": "2011-01-27"},
+        {"patient_id": "HF-1", "week_number": 4, "week_date": "2011-02-24"},
+        {"patient_id": "HF-1", "week_number": 2, "week_date": "2011-02-10"}])
+    return conditions_db
+
+
+def test_every_score_says_which_it_is_and_when(scored_db):
+    """"Risk score 96.0" said neither which score nor when."""
+    top = get_top_risk_patients(scored_db, 1)[0]
+    assert (top["current risk score"], top["current score as of"]) == (95.1, "2011-02-24")
+    assert (top["risk score at discharge"], top["discharge date"]) == (57.5, "2011-01-27")
+    listed = list_patients(scored_db, fields=["current_score", "trend_delta"], limit=1)["patients"][0]
+    assert (listed["current score as of"], listed["discharge date"]) == ("2011-02-24", "2011-01-27")
+    details = get_patient_details(scored_db, "HF-1")
+    assert (details["current risk score"], details["risk score at discharge"]) == (95.1, 57.5)
+    assert details["current score as of"] == "2011-02-24" and "risk_score" not in details
+
+
+def test_a_follow_up_can_ask_about_the_patients_just_listed(scored_db):
+    """"Which of those has changed most" could only look at one of them."""
+    those = "HD-1, HF-1"                                   # as the model sends it: one string
+    result = list_patients(scored_db, filters=[{"field": "patient_id", "op": "in", "value": those}],
+                           sort_by="trend_delta", fields=["trend_delta"])
+    assert [p["patient_id"] for p in result["patients"]] == ["HF-1", "HD-1"]
+    assert result["count_matching"] == 2

@@ -167,7 +167,8 @@ def _report_ungrounded(answer: str, payload, function_name: str) -> None:
 # The assigned doctor is the care team the Patients and Staff pages already
 # show these roles, not part of the clinical layer.
 OVERVIEW_FIELDS = frozenset({"current_score", "discharge_score", "trend_delta", "weeks_tracked",
-                             "current_band", "risk_band", "monitoring_status", "doctor"})
+                             "current_band", "risk_band", "monitoring_status", "doctor",
+                             "patient_id"})
 _ONE_PATIENT = ("get_patient_drivers", "get_patient_details")
 
 NEEDS_REASON_MESSAGE = ("That is part of the patient's clinical details. Open the patient from "

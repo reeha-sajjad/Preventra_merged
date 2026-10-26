@@ -10,7 +10,8 @@
 //     answer that did not run a query (a general question) still links them.
 //
 // Every link lands on a URL the dashboard already understands: a patient's
-// page, or the Patients worklist with its query parameters set.
+// weekly trend (or their page, for the roles that give a reason first), or the
+// Patients worklist with its query parameters set.
 
 import { can, CONSOLE_ROLES, OVERVIEW_ROLES, REASON_ROLES, STAFF_ROLES } from '../roles';
 
@@ -19,7 +20,11 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const worklist = (params) => `/patients?${new URLSearchParams(params)}`;
 
 const ENTITY_ROUTES = {
-  patient:   (v) => ({ to: `/patients/${encodeURIComponent(v)}`, title: `Open patient ${v}` }),
+  // The weekly trend - the scores the chatbot talks about. The roles that give a
+  // reason first land on the patient's page, where they give it.
+  patient:   (v) => (can(REASON_ROLES)
+    ? { to: `/patients/${encodeURIComponent(v)}`, title: `Open patient ${v}` }
+    : { to: `/patients/${encodeURIComponent(v)}/trend`, title: `Open the weekly trend for ${v}` }),
   condition: (v, t) => ({ to: worklist({ group: v }), title: `Show patients with ${t}` }),
   diagnosis: (v) => ({ to: worklist({ search: v }), title: `Search the worklist for "${v}"` }),
   doctor:    (v, t) => ({ to: worklist({ doctor: v }), title: `Show ${t}'s patients` }),

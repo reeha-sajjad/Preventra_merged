@@ -161,11 +161,11 @@ export default function Chatbot() {
   return (
     <>
       {open && (
-        <div className={panel} role="dialog" aria-label="NeuroShield Assistant">
+        <div className={panel} role="dialog" aria-label="Preventra Chatbot">
           {/* Header */}
           <div className="bg-ns-navy px-5 py-4 flex items-center justify-between shrink-0">
             <div>
-              <h2 className="text-white font-semibold text-base leading-tight">NeuroShield Assistant</h2>
+              <h2 className="text-white font-semibold text-base leading-tight">Preventra Chatbot</h2>
               <p className="text-white/60 text-xs mt-0.5">Ask about patient risk data</p>
             </div>
             <div className="flex items-center gap-1">
