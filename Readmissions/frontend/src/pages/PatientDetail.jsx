@@ -15,6 +15,8 @@ import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
 import ForecastPanel from '../components/dashboard/ForecastPanel';
+import DischargePlanCard from '../components/shared/DischargePlanCard';
+import OutcomeCard from '../components/shared/OutcomeCard';
 import { ArrowLeft, Calendar, AlertCircle, ListChecks, TrendingUp, CalendarClock, ChevronRight } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -319,6 +321,10 @@ export default function PatientDetail() {
             </ul>
           </div>
 
+          {/* What should be in place around the discharge; not for a carer -
+              what a patient can afford or eat is theirs to share. */}
+          {!isCarer && <DischargePlanCard patientId={patient.id} />}
+
           <CareTeamCard summary={summary} onChanged={reload} />
 
           {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
@@ -328,6 +334,8 @@ export default function PatientDetail() {
           <MedicinesGivenCard patientId={patient.id} mode="staff" />
 
           <FollowUpCard patientId={patient.id} />
+
+          {!isCarer && <OutcomeCard patientId={patient.id} />}
 
           <ForecastPanel patientId={patient.id} />
 

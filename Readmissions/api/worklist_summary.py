@@ -23,11 +23,15 @@ STATUS_RANK = {"action_required": 4, "deteriorating": 3, "stable": 2,
 BAND_RANK = {"High": 3, "Medium": 2, "Low": 1}
 
 
-def summaries(db, patient_ids: Optional[list] = None) -> dict:
-    """{patient_id: summary} from the weekly monitoring series."""
+def summaries(db, patient_ids: Optional[list] = None, today=None) -> dict:
+    """{patient_id: summary} from the weekly monitoring series. `today` (the
+    hospital's date) lets silence be measured against the calendar
+    (models/monitoring_rules.contact_gap); it defaults to the hospital clock."""
     from api.main import _classify_trend_status        # one definition, shared with the API
     from api.access import id_variants
+    from ingestion.scheduler import today as hospital_today
     from models.monitoring_rules import contact_gap
+    today = today or hospital_today()
     pipeline = ([{"$match": {"patient_id": {"$in": id_variants(patient_ids)}}}] if patient_ids is not None
                 else []) + [
         {"$sort": {"week_number": 1}},
@@ -35,7 +39,10 @@ def summaries(db, patient_ids: Optional[list] = None) -> dict:
                     "bands": {"$push": "$risk_band"}, "flags": {"$push": "$red_flags"},
                     "weeks": {"$push": {"week_number": "$week_number",
                                         "observed": {"$ifNull": ["$observed", True]},
-                                        "risk_band": "$risk_band", "red_flags": "$red_flags"}}}},
+                                        "risk_band": "$risk_band", "red_flags": "$red_flags",
+                                        "week_date": {"$ifNull": ["$week_date", None]},
+                                        "days_after_discharge": {"$ifNull": ["$days_after_discharge",
+                                                                             None]}}}}},
     ]
     out = {}
     for doc in db[WEEKLY_COLLECTION].aggregate(pipeline):
@@ -45,19 +52,23 @@ def summaries(db, patient_ids: Optional[list] = None) -> dict:
                 scores.append(float(raw))
             except (TypeError, ValueError):
                 continue
-        if len(scores) < 2:
+        if not scores:
             continue
-        bands = doc.get("bands") or []
-        gaps = [None] + [7] * (len(scores) - 1)
         # A red flag in the latest week overrides the trend (see
         # models/monitoring_rules.RED_FLAGS), and so does going without contact
         # after warning signs, so the worklist agrees with the patient's page.
-        overdue = contact_gap(doc.get("weeks") or [])["overdue"]
+        overdue = contact_gap(doc.get("weeks") or [], today)["overdue"]
+        # One score is no trend - unless nobody has heard from a Medium or High
+        # patient since discharge, which is exactly the silence to act on.
+        if len(scores) < 2 and not overdue:
+            continue
+        bands = doc.get("bands") or []
+        gaps = [None] + [7] * (len(scores) - 1)
         out[str(doc["_id"])] = {
             "discharge_score": scores[0],
             "current_score": scores[-1],
             "current_band": bands[-1] if bands else None,
-            "trend_delta": round(scores[-1] - scores[0], 1),
+            "trend_delta": round(scores[-1] - scores[0], 1) if len(scores) > 1 else None,
             "monitoring_status": ("action_required" if (doc.get("flags") or [None])[-1] or overdue
                                   else _classify_trend_status(scores, gaps)),
             "weeks_tracked": len(scores),
@@ -103,3 +114,27 @@ def refresh(db, batch_date: str, patient_ids: Optional[list] = None) -> int:
     for i in range(0, len(ops), 1000):
         db["patient_worklist"].bulk_write(ops[i:i + 1000], ordered=False)
     return len(ops)
+
+
+def in_window(db, today=None) -> list:
+    """Patients discharged within the monitoring window (plus the grace for a
+    late contact): the only ones whose status can change with the calendar."""
+    from datetime import timedelta
+    from ingestion.scheduler import today as hospital_today
+    from models.monitoring_rules import CONTACT_DUE_DAYS, MONITORING_DAYS
+    today = today or hospital_today()
+    since = (today - timedelta(days=MONITORING_DAYS + CONTACT_DUE_DAYS)).isoformat()
+    return db[WEEKLY_COLLECTION].distinct("patient_id", {"week_number": 0, "week_date": {"$gte": since}})
+
+
+def refresh_by_calendar(db, today=None) -> int:
+    """Re-summarise the patients still being monitored, so a patient who has
+    gone quiet shows as needing contact on the worklist without waiting for new
+    readings - silence is the one change that arrives with no data. Run by the
+    worker's nightly sweep (ingestion/worker.py)."""
+    from api.db_utils import get_latest_batch_date
+    ids = in_window(db, today)
+    batch = get_latest_batch_date(db, "patient_worklist")
+    if not ids or not batch:
+        return 0
+    return refresh(db, batch, ids)

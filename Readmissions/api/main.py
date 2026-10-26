@@ -41,6 +41,9 @@ from api import medicines_given
 from api import member_ids
 from api import insurer_alerts
 from api import caretaker_home
+from api import checkins
+from api import discharge_plan
+from api import outcomes
 from api import insurer as insurer_home_page
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
@@ -49,8 +52,9 @@ from models import early_warning
 from api.forecasting import ForecastContext, mimic_scoring_bands  # noqa: E402
 from models.monitoring_rules import (RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
                                      LABEL_TO_SIGNAL, MODEL_SOURCE, SIGNAL_RULES,
-                                     contact_gap, score_week, signal_plan, signals_for,
-                                     source_for, variant_for, week_sources)
+                                     contact_gap, contact_gap_text, score_week, signal_plan,
+                                     signals_for, source_for, variant_for, week_sources)
+from ingestion import scheduler as hospital_clock
 from models.discharge_baseline import (derive_baseline, describe as describe_baseline,
                                        relative_observations)
 from models.icd_groups import (GROUP_LABELS, classify as classify_group,
@@ -1300,6 +1304,13 @@ _TREND_STATUS_ACTIONS = {
 }
 
 
+def _origin_of(doc: dict) -> str:
+    """Where a week's readings came from, for attribution: a patient's or
+    caretaker's own check-in (api/checkins.py) is the patient app, whatever
+    series it joined."""
+    return "patient_reported" if doc.get("reported_by") else str(doc.get("source", ""))
+
+
 def _drivers_with_sources(doc: dict, patient_id: str) -> list:
     """
     Parse a weekly document's drivers and attribute each to the feed it came
@@ -1310,7 +1321,7 @@ def _drivers_with_sources(doc: dict, patient_id: str) -> list:
     the same answer as one written after, and no migration was needed. They are
     also placeholders - see models/monitoring_rules.SIGNAL_FEEDS.
     """
-    origin = str(doc.get("source", ""))
+    origin = _origin_of(doc)
     from_model = doc.get("week_number") == 0 or doc.get("scored_by") == "model"
     observed = bool(doc.get("observed", True))
 
@@ -1406,7 +1417,7 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
         # Where this week's numbers came from. Week 0 is not a monitoring week
         # at all - it is the model reading the discharge record - so it is
         # attributed to the model rather than to a home device.
-        origin = str(doc.get("source", ""))
+        origin = _origin_of(doc)
         from_model = wk == 0 or doc.get("scored_by") == "model"
         drivers = _drivers_with_sources(doc, patient_id)
 
@@ -1458,7 +1469,7 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
         status = "action_required"
     # So does silence after warning signs: the score is only held, and nobody
     # knows how the patient has gone since (models/monitoring_rules.contact_gap).
-    contact = contact_gap(docs)
+    contact = contact_gap(docs, hospital_clock.today())
     action = _WEEKLY_STATUS_ACTIONS[status]
     flagged = [RED_FLAGS[k][1] for k in ((docs[-1].get("red_flags") or []) if docs else []) if k in RED_FLAGS]
     if flagged:
@@ -1469,9 +1480,7 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
                   "whether they need to be seen now rather than at the next review.")
     if contact["overdue"]:
         status = "action_required"
-        n, since = contact["weeks_without_contact"], contact["last_contact_week"]
-        action = (f"No readings for {n} week{'s' if n != 1 else ''} since "
-                  + ("discharge" if since == 0 else f"week {since}")
+        action = (contact_gap_text(contact)
                   + f", when this patient was {contact['last_contact_band'] or 'flagged'}. Contact the "
                   "patient today: the score is only held, so open warning signs with nobody hearing "
                   "how they have gone are a reason to escalate, not to wait.")
@@ -2998,6 +3007,24 @@ def undo_medicines_given(entry_id: str, request: Request, patient: Optional[str]
     return medicines_given.undo(db, request.state.user, pid, entry_id)
 
 
+# Weekly check-in - a patient or their caretaker sends this week's readings (api/checkins.py)
+class CheckIn(BaseModel):
+    answers: dict
+    patient_id: Optional[str] = None           # a caretaker: which of their people
+
+
+@app.get("/api/my-home/checkin")
+def my_checkin(request: Request, patient: Optional[str] = None):
+    """Whether this week's check-in is open, and what it asks."""
+    return checkins.form(db, request.state.user, _scope(request), patient)
+
+
+@app.post("/api/my-home/checkin", status_code=201)
+def send_checkin(body: CheckIn, request: Request):
+    """This week's readings, scored at once like any other feed's."""
+    return checkins.submit(db, request.state.user, _scope(request), body.answers, body.patient_id)
+
+
 @app.get("/api/patients/{patient_id}/medicines-given")
 def patient_medicines_given(patient_id: str, request: Request):
     """The care team's view of a caretaker's ticks - the clinical layer."""
@@ -3201,6 +3228,74 @@ def add_care_note(patient_id: str, payload: AddNoteRequest, request: Request):
         upsert=True,
     )
     return {"status": "added", "note": note}
+
+
+# ---------------------------------------------------------------------------
+# Discharge plan - checklist and social needs (api/discharge_plan.py)
+# ---------------------------------------------------------------------------
+class ChecklistTick(BaseModel):
+    item: str
+    done: bool
+
+
+class SocialNeeds(BaseModel):
+    answers: dict
+
+
+def _require_care_team_layer(request: Request, patient_id: str) -> None:
+    """The clinical layer, minus a caretaker: what a patient can afford or eat
+    is theirs to share (api/discharge_plan.py)."""
+    _require_detail(request, patient_id)
+    if request.state.user["role"] == "caretaker":
+        raise HTTPException(status_code=403, detail="The discharge plan is for the care team")
+
+
+@app.get("/api/patients/{patient_id}/discharge-plan")
+def get_discharge_plan(patient_id: str, request: Request):
+    _require_care_team_layer(request, patient_id)
+    return discharge_plan.plan(db, request.state.user, patient_id)
+
+
+@app.post("/api/patients/{patient_id}/discharge-plan/checklist")
+def tick_discharge_checklist(patient_id: str, body: ChecklistTick, request: Request):
+    return discharge_plan.tick(db, request.state.user, _scope(request), patient_id, body.item, body.done)
+
+
+@app.post("/api/patients/{patient_id}/discharge-plan/social")
+def record_social_needs(patient_id: str, body: SocialNeeds, request: Request):
+    return discharge_plan.record_social(db, request.state.user, _scope(request), patient_id, body.answers)
+
+
+# ---------------------------------------------------------------------------
+# Outcomes - acting on alerts, and readmissions observed against expected
+# (api/outcomes.py)
+# ---------------------------------------------------------------------------
+class OutcomeRecord(BaseModel):
+    readmitted: bool
+    readmit_date: Optional[str] = None
+    note: Optional[str] = None
+
+
+@app.get("/api/outcomes")
+def get_outcomes(request: Request, days: int = Query(30, description="7 | 30 | 90")):
+    return outcomes.page(db, _view(request), request.state.user, days)
+
+
+@app.get("/api/patients/{patient_id}/outcome")
+def get_patient_outcome(patient_id: str, request: Request):
+    _require_care_team_layer(request, patient_id)
+    return outcomes.patient_outcome(db, request.state.user, patient_id)
+
+
+@app.post("/api/patients/{patient_id}/outcome")
+def record_patient_outcome(patient_id: str, body: OutcomeRecord, request: Request):
+    return outcomes.record(db, request.state.user, _scope(request), patient_id, body.readmitted,
+                           body.readmit_date, body.note)
+
+
+@app.delete("/api/patients/{patient_id}/outcome")
+def clear_patient_outcome(patient_id: str, request: Request):
+    return outcomes.clear(db, request.state.user, _scope(request), patient_id)
 
 
 @app.get("/api/patients/{patient_id}/care-actions")

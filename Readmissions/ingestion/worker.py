@@ -52,10 +52,13 @@ def handle(db, job: dict) -> dict:
         from api import ingest_connections
         return ingest_connections.run_pull(db, job)
     if job["kind"] == "alerts":
-        from api import forecasting
+        from api import forecasting, worklist_summary
         done = forecasting.raise_alerts(db)
+        # Silence arrives with no data, so nothing else would move a patient
+        # who has gone quiet to "contact the patient" on the worklist.
+        quiet = worklist_summary.refresh_by_calendar(db)
         return {"scored": done["scanned"], "not_scored": [], "alerts_created": done["alerts_created"],
-                "alerts_updated": done["alerts_updated"]}
+                "alerts_updated": done["alerts_updated"], "statuses_refreshed": quiet}
     raise ValueError(f"unknown job kind '{job['kind']}'")
 
 

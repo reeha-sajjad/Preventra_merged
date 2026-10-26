@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -47,6 +47,14 @@ def zone() -> ZoneInfo:
         return ZoneInfo(os.environ.get("NIGHTLY_TZ", "").strip() or "UTC")
     except ZoneInfoNotFoundError:
         return ZoneInfo("UTC")
+
+
+def today() -> date:
+    """The date on the hospital's clock - what "how many days since the last
+    readings" and "which week of monitoring is this" are counted against. On
+    the server's UTC, a check-in at half past midnight in Karachi would be filed
+    under the day before."""
+    return datetime.now(zone()).date()
 
 
 def parse_at(value: str) -> tuple:

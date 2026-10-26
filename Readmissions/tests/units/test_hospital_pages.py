@@ -414,3 +414,31 @@ def test_my_patients_counts_only_the_doctors_and_nurses_own(main, world):
                                    "ops@team.test"])
 def test_my_patients_is_only_for_doctors_and_nurses(main, world, email):
     assert as_user(main, world, email).get("/api/my-patients").status_code == 403
+
+def test_a_quiet_high_discharge_turns_action_required_on_the_worklist(monkeypatch):
+    """Silence by the calendar reaches the stored worklist status (the nightly
+    sweep), including a discharge with no readings since."""
+    import datetime as dt
+    import mongomock
+    from api import worklist_summary
+    db = mongomock.MongoClient()["neuroshield"]
+    db["weekly_monitoring"].insert_many([
+        {"patient_id": "Q1", "week_number": 0, "risk_score": 48.0, "risk_band": "High",
+         "red_flags": [], "week_date": "2026-10-01"},
+        {"patient_id": "Q2", "week_number": 0, "risk_score": 8.0, "risk_band": "Low",
+         "red_flags": [], "week_date": "2026-10-01"},
+        {"patient_id": "OLD", "week_number": 0, "risk_score": 60.0, "risk_band": "High",
+         "red_flags": [], "week_date": "2014-03-01"}])
+    for pid in ("Q1", "Q2", "OLD"):
+        db["patient_worklist"].insert_one({"patient_id": pid, "batch_date": "2026-10-01",
+                                           "risk_score": 48.0, "risk_band": "High"})
+    monkeypatch.setattr("api.main._worklist_driver", lambda pid, row: "")
+    today = dt.date(2026, 10, 12)
+    assert sorted(worklist_summary.in_window(db, today)) == ["Q1", "Q2"]
+    found = worklist_summary.summaries(db, None, today)
+    assert found["Q1"]["monitoring_status"] == "action_required" and found["Q1"]["trend_delta"] is None
+    assert "Q2" not in found and "OLD" not in found          # one score and nothing to act on
+    monkeypatch.setattr("ingestion.scheduler.today", lambda: today)
+    assert worklist_summary.refresh_by_calendar(db) == 2
+    row = db["patient_worklist"].find_one({"patient_id": "Q1"})
+    assert row["monitoring_status"] == "action_required" and row["status_rank"] == 4

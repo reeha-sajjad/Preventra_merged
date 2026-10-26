@@ -53,6 +53,7 @@ See api/mimic_scoring._split_driver.
 from __future__ import annotations
 
 import hashlib
+from datetime import date, datetime, timedelta
 
 import numpy as np
 
@@ -1436,16 +1437,48 @@ def variant_for(patient_id: str, week_number: int) -> int:
 
 # Bands whose silence is a reason to act rather than to wait.
 CONTACT_WATCH_BANDS = ("Medium", "High")
+# Readings are weekly, so a week and two days' grace without any is late.
+CONTACT_DUE_DAYS = 9
+# The window the programme watches: the 30 days a readmission is counted in.
+# Silence after it is the end of monitoring, not a missed contact.
+MONITORING_DAYS = 30
 
 
-def contact_gap(weeks: list) -> dict:
+def _as_date(value):
+    """A stored date ("2026-10-02", a datetime or a date) as a date, or None."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _discharge_date(weeks: list):
+    """Week 0's date, or a later week's date less its days after discharge."""
+    for w in weeks or []:
+        when = _as_date(w.get("week_date"))
+        if when is None:
+            continue
+        if int(w.get("week_number", 0) or 0) == 0:
+            return when
+        days = w.get("days_after_discharge")
+        if days is not None:
+            return when - timedelta(days=int(days))
+    return None
+
+
+def contact_gap(weeks: list, today=None) -> dict:
     """
     Whether the latest monitoring weeks went without contact, and whether that
     silence needs someone to act.
 
     `weeks` are one patient's weekly documents, oldest first, each with
-    `week_number`, `observed`, `risk_band` and `red_flags`. Week 0 is the
-    discharge and always counts as contact.
+    `week_number`, `observed`, `risk_band` and `red_flags`, and - for the check
+    against the calendar - `week_date` (and `days_after_discharge`). Week 0 is
+    the discharge and always counts as contact.
 
     A week without contact holds the last score: nothing new was measured, so
     the number is not moved either way. But holding it is not the same as
@@ -1455,9 +1488,18 @@ def contact_gap(weeks: list) -> dict:
     trend page, the worklist status and the "needs attention" list all read
     this one answer.
 
+    Silence shows up two ways. The simulator writes a week with nothing in it
+    (`observed: False`). Real check-ins have no document for a week nobody
+    reported, so with `today` (the hospital's date) the last contact is also
+    measured against the calendar: more than CONTACT_DUE_DAYS without readings,
+    while the patient is inside the MONITORING_DAYS window, is silence too.
+    A discharge with no readings since counts from the discharge itself.
+
     Returns {"weeks_without_contact": n, "last_contact_week": k,
-    "last_contact_band": band, "overdue": bool}; n is 0 when the latest week
-    was observed.
+    "last_contact_band": band, "last_contact_date": "YYYY-MM-DD" or None,
+    "days_without_contact": d or None, "overdue": bool}. n is 0 when the
+    latest week was observed and on time; d is set only when the calendar
+    says the contact is late.
     """
     silent, last = 0, None
     for w in reversed(weeks or []):
@@ -1468,7 +1510,32 @@ def contact_gap(weeks: list) -> dict:
         break
     band = (last or {}).get("risk_band")
     open_signs = band in CONTACT_WATCH_BANDS or bool((last or {}).get("red_flags"))
-    return {"weeks_without_contact": silent,
+
+    last_date = _as_date((last or {}).get("week_date"))
+    late_days = None
+    now = _as_date(today)
+    if now is not None and last_date is not None:
+        discharged = _discharge_date(weeks)
+        inside = discharged is not None and (now - discharged).days <= MONITORING_DAYS
+        elapsed = (now - last_date).days
+        if inside and elapsed > CONTACT_DUE_DAYS:
+            late_days = elapsed
+    return {"weeks_without_contact": max(silent, (late_days or 0) // 7),
             "last_contact_week": int((last or {}).get("week_number", 0) or 0),
             "last_contact_band": band,
-            "overdue": silent > 0 and open_signs}
+            "last_contact_date": last_date.isoformat() if last_date else None,
+            "days_without_contact": late_days,
+            "overdue": (silent > 0 or late_days is not None) and open_signs}
+
+
+def contact_gap_text(gap: dict) -> str:
+    """How long a patient has gone without readings, for an overdue contact:
+    "No readings for 12 days since week 2" - in days when the calendar showed
+    it, in weeks when stored silent weeks did."""
+    since = gap["last_contact_week"]
+    if gap.get("days_without_contact") is not None:
+        n, unit = gap["days_without_contact"], "day"
+    else:
+        n, unit = gap["weeks_without_contact"], "week"
+    return (f"No readings for {n} {unit}{'s' if n != 1 else ''} since "
+            + ("discharge" if since == 0 else f"week {since}"))

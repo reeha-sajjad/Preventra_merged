@@ -57,7 +57,7 @@ from api import auth
 # through a ScopedDB are limited to the caller's patients on all of them.
 PATIENT_COLLECTIONS = ("patient_worklist", "weekly_monitoring", "care_actions", "alerts",
                        "clinical_alerts", "risk_registry", "notifications", "followups",
-                       "care_team_history")
+                       "care_team_history", "checkins", "discharge_plans", "readmission_outcomes")
 
 # Which roles may do each kind of change. Reading is governed by the scope
 # alone; insurers and patients are read-only.
@@ -98,6 +98,11 @@ ACTIONS = {
     # panels - the verdict's actions and the counterfactual - without the
     # figures (docs/case_manager.md).
     "view_costs":     ("superadmin", "hospital_admin", "doctor", "nurse", "insurer", "patient"),
+    # The Outcomes page (api/outcomes.py): how the hospital acted on alerts,
+    # follow-ups and discharge plans, and readmissions observed against
+    # expected. Counts about the whole hospital and no money, so the roles that
+    # run its care - a case manager included.
+    "view_outcomes":  ("superadmin", "hospital_admin", "case_manager"),
 }
 
 # ------------------------------------------------ overview and clinical layer

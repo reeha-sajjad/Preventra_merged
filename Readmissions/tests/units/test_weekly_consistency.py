@@ -12,7 +12,7 @@ import mongomock
 import pytest
 
 from models.icd_groups import monitoring_groups
-from models.monitoring_rules import contact_gap, red_flags, score_week
+from models.monitoring_rules import contact_gap, contact_gap_text, red_flags, score_week
 from scripts.audit_weekly_monitoring import CHECKS, check_patient
 
 np = pytest.importorskip("numpy")
@@ -57,7 +57,8 @@ def _wk(n, band, observed=True, flags=None):
 def test_silence_after_a_medium_week_is_overdue():
     gap = contact_gap([_wk(0, "Medium"), _wk(1, "Medium"), _wk(2, "Medium", False), _wk(3, "Medium", False)])
     assert gap == {"weeks_without_contact": 2, "last_contact_week": 1,
-                   "last_contact_band": "Medium", "overdue": True}
+                   "last_contact_band": "Medium", "last_contact_date": None,
+                   "days_without_contact": None, "overdue": True}
 
 
 def test_silence_after_a_low_week_is_not_overdue_and_contact_clears_it():
@@ -67,6 +68,50 @@ def test_silence_after_a_low_week_is_not_overdue_and_contact_clears_it():
 
 def test_a_red_flag_before_the_silence_makes_it_overdue_even_when_low():
     assert contact_gap([_wk(0, "Low"), _wk(1, "Low", flags=["spo2"]), _wk(2, "Low", False)])["overdue"]
+
+
+# ------------------------------------------------------------ silence by the calendar
+def _dated(n, band, day, flags=None):
+    """A real check-in: no placeholder for missing weeks, only dates."""
+    return {**_wk(n, band, flags=flags), "week_date": f"2026-10-{day:02d}", "days_after_discharge": 7 * n}
+
+
+def test_real_check_ins_that_stop_are_overdue_by_the_calendar():
+    weeks = [_dated(0, "High", 1), _dated(1, "High", 8)]
+    gap = contact_gap(weeks, today="2026-10-20")                 # 12 days since week 1
+    assert gap["overdue"] and gap["days_without_contact"] == 12 and gap["weeks_without_contact"] == 1
+    assert gap["last_contact_date"] == "2026-10-08"
+    assert contact_gap_text(gap) == "No readings for 12 days since week 1"
+
+
+def test_a_week_and_two_days_is_still_on_time():
+    weeks = [_dated(0, "High", 1), _dated(1, "High", 8)]
+    assert not contact_gap(weeks, today="2026-10-17")["overdue"]          # 9 days: due, not late
+
+
+def test_a_medium_discharge_never_heard_from_is_overdue():
+    gap = contact_gap([_dated(0, "Medium", 1)], today="2026-10-12")
+    assert gap["overdue"] and contact_gap_text(gap) == "No readings for 11 days since discharge"
+
+
+def test_silence_after_a_low_week_stays_quiet_by_the_calendar_too():
+    assert not contact_gap([_dated(0, "Low", 1), _dated(1, "Low", 8)], today="2026-10-25")["overdue"]
+
+
+def test_after_the_monitoring_window_silence_is_the_end_not_a_missed_contact():
+    weeks = [_dated(0, "High", 1), _dated(1, "High", 8)]
+    assert contact_gap(weeks, today="2026-10-31")["overdue"]               # day 30: still watched
+    assert not contact_gap(weeks, today="2026-11-01")["overdue"]           # day 31: monitoring over
+    # Old demo data, discharged years ago, is never "late".
+    old = [{**w, "week_date": w["week_date"].replace("2026", "2014")} for w in weeks]
+    assert not contact_gap(old, today="2026-10-20")["overdue"]
+
+
+def test_the_discharge_date_comes_from_a_later_week_when_week_0_is_undated():
+    weeks = [_wk(0, "High"), _dated(2, "High", 15)]                        # discharged 1 October
+    assert contact_gap(weeks, today="2026-10-30")["overdue"]
+    assert not contact_gap(weeks, today="2026-11-02")["overdue"]
+
 
 
 # ------------------------------------------------------------ the simulator

@@ -13,7 +13,10 @@ whose latest weekly score
 
 or whose latest weeks went without contact after a Medium or High week (or a
 red flag) - the score is only held then, so no rise can fire, and that is when
-someone should be calling (models/monitoring_rules.contact_gap).
+someone should be calling (models/monitoring_rules.contact_gap). Silence is
+counted by the calendar too: more than a week and two days without readings,
+inside the 30-day window - including a Medium or High discharge never heard
+from since.
 
 A red flag, a rise that ends in High, or silence after High is "urgent";
 anything else "rising".
@@ -29,7 +32,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from models.monitoring_rules import RED_FLAGS, contact_gap
+from models.monitoring_rules import RED_FLAGS, contact_gap, contact_gap_text
 
 RISE_POINTS = 5.0
 BAND_RANK = {"Low": 1, "Medium": 2, "High": 3}
@@ -43,17 +46,20 @@ def _float(value, default=0.0) -> float:
         return default
 
 
-def assess(weeks: list):
-    """One patient's weeks, oldest first -> the watchlist entry, or None."""
-    if len(weeks) < 2:
+def assess(weeks: list, today=None):
+    """One patient's weeks, oldest first -> the watchlist entry, or None.
+    `today` (the hospital's date) also counts silence by the calendar."""
+    if not weeks:
         return None
-    latest, prev = weeks[-1], weeks[-2]
+    latest = weeks[-1]
+    prev = weeks[-2] if len(weeks) > 1 else latest
     # Silence after warning signs: the score is only held, so a rise rule can
     # never fire on it - and that is exactly when someone should be calling.
     gap = contact_gap([{"week_number": w.get("week"), "observed": w.get("observed", True),
-                        "risk_band": w.get("band"), "red_flags": w.get("flags")} for w in weeks])
+                        "risk_band": w.get("band"), "red_flags": w.get("flags"),
+                        "week_date": w.get("date"), "days_after_discharge": w.get("days")}
+                       for w in weeks], today)
     if gap["overdue"]:
-        n, since = gap["weeks_without_contact"], gap["last_contact_week"]
         band = gap["last_contact_band"] or "flagged"
         score = _float(latest.get("score"))
         return {
@@ -63,10 +69,10 @@ def assess(weeks: list):
             "risk_score": score, "risk_band": latest.get("band") or "Low",
             "previous_score": score, "previous_band": prev.get("band") or "Low",
             "delta": 0.0, "red_flags": [],
-            "reasons": [f"No readings for {n} week{'s' if n != 1 else ''} since "
-                        + ("discharge" if since == 0 else f"week {since}")
-                        + f" while {band} - contact the patient"],
+            "reasons": [contact_gap_text(gap) + f" while {band} - contact the patient"],
         }
+    if len(weeks) < 2:
+        return None
     score, before = _float(latest.get("score")), _float(prev.get("score"))
     delta = round(score - before, 1)
     band, band_before = latest.get("band") or "Low", prev.get("band") or "Low"
@@ -104,12 +110,15 @@ def watchlist(view, db, user: dict, limit: int = 50) -> dict:
             "band": {"$ifNull": ["$risk_band", "Low"]},
             "flags": {"$ifNull": ["$red_flags", []]},
             "observed": {"$ifNull": ["$observed", True]},
-            "date": {"$ifNull": ["$week_date", ""]}}}}},
+            "date": {"$ifNull": ["$week_date", ""]},
+            "days": {"$ifNull": ["$days_after_discharge", None]}}}}},
     ])
+    from ingestion.scheduler import today as hospital_today
+    today = hospital_today()
     items = []
     for doc in series:
         weeks = sorted(doc["weeks"], key=lambda w: w.get("week") or 0)
-        entry = assess(weeks)
+        entry = assess(weeks, today)
         if entry:
             items.append({"patient_id": str(doc["_id"]), **entry})
 

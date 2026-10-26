@@ -33,6 +33,10 @@ export const STUDIO_ROLES = ['superadmin', 'hospital_admin'];
 // coordinates care and does not manage money: they see the counterfactual and
 // the care plan, without the dollar figures.
 export const COST_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'insurer', 'patient'];
+// The Outcomes page (api/access.py view_outcomes): acting on alerts and
+// follow-ups, discharge plans, readmissions observed against expected. No
+// money on it, so a case manager sees it too.
+export const OUTCOME_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 // Doctors and nurses: their own patients are their home page (GLP-1's
 // CARE_TEAM_ROLES in RoleContext.jsx).
 export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];

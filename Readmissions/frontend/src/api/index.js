@@ -169,6 +169,20 @@ const RealAPI = {
   undoMedicinesGiven: (id, patient) => apiFetch(`/api/my-home/medicines/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
     { method: 'DELETE' }),
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
+  // The weekly check-in a patient or caretaker sends (api/checkins.py).
+  getCheckIn: (patient) => apiFetch(`/api/my-home/checkin${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
+  sendCheckIn: (answers, patient) => apiFetch('/api/my-home/checkin', json({ answers, patient_id: patient || null })),
+  // The discharge plan: checklist and social needs (api/discharge_plan.py).
+  getDischargePlan: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan`),
+  tickDischargeChecklist: (id, item, done) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/checklist`, json({ item, done })),
+  recordSocialNeeds: (id, answers) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/social`, json({ answers })),
+  // Outcomes (api/outcomes.py): the page, and one patient's 30-day outcome.
+  getOutcomes: (days = 30) => apiFetch(`/api/outcomes?days=${days}`),
+  getPatientOutcome: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/outcome`),
+  recordPatientOutcome: (id, body) => apiFetch(`/api/patients/${encodeURIComponent(id)}/outcome`, json(body)),
+  clearPatientOutcome: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/outcome`, { method: 'DELETE' }),
   // An insurer's home (api/insurer.py).
   getInsurerHome: () => apiFetch('/api/insurer/home'),
   // Insurance member IDs (api/member_ids.py).
@@ -517,6 +531,15 @@ export const getMedicinesGiven   = realOnly(RealAPI.getMedicinesGiven);
 export const recordMedicinesGiven = realOnly(RealAPI.recordMedicinesGiven);
 export const undoMedicinesGiven  = realOnly(RealAPI.undoMedicinesGiven);
 export const getPatientMedicinesGiven = realOnly(RealAPI.getPatientMedicinesGiven);
+export const getCheckIn          = realOnly(RealAPI.getCheckIn);
+export const sendCheckIn         = realOnly(RealAPI.sendCheckIn);
+export const getDischargePlan    = realOnly(RealAPI.getDischargePlan);
+export const tickDischargeChecklist = realOnly(RealAPI.tickDischargeChecklist);
+export const recordSocialNeeds   = realOnly(RealAPI.recordSocialNeeds);
+export const getOutcomes         = realOnly(RealAPI.getOutcomes);
+export const getPatientOutcome   = realOnly(RealAPI.getPatientOutcome);
+export const recordPatientOutcome = realOnly(RealAPI.recordPatientOutcome);
+export const clearPatientOutcome = realOnly(RealAPI.clearPatientOutcome);
 export const linkCaretaker       = realOnly(RealAPI.linkCaretaker);
 export const unlinkCaretaker     = realOnly(RealAPI.unlinkCaretaker);
 export const reportPharmacyProblem = realOnly(RealAPI.reportPharmacyProblem);

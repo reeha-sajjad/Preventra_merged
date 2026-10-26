@@ -5,6 +5,7 @@ import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
+import CheckInCard from '../components/patient/CheckInCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
 
 const BAND_TEXT = { High: 'text-red-700', Medium: 'text-amber-700', Low: 'text-green-700' };
@@ -120,6 +121,9 @@ export default function PatientHome() {
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
+          <CheckInCard key={`checkin-${data.patient_id}`} patientId={caretaker ? data.patient_id : null}
+            caretaker={caretaker} patientName={data.caring_for?.patient_name} />
+
           <Card icon={Hospital} title="Your hospital stay" id="stay">
             {(stay.admitted || stay.discharged) && (
               <dl className="mt-4 grid gap-3 sm:grid-cols-2">

@@ -20,10 +20,11 @@ import ModelStudio from './pages/ModelStudio';
 import MyPatients from './pages/MyPatients';
 import FollowUps from './pages/FollowUps';
 import PharmacyHome from './pages/PharmacyHome';
+import Outcomes from './pages/Outcomes';
 import { MANUAL_ENTRY_ENABLED } from './api';
 import { readClaims } from './api/auth';
 import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES,
-         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES } from './roles';
+         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, OUTCOME_ROLES } from './roles';
 import LoadingScreen from './components/LoadingScreen';
 import { useAppLoader } from './hooks/useAppLoader';
 
@@ -99,6 +100,7 @@ function AppRoutes() {
           {can(INSURER_ROLES) && <Route path="/overview" element={<Navigate to="/" replace />} />}
           {can(STAFF_ROLES) && <Route path="/staff" element={<Staff />} />}
           {can(FOLLOWUP_HANDLE_ROLES) && <Route path="/follow-ups" element={<FollowUps />} />}
+          {can(OUTCOME_ROLES) && <Route path="/outcomes" element={<Outcomes />} />}
           <Route path="/patients/:id" element={<PatientDetail />} />
           <Route path="/patients/:id/trend" element={<PatientTrend />} />
           <Route path="/patients/:id/update" element={<UpdatePatient />} />

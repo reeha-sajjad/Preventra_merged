@@ -97,3 +97,29 @@ def test_a_patient_outside_the_scope_cannot_be_marked(main, world, weeks):
     assert r.status_code == 404
     assert as_user(main, world, "doc.a@a.test").post(
         f"/api/rising-risk/{A3}/seen", json={"week_number": 1}).status_code == 404
+
+
+def test_check_ins_that_stop_are_on_the_list_by_the_calendar():
+    from api.risk_watch import assess
+    weeks = [{"week": 0, "score": 41.0, "band": "High", "date": "2026-10-01"},
+             {"week": 1, "score": 44.0, "band": "High", "date": "2026-10-08", "days": 7}]
+    assert assess(weeks, "2026-10-15") is None                  # 7 days, +3: nothing to say
+    entry = assess(weeks, "2026-10-21")
+    assert entry["severity"] == "urgent"
+    assert entry["reasons"] == ["No readings for 13 days since week 1 while High - contact the patient"]
+
+
+def test_a_high_discharge_never_heard_from_is_on_the_list(main, world, monkeypatch):
+    from ingestion import scheduler
+    import datetime as dt
+    db = world["db"]
+    db["weekly_monitoring"].delete_many({})
+    db["weekly_monitoring"].insert_one({"patient_id": A1, "week_number": 0, "risk_score": 52,
+                                        "risk_band": "High", "red_flags": [], "week_date": "2026-10-01"})
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 10, 12))
+    body = watch(main, world, "doc.a@a.test")
+    assert ids(body) == [A1]
+    assert body["patients"][0]["reasons"] == [
+        "No readings for 11 days since discharge while High - contact the patient"]
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 10, 8))     # one week: not yet
+    assert ids(watch(main, world, "doc.a@a.test")) == []

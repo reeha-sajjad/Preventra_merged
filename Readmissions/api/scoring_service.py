@@ -494,6 +494,8 @@ def scored_weeks(db, hospital_id: str, stay: dict, week0: dict) -> list:
                      "group_label": week0.get("group_label"), "group_evidence": week0.get("group_evidence"),
                      "group_confidence": week0.get("group_confidence"), "hospital_id": hospital_id,
                      "encounter_key": stay["encounter_key"],
+                     # A patient's or caretaker's own check-in (api/checkins.py).
+                     **({"reported_by": wk["reported_by"]} if wk.get("reported_by") else {}),
                      **({"note": wk["note"]} if wk.get("note") else {})})
         prev_adj, prev_score = adj, score
     return docs
