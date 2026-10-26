@@ -1,0 +1,165 @@
+ INFO  Accepting connections at http://localhost:5175
+ HTTP  10/22/2026 7:36:38 AM ::1 GET /
+ HTTP  10/22/2026 7:36:38 AM ::1 Returned 200 in 28 ms
+ HTTP  10/22/2026 7:36:39 AM ::1 GET /signin.html
+ HTTP  10/22/2026 7:36:39 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 7:36:39 AM ::1 GET /mark.png
+ HTTP  10/22/2026 7:36:39 AM ::1 GET /signin
+ HTTP  10/22/2026 7:36:39 AM ::1 Returned 200 in 7 ms
+ HTTP  10/22/2026 7:36:39 AM ::1 Returned 304 in 11 ms
+ HTTP  10/22/2026 7:36:39 AM ::1 GET /config.js
+ HTTP  10/22/2026 7:36:39 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:36:39 AM ::1 Returned 304 in 8 ms
+ HTTP  10/22/2026 7:36:39 AM ::1 Returned 304 in 8 ms
+ HTTP  10/22/2026 7:36:41 AM ::1 GET /signin
+ HTTP  10/22/2026 7:36:41 AM ::1 Returned 200 in 6 ms
+ HTTP  10/22/2026 7:36:43 AM ::1 GET /
+ HTTP  10/22/2026 7:36:43 AM ::1 Returned 200 in 1 ms
+ HTTP  10/22/2026 7:36:44 AM ::1 GET /signin.html
+ HTTP  10/22/2026 7:36:44 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 7:36:44 AM ::1 GET /signin
+ HTTP  10/22/2026 7:36:44 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 7:36:44 AM ::1 GET /config.js
+ HTTP  10/22/2026 7:36:44 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:36:44 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 7:36:44 AM ::1 Returned 304 in 3 ms
+ HTTP  10/22/2026 7:39:03 AM ::1 GET /
+ HTTP  10/22/2026 7:39:03 AM ::1 Returned 200 in 5 ms
+ HTTP  10/22/2026 7:39:04 AM ::1 GET /mark.png
+ HTTP  10/22/2026 7:39:04 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 7:39:04 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:39:04 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 7:39:06 AM ::1 GET /signin.html
+ HTTP  10/22/2026 7:39:06 AM ::1 Returned 301 in 0 ms
+ HTTP  10/22/2026 7:39:06 AM ::1 GET /signin
+ HTTP  10/22/2026 7:39:06 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 7:39:06 AM ::1 GET /config.js
+ HTTP  10/22/2026 7:39:06 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 7:39:06 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:39:06 AM ::1 Returned 304 in 0 ms
+ HTTP  10/22/2026 7:39:06 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:39:06 AM ::1 Returned 304 in 4 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 200 in 10 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /signin.html
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /signin
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /mark.png
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 200 in 5 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /config.js
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 304 in 4 ms
+ HTTP  10/22/2026 7:43:35 AM ::1 GET /logo.png
+ HTTP  10/22/2026 7:43:35 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 7:44:07 AM ::1 GET /
+ HTTP  10/22/2026 7:44:07 AM ::1 Returned 200 in 4 ms
+ HTTP  10/22/2026 7:44:07 AM ::1 GET /mark.png
+ HTTP  10/22/2026 7:44:07 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 9:52:05 AM ::1 GET /signin.html
+ HTTP  10/22/2026 9:52:05 AM ::1 Returned 301 in 20 ms
+ HTTP  10/22/2026 9:52:05 AM ::1 GET /signin
+ HTTP  10/22/2026 9:52:05 AM ::1 Returned 200 in 10 ms
+ HTTP  10/22/2026 9:52:05 AM ::1 GET /config.js
+ HTTP  10/22/2026 9:52:05 AM ::1 Returned 304 in 5 ms
+ HTTP  10/22/2026 9:52:05 AM ::1 GET /logo.png
+ HTTP  10/22/2026 9:52:05 AM ::1 Returned 304 in 3 ms
+ HTTP  10/22/2026 10:11:01 AM ::1 GET /
+ HTTP  10/22/2026 10:11:01 AM ::1 Returned 200 in 20 ms
+ HTTP  10/22/2026 10:11:01 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:11:01 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:11:01 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:11:01 AM ::1 Returned 304 in 3 ms
+ HTTP  10/22/2026 10:11:01 AM ::1 GET /signin
+ HTTP  10/22/2026 10:11:01 AM ::1 Returned 200 in 8 ms
+ HTTP  10/22/2026 10:11:02 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:11:02 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:11:02 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:11:02 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:11:06 AM ::1 GET /
+ HTTP  10/22/2026 10:11:06 AM ::1 Returned 200 in 8 ms
+ HTTP  10/22/2026 10:11:06 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:11:06 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:11:07 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:11:07 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:11:07 AM ::1 GET /signin
+ HTTP  10/22/2026 10:11:07 AM ::1 Returned 200 in 1 ms
+ HTTP  10/22/2026 10:11:07 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:11:07 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:11:07 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:11:07 AM ::1 Returned 304 in 4 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 200 in 9 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 301 in 2 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /signin
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 304 in 4 ms
+ HTTP  10/22/2026 10:13:23 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:13:23 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:13:26 AM ::1 GET /
+ HTTP  10/22/2026 10:13:26 AM ::1 Returned 200 in 1 ms
+ HTTP  10/22/2026 10:13:26 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:13:26 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:13:27 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:13:27 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:13:27 AM ::1 GET /signin
+ HTTP  10/22/2026 10:13:27 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 10:13:27 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:13:27 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:13:27 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:13:27 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 200 in 3 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 301 in 2 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 304 in 6 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /signin
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:16:56 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:16:56 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:16:57 AM ::1 GET /signin
+ HTTP  10/22/2026 10:16:57 AM ::1 Returned 200 in 4 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 200 in 14 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /signin
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 304 in 0 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:23:29 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:23:29 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:23:31 AM ::1 GET /
+ HTTP  10/22/2026 10:23:31 AM ::1 Returned 200 in 2 ms
+ HTTP  10/22/2026 10:23:31 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:23:31 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:23:33 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:23:33 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:23:33 AM ::1 GET /signin
+ HTTP  10/22/2026 10:23:33 AM ::1 Returned 200 in 1 ms
+ HTTP  10/22/2026 10:23:33 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:23:33 AM ::1 Returned 304 in 1 ms
+ HTTP  10/22/2026 10:23:33 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:23:33 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 200 in 12 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /signin.html
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 301 in 1 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /mark.png
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /signin
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 304 in 4 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 200 in 13 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /config.js
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:32:43 AM ::1 GET /logo.png
+ HTTP  10/22/2026 10:32:43 AM ::1 Returned 304 in 2 ms
+ HTTP  10/22/2026 10:32:44 AM ::1 GET /signin
+ HTTP  10/22/2026 10:32:44 AM ::1 Returned 200 in 3 ms

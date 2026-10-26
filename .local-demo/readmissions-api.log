@@ -1,0 +1,17 @@
+INFO:     Started server process [43471]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52823 - "GET /auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52935 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53012 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53012 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56734 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56734 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57342 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57342 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57583 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57647 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "OPTIONS /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57863 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58066 - "POST /auth/login HTTP/1.1" 200 OK
