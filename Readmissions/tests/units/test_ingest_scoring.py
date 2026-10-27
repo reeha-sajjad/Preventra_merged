@@ -150,7 +150,10 @@ def test_a_job_that_keeps_failing_is_reported(main, world, token, monkeypatch):
 
 
 # ----------------------------------------------------------------- weeks
-def test_a_weekly_check_in_is_scored_and_a_red_flag_surfaces(main, world, token):
+def test_a_weekly_check_in_is_scored_and_a_red_flag_surfaces(main, world, token, monkeypatch):
+    import datetime as dt
+    from ingestion import scheduler
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 4, 13))     # still being monitored
     db = world["db"]
     send(main, token, bundle())
     send_weeks(main, token, week("2026-04-12", weight_kg=87.4, spo2=87, refill_status="late"))

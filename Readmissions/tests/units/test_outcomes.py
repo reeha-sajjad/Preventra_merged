@@ -170,7 +170,7 @@ def test_staying_in_touch_and_discharge_planning(main, world, clock):
     assert (c["checkins"], c["checkin_patients"], c["by_caretaker"], c["with_red_flags"]) == (2, 1, 1, 1)
     d = page["discharge_planning"]
     assert (d["discharges"], d["with_plan"], d["followup_booked"], d["complete"], d["with_needs"]) == (2, 1, 1, 0, 1)
-    assert d["needs"] == [{"key": "transport", "label": "Can get to appointments", "count": 1}]
+    assert d["needs"] == [{"key": "transport", "label": "Needs help with transport", "count": 1}]
 
 
 def test_a_readmission_known_before_day_30_counts_in_the_denominator(main, world, clock):

@@ -18,6 +18,12 @@ counted by the calendar too: more than a week and two days without readings,
 inside the 30-day window - including a Medium or High discharge never heard
 from since.
 
+Only patients still being monitored are looked at: discharged within the
+30-day window plus the grace for a late contact (worklist_summary.in_window).
+A latest week from years ago - the historical demo data - is not news, and
+reading every weekly record of a hospital on every 30-second bell poll was
+the slowest request in the app.
+
 A red flag, a rise that ends in High, or silence after High is "urgent";
 anything else "rising".
 Red flags first, then other urgent rises, then the rest; biggest rise first.
@@ -99,7 +105,12 @@ def assess(weeks: list, today=None):
 
 def watchlist(view, db, user: dict, limit: int = 50) -> dict:
     """The caller's patients whose latest week needs a look, most serious first."""
-    series = view["weekly_monitoring"].aggregate([
+    from api.worklist_summary import in_window
+    from ingestion.scheduler import today as hospital_today
+    today = hospital_today()
+    current = in_window(db, today)
+    series = [] if not current else view["weekly_monitoring"].aggregate([
+        {"$match": {"patient_id": {"$in": current}}},
         {"$sort": {"week_number": 1}},
         # Defaults spelled out: weeks written before red flags existed have no
         # red_flags field, and a missing field must read as "none", not break
@@ -113,8 +124,6 @@ def watchlist(view, db, user: dict, limit: int = 50) -> dict:
             "date": {"$ifNull": ["$week_date", ""]},
             "days": {"$ifNull": ["$days_after_discharge", None]}}}}},
     ])
-    from ingestion.scheduler import today as hospital_today
-    today = hospital_today()
     items = []
     for doc in series:
         weeks = sorted(doc["weeks"], key=lambda w: w.get("week") or 0)

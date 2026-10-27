@@ -18,7 +18,12 @@ SERIES = {
 
 
 @pytest.fixture
-def weeks(world):
+def weeks(world, monkeypatch):
+    # Inside these patients' monitoring window: the watchlist only reads
+    # patients still being monitored.
+    import datetime as dt
+    from ingestion import scheduler
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 4, 20))
     db = world["db"]
     db["weekly_monitoring"].delete_many({})
     for pid, series in SERIES.items():
@@ -123,3 +128,12 @@ def test_a_high_discharge_never_heard_from_is_on_the_list(main, world, monkeypat
         "No readings for 11 days since discharge while High - contact the patient"]
     monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 10, 8))     # one week: not yet
     assert ids(watch(main, world, "doc.a@a.test")) == []
+
+
+
+def test_a_patient_whose_monitoring_ended_long_ago_is_not_news(main, world, weeks, monkeypatch):
+    """Years-old weeks (the historical demo data) stay off the bell."""
+    import datetime as dt
+    from ingestion import scheduler
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 10, 27))
+    assert watch(main, world, "doc.a@a.test")["patients"] == []

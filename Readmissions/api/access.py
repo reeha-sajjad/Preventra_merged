@@ -47,6 +47,7 @@ who can see a patient sees all of it.
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from fastapi import HTTPException
@@ -267,12 +268,113 @@ def patient_scope(db, user: dict) -> Optional[list]:
         query = None
     if query is None:
         return []
-    mine = [d["patient_id"] for d in db["care_actions"].find(query, {"patient_id": 1})]
-    if role in ("doctor", "nurse"):
-        # Plus any patient opened with emergency access in the last 24 hours.
-        have = {str(p) for p in mine}
-        mine += sorted(p for p in emergency_patients(db, user) if p not in have)
-    return mine
+    return PatientScope(db, user, query)
+
+
+# A whole hospital's patient list, kept for a few seconds. One page asks for it
+# from several requests at once (the list, the bell, the condition filter), and
+# fetching a hospital's thousands of ids was most of each. Only hospital-wide
+# scopes (hospital admin, case manager, the superadmin acting for a hospital):
+# assignment-based ones are small and change by hand. Membership checks - "may
+# this user open this patient?" - never use it; they always ask the database.
+HOSPITAL_LIST_SECONDS = 15
+_hospital_lists: dict = {}
+
+
+def forget_hospital_lists() -> None:
+    _hospital_lists.clear()
+
+
+class PatientScope:
+    """The patients one user may see, fetched only as far as a request needs.
+
+    Every request used to fetch the id of every patient the user may see before
+    doing anything else - for a hospital's case manager, four thousand ids - and
+    then carried all of them (twice: as text and as a number) in every query,
+    even to open one patient. Most requests are about one patient, and "is this
+    patient mine?" is one indexed lookup. So:
+
+        patient in scope     that lookup (several patients: one lookup for all),
+                             remembered for the rest of the request
+        len, iteration, [i]  the full list, fetched once, in one round trip
+
+    Who may see what is unchanged - the same ownership query answers both.
+    Doctors and nurses also see the patients they hold an unexpired emergency
+    grant for (emergency_patients).
+    """
+
+    def __init__(self, db, user: dict, query: dict):
+        self._db, self._user, self._query = db, user, query
+        self._ids = None
+        self._idset = None
+        self._known: dict = {}
+        self._grants = None
+
+    def _emergency(self) -> set:
+        if self._grants is None:
+            self._grants = ({str(p) for p in emergency_patients(self._db, self._user)}
+                            if self._user["role"] in ("doctor", "nurse") else set())
+        return self._grants
+
+    def ids(self) -> list:
+        if self._ids is None:
+            cached = None
+            hospital_wide = set(self._query) == {"hospital_id"}
+            if hospital_wide:
+                hit = _hospital_lists.get(self._query["hospital_id"])
+                if hit and hit[0] > time.monotonic() and hit[2] is self._db:
+                    cached = list(hit[1])
+            mine = cached if cached is not None else [d["patient_id"] for d in self._db["care_actions"].find(
+                self._query, {"_id": 0, "patient_id": 1}).batch_size(100000)]
+            if hospital_wide and cached is None:
+                _hospital_lists[self._query["hospital_id"]] = (time.monotonic() + HOSPITAL_LIST_SECONDS,
+                                                               tuple(mine), self._db)
+            have = {str(p) for p in mine}
+            mine += sorted(p for p in self._emergency() if p not in have)
+            self._ids = mine
+            # A list read fresh also answers membership; a kept one does not.
+            self._idset = {str(p) for p in mine} if cached is None else None
+        return self._ids
+
+    def allowed(self, patient_ids) -> list:
+        """Those of `patient_ids` this user may see, in one lookup at most."""
+        if self._idset is not None:
+            return [p for p in patient_ids if str(p) in self._idset]
+        unknown = [p for p in patient_ids if str(p) not in self._known]
+        if unknown:
+            found = {str(d["patient_id"]) for d in self._db["care_actions"].find(
+                {"$and": [self._query, {"patient_id": {"$in": id_variants(unknown)}}]},
+                {"_id": 0, "patient_id": 1})}
+            for p in unknown:
+                self._known[str(p)] = str(p) in found
+            if not all(self._known[str(p)] for p in unknown) and self._emergency():
+                for p in unknown:
+                    self._known[str(p)] = self._known[str(p)] or str(p) in self._emergency()
+        return [p for p in patient_ids if self._known[str(p)]]
+
+    def __contains__(self, patient_id) -> bool:
+        return bool(self.allowed([patient_id]))
+
+    def __iter__(self):
+        return iter(self.ids())
+
+    def __len__(self) -> int:
+        return len(self.ids())
+
+    def __getitem__(self, i):
+        return self.ids()[i]
+
+    def __bool__(self) -> bool:
+        return bool(self.ids())
+
+    # Compares, and prints, like the list it stands for.
+    def __eq__(self, other) -> bool:
+        return self.ids() == (other.ids() if isinstance(other, PatientScope) else other)
+
+    __hash__ = None
+
+    def __repr__(self) -> str:
+        return f"PatientScope({self.ids()!r})"
 
 
 def emergency_patients(db, user: dict) -> set:
@@ -314,7 +416,30 @@ def scope_query(scope: Optional[list], field: str = "patient_id") -> dict:
 
 
 def in_scope(scope: Optional[list], patient_id) -> bool:
-    return scope is None or str(patient_id) in {str(p) for p in scope}
+    if scope is None:
+        return True
+    if isinstance(scope, PatientScope):
+        return patient_id in scope
+    return str(patient_id) in {str(p) for p in scope}
+
+
+# A query naming at most this many patients is checked patient by patient
+# (one lookup for all of them) rather than carrying the whole scope.
+PINNED_MAX = 500
+
+
+def _pinned(filter, field: str):
+    """The patients a filter names outright - field equal to one id, or $in a
+    short list - or None when it names none (a list query)."""
+    if not isinstance(filter, dict) or field not in filter:
+        return None
+    value = filter[field]
+    if isinstance(value, (str, int)) and not isinstance(value, bool):
+        return [value]
+    if (isinstance(value, dict) and set(value) == {"$in"} and isinstance(value["$in"], (list, tuple))
+            and 0 < len(value["$in"]) <= PINNED_MAX):
+        return list(value["$in"])
+    return None
 
 
 def require_patient(scope: Optional[list], patient_id) -> None:
@@ -347,25 +472,45 @@ class ScopedCollection:
     collection.
     """
 
-    def __init__(self, collection, restriction: dict):
+    def __init__(self, collection, restriction: Optional[dict] = None, scope=None, field: str = "patient_id"):
         self._c = collection
-        self._r = restriction
+        self._fixed = restriction
+        self._scope = scope
+        self._field = field
+
+    def _r(self, filter=None) -> dict:
+        """The restriction for this filter. A filter that already names its
+        patients needs only those checked: when all are the caller's, the
+        filter is restriction enough, and the results are the same as with the
+        whole scope attached."""
+        if self._fixed is not None:
+            return self._fixed
+        if self._scope is None:
+            return {}
+        pinned = _pinned(filter, self._field)
+        if pinned is not None:
+            allowed = (self._scope.allowed(pinned) if isinstance(self._scope, PatientScope)
+                       else [p for p in pinned if in_scope(self._scope, p)])
+            return {} if len(allowed) == len(pinned) else {self._field: {"$in": id_variants(allowed)}}
+        return scope_query(self._scope, self._field)
 
     def find(self, filter=None, *args, **kwargs):
-        return self._c.find(_and(filter, self._r), *args, **kwargs)
+        return self._c.find(_and(filter, self._r(filter)), *args, **kwargs)
 
     def find_one(self, filter=None, *args, **kwargs):
-        return self._c.find_one(_and(filter, self._r), *args, **kwargs)
+        return self._c.find_one(_and(filter, self._r(filter)), *args, **kwargs)
 
     def count_documents(self, filter, *args, **kwargs):
-        return self._c.count_documents(_and(filter, self._r), *args, **kwargs)
+        return self._c.count_documents(_and(filter, self._r(filter)), *args, **kwargs)
 
     def aggregate(self, pipeline, *args, **kwargs):
-        stages = ([{"$match": self._r}] if self._r else []) + list(pipeline)
+        first = (pipeline[0].get("$match") if pipeline and isinstance(pipeline[0], dict) else None)
+        restriction = self._r(first)
+        stages = ([{"$match": restriction}] if restriction else []) + list(pipeline)
         return self._c.aggregate(stages, *args, **kwargs)
 
     def distinct(self, key, filter=None, *args, **kwargs):
-        return self._c.distinct(key, _and(filter, self._r), *args, **kwargs)
+        return self._c.distinct(key, _and(filter, self._r(filter)), *args, **kwargs)
 
 
 class ScopedDB:
@@ -385,7 +530,7 @@ class ScopedDB:
 
     def __getitem__(self, name):
         if name in PATIENT_COLLECTIONS:
-            return ScopedCollection(self._db[name], scope_query(self.scope))
+            return ScopedCollection(self._db[name], scope=self.scope)
         if name == "doctors":
             return ScopedCollection(self._db[name], doctor_query(self.user))
         return self._db[name]

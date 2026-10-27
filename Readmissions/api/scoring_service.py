@@ -354,10 +354,14 @@ def _write_discharge(db, hospital_id: str, stay: dict, row: pd.Series, result: d
          "stage": stay.get("stage", "final")},
         {"$set": {**common, "batch_date": common["discharge_date"], "stage": stay.get("stage", "final"),
                   "scored_at": _now()}}, upsert=True)
-    db["care_actions"].update_one(
+    made = db["care_actions"].update_one(
         {"patient_id": pid},
         {"$setOnInsert": {"patient_id": pid, "hospital_id": hospital_id, "notes": [],
                           "coordinator_name": None, "assigned_nurse_ids": []}}, upsert=True)
+    if made.upserted_id is not None:
+        # A new patient of the hospital: its kept patient list is out of date.
+        from api.access import forget_hospital_lists
+        forget_hospital_lists()
     if not is_latest:
         return
 

@@ -2468,6 +2468,7 @@ def add_to_worklist(payload: WorklistSaveRequest, request: Request):
                           "hospital_id": access.hospital_of(request.state.user)}},
         upsert=True,
     )
+    access.forget_hospital_lists()
 
     return {
         "status":     "added",

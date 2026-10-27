@@ -134,12 +134,25 @@ def ensure_indexes(db) -> None:
 
 
 # ------------------------------------------------------------ the rules
+# A need in words. The questions are worded as the good case ("Can afford
+# their medicines"), so a count under the question's own label read as the
+# opposite of what it counted.
+NEED_LABELS = {
+    "lives_alone": "Lives alone",
+    "help_at_home": "No help at home",
+    "transport": "Needs help with transport",
+    "medicine_cost": "Worried about medicine cost",
+    "food": "Worried about having enough food",
+    "housing": "Unstable housing",
+}
+
+
 def needs(social: dict) -> list:
     """The answers that are needs, each with its action."""
     out = []
-    for key, (label, _, need, action) in SOCIAL.items():
+    for key, (_, _, need, action) in SOCIAL.items():
         if (social or {}).get(key) == need:
-            out.append({"key": key, "label": label, "action": action})
+            out.append({"key": key, "label": NEED_LABELS[key], "action": action})
     return out
 
 
@@ -320,7 +333,7 @@ def summary(db, rows: list) -> dict:
             by_need[n["key"]] += 1
     return {"discharges": len(rows), "with_plan": with_plan, "followup_booked": booked, "complete": complete,
             "screened": screened, "with_needs": with_needs,
-            "needs": [{"key": k, "label": SOCIAL[k][0], "count": c} for k, c in by_need.items() if c]}
+            "needs": [{"key": k, "label": NEED_LABELS[k], "count": c} for k, c in by_need.items() if c]}
 
 
 def complete_for(db, keys: list) -> dict:
