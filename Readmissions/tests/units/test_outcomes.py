@@ -181,3 +181,20 @@ def test_a_readmission_known_before_day_30_counts_in_the_denominator(main, world
                    json={"readmitted": True, "readmit_date": "2026-04-20"}).status_code == 200
     r = cm.get("/api/outcomes").json()["readmissions"]
     assert r["overall"]["known"] == 1 and r["past_30_days"] == 1
+
+
+def test_a_sweep_over_historical_data_is_not_counted_as_alerts(main, world, clock):
+    """Alerts about discharges years old (a forecast run over old data) were
+    never live, so 'acting on alerts' leaves them out."""
+    db = world["db"]
+    db["clinical_alerts"].delete_many({})
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    recent = (dt.date.today() - dt.timedelta(days=10)).isoformat()
+    db["clinical_alerts"].insert_many([
+        {"alert_id": "live", "patient_id": A1, "status": "pending", "created_at": now,
+         "patient": {"discharge_date": recent}},
+        {"alert_id": "old", "patient_id": A2, "status": "pending", "created_at": now,
+         "patient": {"discharge_date": "2012-05-01"}},
+        {"alert_id": "undated", "patient_id": A3, "status": "pending", "created_at": now},
+    ])
+    assert as_user(main, world, "cm@a.test").get("/api/outcomes").json()["alerts"]["raised"] == 2

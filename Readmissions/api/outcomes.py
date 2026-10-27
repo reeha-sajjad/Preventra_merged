@@ -7,7 +7,9 @@ second only once 30 days have passed:
 
 ACTING ON IT - from records the app already keeps, over a chosen period
     clinical alerts   raised, acknowledged, answered; hours to acknowledge and
-                      to answer (api/doctor_service.py)
+                      to answer (api/doctor_service.py) - only alerts raised
+                      during the patient's 30 days (plus a week), not a sweep
+                      over historical data
     follow-ups        asked for, done, how they ended - booked, unreachable,
                       not needed - and days to done (api/followups.py)
     staying in touch  patients inside the 30-day window now, how many have gone
@@ -191,10 +193,21 @@ def _hours(a, b) -> Optional[float]:
     return (end - start).total_seconds() / 3600 if start and end else None
 
 
+def _during_monitoring(alert: dict) -> bool:
+    """Raised while the patient was being monitored. A sweep that forecasts
+    historical data raises alerts about discharges years old - nobody could
+    have acted on those, so they are not counted. Without a discharge date on
+    the alert, it counts."""
+    discharged = _as_date((alert.get("patient") or {}).get("discharge_date"))
+    raised = _as_date(alert.get("created_at"))
+    return discharged is None or raised is None or (raised - discharged).days <= MONITORING_DAYS + 7
+
+
 def _alerts(view, since: datetime) -> dict:
-    docs = list(view["clinical_alerts"].find(
+    docs = [d for d in view["clinical_alerts"].find(
         {"created_at": {"$gte": since.strftime("%Y-%m-%d %H:%M:%S")}},
-        {"_id": 0, "status": 1, "created_at": 1, "acknowledged_at": 1, "response.responded_at": 1}))
+        {"_id": 0, "status": 1, "created_at": 1, "acknowledged_at": 1, "response.responded_at": 1,
+         "patient.discharge_date": 1}) if _during_monitoring(d)]
     answered = [d for d in docs if d.get("status") == "responded"]
     acked = [d for d in docs if d.get("acknowledged_at") or d.get("status") == "responded"]
     return {
