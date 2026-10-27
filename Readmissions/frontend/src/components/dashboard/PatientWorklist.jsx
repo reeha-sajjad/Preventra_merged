@@ -221,6 +221,13 @@ function WorklistSkeleton() {
   );
 }
 
+// What the worklist's current score is made of, for the hover text: the
+// discharge score, then one re-score per monitoring week.
+const scoreHistory = (row) => {
+  const weeks = Math.max(0, (row.weeks_tracked || 1) - 1);
+  return `Latest score after ${weeks} week${weeks === 1 ? '' : 's'} of monitoring`;
+};
+
 export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
   const [patients, setPatients]   = useState([]);
   const [total, setTotal]         = useState(0);
@@ -451,10 +458,10 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
                     </span>
                     <RiskBadge riskBand={row.risk_band} size="sm" />
                   </div>
-                  <div className="mt-0.5 text-xs text-gray-400">
+                  <div className="mt-0.5 text-xs text-gray-500" title={scoreHistory(row)}>
                     {row.weeks_tracked > 1 && row.discharge_score != null
-                      ? `latest of ${row.weeks_tracked}; first was ${parseFloat(row.discharge_score).toFixed(1)}%`
-                      : 'at discharge'}
+                      ? `Now · was ${parseFloat(row.discharge_score).toFixed(1)}% at discharge`
+                      : 'At discharge'}
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
@@ -528,15 +535,14 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
                     <span className={`text-xl font-bold ${getScoreColor(row.risk_band)}`}>
                       {parseFloat(row.risk_score).toFixed(1)}%
                     </span>
-                    {/* Both numbers are discharge scores - the difference is
-                        WHICH admission, so labelling the baseline "at discharge"
-                        implied the headline number was not. */}
+                    {/* The headline is the latest weekly re-score; the line
+                        under it is where the patient started, at discharge. */}
                     {row.weeks_tracked > 1 && row.discharge_score != null ? (
-                      <div className="text-xs text-gray-400 mt-0.5">
-                        latest of {row.weeks_tracked}; first was {parseFloat(row.discharge_score).toFixed(1)}%
+                      <div className="text-xs text-gray-500 mt-0.5" title={scoreHistory(row)}>
+                        Now · was {parseFloat(row.discharge_score).toFixed(1)}% at discharge
                       </div>
                     ) : (
-                      <div className="text-xs text-gray-400 mt-0.5">at discharge</div>
+                      <div className="text-xs text-gray-500 mt-0.5">At discharge</div>
                     )}
                   </td>
                   <td className="px-6 py-3">
