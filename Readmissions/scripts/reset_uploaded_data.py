@@ -4,7 +4,8 @@ Remove everything one hospital's UPLOADS put in, for a clean demo or a fresh sta
 
 Only what came in through the Data page, the ingest API or a database pull is
 touched: the uploaded patients on the worklist, their scores, weekly records,
-care-team and alert records, the stored discharges and check-ins, the upload
+care-team and alert records, their patients' own check-ins, discharge plans and
+recorded outcomes, the stored discharges and check-ins, the upload
 history, and - unless kept - the hospital's Model Studio models and its saved
 file reading. The demo patients (MIMIC-...), the hospital itself, its staff
 accounts and the access log are left alone: the access log is the record of
@@ -42,6 +43,7 @@ def plan(db, hospital: str, keep_model: bool, keep_reading: bool) -> list:
     steps = [("patient_worklist", scored), ("risk_registry", scored), ("weekly_monitoring", scored),
              ("care_actions", mine), ("clinical_alerts", mine), ("alerts", mine), ("followups", mine),
              ("notifications", mine), ("risk_watch_seen", mine),
+             ("checkins", mine), ("discharge_plans", mine), ("readmission_outcomes", mine),
              ("ingest_stays", {"hospital_id": hospital}), ("ingest_weeks", {"hospital_id": hospital}),
              ("ingest_jobs", {"hospital_id": hospital}), ("ingest_batches", {"hospital_id": hospital}),
              ("ingest_raw", {"hospital_id": hospital}), ("ingest_drafts", {"hospital_id": hospital})]

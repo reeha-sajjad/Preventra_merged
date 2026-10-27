@@ -190,7 +190,7 @@ function Readmissions({ r }) {
       sub="Expected is the average discharge score - the model is calibrated, so a band’s scores are its expected rate. Every discharge with a known 30-day outcome, whatever the period above.">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Tile icon={Flag} label="Outcome known" value={o.known.toLocaleString()}
-          sub={`of ${r.past_30_days.toLocaleString()} discharges past their 30 days`} />
+          sub={`of ${r.past_30_days.toLocaleString()} discharges past their 30 days or already back`} />
         <Tile icon={Target} label="Observed" value={rate(o.observed_rate)} sub={`${o.readmitted} readmitted`}
           tone={o.ratio !== null && o.ratio > 1 ? 'red' : o.ratio !== null ? 'green' : 'gray'} />
         <Tile icon={Target} label="Expected" value={rate(o.expected_rate)} sub="from the discharge scores" />

@@ -171,3 +171,13 @@ def test_staying_in_touch_and_discharge_planning(main, world, clock):
     d = page["discharge_planning"]
     assert (d["discharges"], d["with_plan"], d["followup_booked"], d["complete"], d["with_needs"]) == (2, 1, 1, 0, 1)
     assert d["needs"] == [{"key": "transport", "label": "Can get to appointments", "count": 1}]
+
+
+def test_a_readmission_known_before_day_30_counts_in_the_denominator(main, world, clock):
+    """Known outcomes can never outnumber the discharges they are out of."""
+    clock(dt.date(2026, 4, 25))                                   # day 15 of A1-A4's 30
+    cm = as_user(main, world, "cm@a.test")
+    assert cm.post(f"/api/patients/{A1}/outcome",
+                   json={"readmitted": True, "readmit_date": "2026-04-20"}).status_code == 200
+    r = cm.get("/api/outcomes").json()["readmissions"]
+    assert r["overall"]["known"] == 1 and r["past_30_days"] == 1

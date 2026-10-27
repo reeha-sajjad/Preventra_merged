@@ -291,13 +291,14 @@ def _known_outcomes(db, view, batch: Optional[str], today) -> tuple:
     for d in db[COLLECTION].find(access.scope_query(scope), {"_id": 0}):
         known[(str(d["patient_id"]), d["discharge_date"])] = (
             float(d.get("discharge_score") or 0), d.get("discharge_band") or "", bool(d["readmitted"]), "care_team")
-    # Every discharge past its 30 days: the current ones on the worklist, and
-    # any older one whose outcome is known.
+    # Every discharge whose outcome could be known by now: the current ones on
+    # the worklist past their 30 days, and any with a known outcome - a
+    # readmission is known the day it happens, before the 30 days are up.
     closed = {(str(r["patient_id"]), str(r.get("discharge_date")))
               for r in (view["patient_worklist"].find(
                   {"batch_date": batch, "discharge_date": {"$lte": closed_before, "$gt": ""}},
                   {"_id": 0, "patient_id": 1, "discharge_date": 1}) if batch else [])}
-    closed |= {k for k in known if k[1] <= closed_before}
+    closed |= set(known)
     rows = [(pid, day, *values) for (pid, day), values in known.items()]
     return rows, len(closed)
 
