@@ -17,8 +17,8 @@ import CareCoordination from '../components/dashboard/CareCoordination';
 import ForecastPanel from '../components/dashboard/ForecastPanel';
 import DischargePlanCard from '../components/shared/DischargePlanCard';
 import OutcomeCard from '../components/shared/OutcomeCard';
-import { ArrowLeft, Calendar, AlertCircle, ListChecks, TrendingUp, CalendarClock, ChevronRight } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { ArrowLeft, Calendar, AlertCircle, ListChecks, CalendarClock, ChevronRight } from 'lucide-react';
+import WeeklyTrendPanel from '../components/dashboard/WeeklyTrendPanel';
 
 function PageSkeleton() {
   return (
@@ -59,7 +59,6 @@ export default function PatientDetail() {
   // insurers (api/access.py).
   const [summary, setSummary] = useState(null);
   const [patient, setPatient] = useState(null);
-  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -77,14 +76,6 @@ export default function PatientDetail() {
         return getPatientById(id).then((patientData) => {
           if (!live) return;
           setPatient(patientData);
-          let patientHistory = patientData.history || [];
-          if (patientHistory.length === 1) {
-            patientHistory = [
-              { week: "Previous", score: patientHistory[0].score },
-              patientHistory[0]
-            ];
-          }
-          setHistory(patientHistory);
         });
       })
       .then(() => { if (live) setLoading(false); })
@@ -262,43 +253,10 @@ export default function PatientDetail() {
         {/* Right Column: Chart & Actions */}
         <div className="lg:col-span-2 space-y-8">
           
-          {/* Score History */}
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-            <h2 className="text-xl font-semibold text-ns-navy mb-6 flex items-center space-x-2">
-              <TrendingUp className="text-gray-400" size={22} />
-              <span>Score History</span>
-            </h2>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={history} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                  <XAxis 
-                    dataKey="week" 
-                    tick={{fill: '#9ca3af', fontSize: 13}}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis 
-                    domain={[0, 100]}
-                    tick={{fill: '#9ca3af', fontSize: 13}}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="score" 
-                    stroke="#0F2A4A" 
-                    strokeWidth={3}
-                    dot={{ fill: '#0F2A4A', strokeWidth: 2, r: 4 }}
-                    activeDot={{ r: 6, fill: '#C0392B', strokeWidth: 0 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          {/* The weekly trend since discharge: one score per monitoring week,
+              with what to do now - including "no readings for N days, contact
+              the patient". The full page is one click away. */}
+          <WeeklyTrendPanel patientId={patient.id} compact />
 
           {/* Suggested Actions */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">

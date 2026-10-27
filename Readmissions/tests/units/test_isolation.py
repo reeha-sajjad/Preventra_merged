@@ -248,8 +248,22 @@ def test_score_history_is_the_weekly_series_for_a_monitored_patient(main, world)
         {"patient_id": A4, "week_number": w, "batch_date": LATEST, "risk_score": 30 + w * 2,
          "risk_band": "Low"} for w in (2, 0, 1)])
     body = as_user(main, world, "me@patient.test").get(f"/api/patients/{A4}").json()
-    assert body["history"] == [{"week": "Discharge", "score": 30.0}, {"week": "Wk 1", "score": 32.0},
-                               {"week": "Wk 2", "score": 34.0}]
+    assert body["history"] == [{"week": "Discharge", "date": "", "score": 30.0},
+                               {"week": "Wk 1", "date": "", "score": 32.0},
+                               {"week": "Wk 2", "date": "", "score": 34.0}]
+
+
+def test_a_discharge_with_no_weeks_since_is_one_point_not_loader_dates(main, world):
+    """One week in the series used to fall back to the risk registry, whose
+    dates are when a loader ran - the chart read "7/12, 7/14"."""
+    db = world["db"]
+    db["weekly_monitoring"].delete_many({"patient_id": A4})
+    db["weekly_monitoring"].insert_one({"patient_id": A4, "week_number": 0, "risk_score": 44.9,
+                                        "risk_band": "High", "week_date": "2026-10-15"})
+    db["risk_registry"].insert_many([{"patient_id": A4, "batch_date": "2026-07-12", "risk_score": 12.0},
+                                     {"patient_id": A4, "batch_date": "2026-07-14", "risk_score": 44.9}])
+    body = as_user(main, world, "me@patient.test").get(f"/api/patients/{A4}").json()
+    assert body["history"] == [{"week": "Discharge", "date": "2026-10-15", "score": 44.9}]
 
 
 def test_the_care_plan_follows_the_trend_not_just_the_band(main, world):

@@ -6,7 +6,7 @@ import TrendStatusBadge, { trendStatusConfig } from '../shared/TrendStatusBadge'
 import RiskBadge from '../shared/RiskBadge';
 import BulletList from '../shared/BulletList';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot, ReferenceLine,
 } from 'recharts';
 import {
   AlertCircle, ArrowUpRight, ArrowDownRight, Minus, ChevronRight, CalendarClock, Sparkles, Loader2,
@@ -53,10 +53,37 @@ function SourceTag({ source, className = '' }) {
   );
 }
 
+// A week without readings is drawn hollow: its score is only held from the
+// last readings, not measured.
 function TrendDot(props) {
   const { cx, cy, payload } = props;
   const color = BAND_DOT_COLOR[payload.risk_band] || '#0F2A4A';
-  return <Dot cx={cx} cy={cy} r={5} fill={color} stroke="#fff" strokeWidth={1.5} />;
+  return payload.observed === false
+    ? <Dot cx={cx} cy={cy} r={5} fill="#fff" stroke={color} strokeWidth={2} />
+    : <Dot cx={cx} cy={cy} r={5} fill={color} stroke="#fff" strokeWidth={1.5} />;
+}
+
+const weekDate = (iso) => (iso
+  ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  : '');
+
+// What one point is: which week, its date, the score and band, and whether it
+// was measured that week or held over.
+function TrendTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const w = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-md">
+      <div className="font-semibold text-gray-900">
+        {w.week_number === 0 ? 'At discharge' : `Week ${w.week_number}`}{w.week_date ? ` · ${weekDate(w.week_date)}` : ''}
+      </div>
+      <div className="mt-0.5 text-gray-700">Risk {Number(w.risk_score).toFixed(1)}% · {w.risk_band}</div>
+      {w.week_number > 0 && w.observed === false && (
+        <div className="mt-0.5 text-gray-500">No readings this week - score held</div>
+      )}
+      {w.red_flags?.length > 0 && <div className="mt-0.5 font-semibold text-red-700">Red flag: {w.red_flags.join(', ')}</div>}
+    </div>
+  );
 }
 
 // A week with no readings shows no change of its own: the score is only held.
@@ -523,17 +550,29 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
       )}
 
       {/* Chart */}
-      <div className={compact ? 'h-32 w-full mb-4' : 'h-64 w-full mb-6'}>
+      <div className={compact ? 'h-44 w-full mb-2' : 'h-64 w-full mb-2'}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={trend.weeks} margin={{ top: 5, right: 15, left: -20, bottom: 5 }}>
+          <LineChart data={trend.weeks} margin={{ top: 5, right: 52, left: -20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-            <XAxis dataKey="week_label" tick={{ fill: '#9ca3af', fontSize: 12 }} axisLine={false} tickLine={false} />
-            <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 12 }} axisLine={false} tickLine={false} />
-            <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+            <XAxis dataKey="week_label" tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false}
+              padding={{ left: 12, right: 12 }} />
+            <YAxis domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
+            {/* Where the bands start (fixed product bands: 20% Medium, 40% High). */}
+            <ReferenceLine y={40} stroke="#C0392B" strokeDasharray="4 4" strokeOpacity={0.5}
+              label={{ value: 'High', position: 'right', fill: '#b91c1c', fontSize: 11 }} />
+            <ReferenceLine y={20} stroke="#c58700" strokeDasharray="4 4" strokeOpacity={0.5}
+              label={{ value: 'Medium', position: 'right', fill: '#92400e', fontSize: 11 }} />
+            <Tooltip content={<TrendTooltip />} />
             <Line type="monotone" dataKey="risk_score" stroke="#0F2A4A" strokeWidth={2.5} dot={<TrendDot />} activeDot={{ r: 7 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
+      <p className={`text-xs text-gray-500 ${compact ? 'mb-4' : 'mb-6'}`}>
+        {weekly ? (trend.weeks.length > 1
+          ? `Discharge ${weekDate(trend.weeks[0].week_date)}, then one score per week since. Hollow points are weeks with no readings.`
+          : `Discharge score only - no weekly readings since ${weekDate(trend.weeks[0]?.week_date)}.`)
+          : 'One point per scored admission.'}
+      </p>
 
       {/* Per-week breakdown */}
       <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
