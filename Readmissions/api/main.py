@@ -17,7 +17,7 @@ from fastapi import (Body, Depends, FastAPI, File, Form, Header, HTTPException, 
                      Request, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import AutoReconnect, ServerSelectionTimeoutError
 
@@ -1436,6 +1436,10 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
             "rapid_return": False,
             "drivers": drivers,
             "sources": sources,
+            # What the patient or caretaker sent with the check-in (api/checkins.py).
+            "reported_by": doc.get("reported_by"),
+            "remarks": doc.get("remarks"),
+            "custom_answers": doc.get("custom_answers") or [],
         })
         if observed:
             last = (score, wk, days)
@@ -1566,8 +1570,8 @@ def get_patient_trend(patient_id: str, request: Request):
         .sort("week_number", 1)
     )
     if weekly_docs:
-        return _hide_costs(request, _with_week_alerts(
-            request, patient_id, _weekly_trend_response(patient_id, weekly_docs)))
+        return _hide_costs(request, _hide_private_checkin(request, _with_week_alerts(
+            request, patient_id, _weekly_trend_response(patient_id, weekly_docs))))
 
     registry_docs = list(
         db["risk_registry"]
@@ -1709,6 +1713,17 @@ class AIInsightsRequest(BaseModel):
     # the level - and "55% and falling" deserves different advice from
     # "55% and climbing".
     trend_status: Optional[str] = None
+
+
+def _hide_private_checkin(request: Request, body: dict) -> dict:
+    """A caretaker sees the remarks and extra answers they sent themselves, not
+    the ones the patient sent: what the patient wrote to the care team is theirs
+    to share, the same reasoning as the discharge plan."""
+    if request.state.user["role"] != "caretaker":
+        return body
+    return {**body, "weeks": [
+        w if w.get("reported_by") == "caretaker" else {**w, "remarks": None, "custom_answers": []}
+        for w in body.get("weeks") or []]}
 
 
 def _hide_costs(request: Request, body: dict) -> dict:
@@ -2992,6 +3007,8 @@ def undo_medicines_given(entry_id: str, request: Request, patient: Optional[str]
 # Weekly check-in - a patient or their caretaker sends this week's readings (api/checkins.py)
 class CheckIn(BaseModel):
     answers: dict
+    custom_answers: dict = Field(default_factory=dict)   # the care team's own questions, by id
+    remarks: Optional[str] = Field(default=None, max_length=2000)
     patient_id: Optional[str] = None           # a caretaker: which of their people
 
 
@@ -3004,7 +3021,8 @@ def my_checkin(request: Request, patient: Optional[str] = None):
 @app.post("/api/my-home/checkin", status_code=201)
 def send_checkin(body: CheckIn, request: Request):
     """This week's readings, scored at once like any other feed's."""
-    return checkins.submit(db, request.state.user, _scope(request), body.answers, body.patient_id)
+    return checkins.submit(db, request.state.user, _scope(request), body.answers, body.patient_id,
+                           custom_answers=body.custom_answers, remarks=body.remarks)
 
 
 @app.get("/api/patients/{patient_id}/medicines-given")
@@ -3224,6 +3242,15 @@ class SocialNeeds(BaseModel):
     answers: dict
 
 
+class PlanItem(BaseModel):
+    label: str
+
+
+class CheckinQuestion(BaseModel):
+    label: str
+    kind: str = "yes_no"
+
+
 def _require_care_team_layer(request: Request, patient_id: str) -> None:
     """The clinical layer, minus a caretaker: what a patient can afford or eat
     is theirs to share (api/discharge_plan.py)."""
@@ -3246,6 +3273,27 @@ def tick_discharge_checklist(patient_id: str, body: ChecklistTick, request: Requ
 @app.post("/api/patients/{patient_id}/discharge-plan/social")
 def record_social_needs(patient_id: str, body: SocialNeeds, request: Request):
     return discharge_plan.record_social(db, request.state.user, _scope(request), patient_id, body.answers)
+
+
+@app.post("/api/patients/{patient_id}/discharge-plan/items")
+def add_plan_item(patient_id: str, body: PlanItem, request: Request):
+    return discharge_plan.add_item(db, request.state.user, _scope(request), patient_id, body.label)
+
+
+@app.delete("/api/patients/{patient_id}/discharge-plan/items/{item_id}")
+def remove_plan_item(patient_id: str, item_id: str, request: Request):
+    return discharge_plan.remove_item(db, request.state.user, _scope(request), patient_id, item_id)
+
+
+@app.post("/api/patients/{patient_id}/discharge-plan/checkin-questions")
+def add_checkin_question(patient_id: str, body: CheckinQuestion, request: Request):
+    return discharge_plan.add_question(db, request.state.user, _scope(request), patient_id,
+                                       body.label, body.kind)
+
+
+@app.delete("/api/patients/{patient_id}/discharge-plan/checkin-questions/{question_id}")
+def remove_checkin_question(patient_id: str, question_id: str, request: Request):
+    return discharge_plan.remove_question(db, request.state.user, _scope(request), patient_id, question_id)
 
 
 # ---------------------------------------------------------------------------

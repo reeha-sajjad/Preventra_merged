@@ -161,3 +161,149 @@ def test_an_ingested_patients_check_in_joins_the_ingested_week(main, world, toke
     week = db["weekly_monitoring"].find_one({"patient_id": pid, "week_number": 2})
     assert week["source"] == "ingest" and week["reported_by"] == "patient"
     assert week["monitoring"]["weight_change_kg"] == 1.8                    # against 84.2 at discharge
+
+
+# ------------------------------------------------------------ remarks and the care team's own questions
+BASIC = {"orthopnoea_pillows": 2, "ankle_swelling": "mild"}
+
+
+def ask(main, world):
+    """The case manager adds a yes/no and a short-answer question for A4;
+    returns their ids."""
+    cm = as_user(main, world, "cm@a.test")
+    cm.post(f"/api/patients/{A4}/discharge-plan/checkin-questions", json={"label": "Any dizziness?", "kind": "yes_no"})
+    plan = cm.post(f"/api/patients/{A4}/discharge-plan/checkin-questions",
+                   json={"label": "How did you sleep?", "kind": "text"}).json()
+    return [q["id"] for q in plan["checkin_questions"]]
+
+
+def test_custom_questions_follow_the_built_in_ones(main, world, a4):
+    yes_no, text = ask(main, world)
+    me = as_user(main, world, "me@patient.test")
+    form = me.get("/api/my-home/checkin").json()
+    assert form["custom_questions"] == [
+        {"key": yes_no, "label": "Any dizziness?", "kind": "choice", "custom": True,
+         "options": [{"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"}]},
+        {"key": text, "label": "How did you sleep?", "kind": "text", "custom": True, "max": 500}]
+    assert form["remarks_max"] == 500
+    assert form["questions"][0]["key"] == "orthopnoea_pillows" and not any(q.get("custom") for q in form["questions"])
+    assert me.post("/api/my-home/checkin", json={"answers": BASIC}).status_code == 201
+    done = me.get("/api/my-home/checkin").json()
+    assert done["done_this_week"] and done["custom_questions"] == []
+
+
+def test_remarks_and_custom_answers_land_on_the_week_and_the_log(main, world, a4):
+    yes_no, text = ask(main, world)
+    me = as_user(main, world, "me@patient.test")
+    r = me.post("/api/my-home/checkin", json={"answers": BASIC, "remarks": " Dizzy on stairs ",
+                                              "custom_answers": {yes_no: "yes", text: " fine "}})
+    assert r.status_code == 201, r.text
+    expected = [{"id": yes_no, "label": "Any dizziness?", "kind": "yes_no", "answer": "yes"},
+                {"id": text, "label": "How did you sleep?", "kind": "text", "answer": "fine"}]
+    week = a4["weekly_monitoring"].find_one({"patient_id": A4, "week_number": 2})
+    assert week["remarks"] == "Dizzy on stairs" and week["custom_answers"] == expected
+    log = a4[checkins.COLLECTION].find_one({"patient_id": A4})
+    assert log["remarks"] == "Dizzy on stairs" and log["custom_answers"] == expected
+    # Not scored: the same answers without the extras give the same week.
+    a4["weekly_monitoring"].delete_many({"patient_id": A4, "week_number": 2})
+    a4[checkins.COLLECTION].delete_many({})
+    me.post("/api/my-home/checkin", json={"answers": BASIC})
+    plain = a4["weekly_monitoring"].find_one({"patient_id": A4, "week_number": 2})
+    assert plain["risk_score"] == week["risk_score"] and plain["driver_1"] == week["driver_1"]
+    assert "remarks" not in plain and "custom_answers" not in plain
+
+    a4["weekly_monitoring"].update_one({"_id": plain["_id"]}, {"$set": {"remarks": "Dizzy on stairs",
+                                                                       "custom_answers": expected}})
+    a4["care_actions"].update_one({"patient_id": A4}, {"$set": {"assigned_doctor_id": "DR-A"}})
+    weeks = as_user(main, world, "doc.a@a.test").get(f"/api/patients/{A4}/trend").json()["weeks"]
+    wk2 = next(w for w in weeks if w["week_number"] == 2)
+    assert wk2["remarks"] == "Dizzy on stairs" and wk2["custom_answers"] == expected
+    assert wk2["reported_by"] == "patient"
+    assert next(w for w in weeks if w["week_number"] == 0)["custom_answers"] == []
+
+
+@pytest.mark.parametrize("body", [
+    {"answers": {}, "remarks": "Only a remark"},
+    {"answers": {}, "custom_answers": {"$yes": "yes"}},
+    {"answers": BASIC, "custom_answers": {"$yes": "maybe"}},
+    {"answers": BASIC, "custom_answers": {"$text": "x" * 501}},
+    {"answers": BASIC, "custom_answers": {"$text": {"a": 1}}},
+    {"answers": BASIC, "custom_answers": {"$text": 7}},
+    {"answers": BASIC, "remarks": "x" * 501},
+])
+def test_extras_are_checked(main, world, a4, body):
+    yes_no, text = ask(main, world)
+    body = {**body, "custom_answers": {k.replace("$yes", yes_no).replace("$text", text): v
+                                       for k, v in body.get("custom_answers", {}).items()}}
+    r = as_user(main, world, "me@patient.test").post("/api/my-home/checkin", json=body)
+    assert r.status_code == 422, r.text
+    assert a4[checkins.COLLECTION].count_documents({}) == 0
+    assert a4["weekly_monitoring"].count_documents({"patient_id": A4, "week_number": 2}) == 0
+
+
+def test_an_answer_to_a_removed_question_is_dropped_not_refused(main, world, a4):
+    yes_no, _ = ask(main, world)
+    me = as_user(main, world, "me@patient.test")
+    assert [q["key"] for q in me.get("/api/my-home/checkin").json()["custom_questions"]][0] == yes_no
+    as_user(main, world, "cm@a.test").delete(f"/api/patients/{A4}/discharge-plan/checkin-questions/{yes_no}")
+    r = me.post("/api/my-home/checkin", json={"answers": BASIC, "custom_answers": {yes_no: "yes"}})
+    assert r.status_code == 201, r.text
+    week = a4["weekly_monitoring"].find_one({"patient_id": A4, "week_number": 2})
+    log = a4[checkins.COLLECTION].find_one({"patient_id": A4})
+    assert not week.get("custom_answers") and not log.get("custom_answers")
+    assert a4[checkins.COLLECTION].count_documents({}) == 1
+
+
+def test_a_removed_question_is_kept_on_past_weeks(main, world, a4):
+    yes_no, _ = ask(main, world)
+    me = as_user(main, world, "me@patient.test")
+    me.post("/api/my-home/checkin", json={"answers": BASIC, "custom_answers": {yes_no: "no"}})
+    as_user(main, world, "cm@a.test").delete(f"/api/patients/{A4}/discharge-plan/checkin-questions/{yes_no}")
+    week = a4["weekly_monitoring"].find_one({"patient_id": A4, "week_number": 2})
+    assert week["custom_answers"] == [{"id": yes_no, "label": "Any dizziness?", "kind": "yes_no", "answer": "no"}]
+    assert [q["label"] for q in checkins.custom_questions_for(a4, A4)] == ["How did you sleep?"]
+
+
+def test_an_ingested_patients_remarks_survive_rescoring(main, world, token, monkeypatch):
+    from api import scoring_service
+    from tests.units.test_ingest_scoring import send
+    db = world["db"]
+    send(main, token, bundle(disch="2026-10-01T12:00"))
+    assert worker.run(db, once=True) == 1
+    pid = db["patient_worklist"].find_one({"source": "ingest"})["patient_id"]
+    me_id = world["ids"]["me@patient.test"]
+    db["care_actions"].update_many({"patient_account_id": me_id}, {"$unset": {"patient_account_id": ""}})
+    db["care_actions"].update_one({"patient_id": pid}, {"$set": {"patient_account_id": me_id}})
+    monkeypatch.setattr(scheduler, "today", lambda: dt.date(2026, 10, 9))
+
+    r = as_user(main, world, "me@patient.test").post(
+        "/api/my-home/checkin", json={"answers": {"orthopnoea_pillows": 2}, "remarks": "Dizzy on stairs"})
+    assert r.status_code == 201, r.text
+    assert db["ingest_weeks"].find_one({"patient_id": pid, "week_number": 2})["remarks"] == "Dizzy on stairs"
+    answers = [{"id": "cq_1", "label": "Any dizziness?", "kind": "yes_no", "answer": "yes"}]
+    db["ingest_weeks"].update_one({"patient_id": pid, "week_number": 2}, {"$set": {"custom_answers": answers}})
+    hospital = db["ingest_weeks"].find_one({"patient_id": pid, "week_number": 2})["hospital_id"]
+    scoring_service.score_weeks(db, hospital, [pid])
+    week = db["weekly_monitoring"].find_one({"patient_id": pid, "week_number": 2})
+    assert week["remarks"] == "Dizzy on stairs" and week["custom_answers"] == answers
+    assert "note" not in week
+
+
+def test_a_caretakers_extras_and_what_they_see(main, world, a4):
+    carer = as_user(main, world, "carer@home.test")
+    r = carer.post("/api/my-home/checkin", json={"answers": {"ankle_swelling": "mild"}, "patient_id": A4,
+                                                 "remarks": "She was tired this week"})
+    assert r.status_code == 201, r.text
+    assert a4[checkins.COLLECTION].find_one({"patient_id": A4})["by_role"] == "caretaker"
+    assert a4["weekly_monitoring"].find_one({"patient_id": A4, "week_number": 2})["remarks"] == "She was tired this week"
+    a4["weekly_monitoring"].insert_one({
+        "patient_id": A4, "week_number": 1, "days_after_discharge": 7, "week_date": "2026-10-08",
+        "risk_score": 30.0, "risk_band": "Medium", "observed": True, "red_flags": [], "reported_by": "patient",
+        "remarks": "Private to the patient",
+        "custom_answers": [{"id": "cq_1", "label": "Any dizziness?", "kind": "yes_no", "answer": "yes"}]})
+    weeks = {w["week_number"]: w for w in carer.get(f"/api/patients/{A4}/trend").json()["weeks"]}
+    assert weeks[2]["remarks"] == "She was tired this week" and weeks[2]["reported_by"] == "caretaker"
+    assert weeks[1]["remarks"] is None and weeks[1]["custom_answers"] == []
+    a4["care_actions"].update_one({"patient_id": A4}, {"$set": {"assigned_doctor_id": "DR-A"}})
+    seen = as_user(main, world, "doc.a@a.test").get(f"/api/patients/{A4}/trend").json()["weeks"]
+    assert next(w for w in seen if w["week_number"] == 1)["remarks"] == "Private to the patient"

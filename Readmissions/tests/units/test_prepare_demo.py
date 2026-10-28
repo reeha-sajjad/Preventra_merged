@@ -109,7 +109,8 @@ def test_running_again_resets_the_demo_rather_than_moving_twice(db):
     db["weekly_monitoring"].insert_one({"patient_id": "MIMIC-1", "week_number": 1, "reported_by": "patient",
                                         "week_date": "2026-10-27"})
     db["checkins"].insert_one({"patient_id": "MIMIC-1", "discharge_date": "2026-10-24", "week_number": 1})
-    db["discharge_plans"].insert_one({"patient_id": "MIMIC-3", "discharge_date": "2026-10-15"})
+    db["discharge_plans"].insert_one({"patient_id": "MIMIC-3", "discharge_date": "2026-10-15",
+                                      "custom_items": [{"id": "ci_00000001", "label": "Oxygen delivered"}]})
     db["clinical_alerts"].insert_one({"alert_id": "NEW", "patient_id": "MIMIC-1",
                                       "created_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
     prepare_demo.prepare(db, HID, TODAY, write=True)

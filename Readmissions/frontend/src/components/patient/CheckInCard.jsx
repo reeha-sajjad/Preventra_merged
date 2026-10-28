@@ -11,11 +11,15 @@ const formatDay = (iso) => (iso
  * questions, chosen by the patient's monitoring plan, sent once a week for the
  * 30 days after discharge. A caretaker answers for the person they care for
  * (patientId). The answers are scored like any other feed's; the patient never
- * sees a score - a red flag gets the safety advice instead.
+ * sees a score - a red flag gets the safety advice instead. After the usual
+ * questions come any the care team added for this patient, then a free-text
+ * remark; neither is scored, and at least one usual question must be answered.
  */
 export default function CheckInCard({ patientId = null, caretaker = false, patientName = null }) {
   const [data, setData] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [customAnswers, setCustomAnswers] = useState({});
+  const [remarks, setRemarks] = useState('');
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -32,7 +36,12 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
 
   const who = caretaker && patientName ? patientName.split(' ')[0] : null;
   const set = (key, value) => setAnswers((a) => ({ ...a, [key]: value }));
-  const answered = Object.values(answers).filter((v) => v !== '' && v !== undefined && v !== null).length;
+  const filled = (v) => v !== '' && v !== undefined && v !== null;
+  const answered = Object.values(answers).filter(filled).length;
+  const custom = data.custom_questions || [];
+  const customSet = (key, value) => setCustomAnswers((a) => ({ ...a, [key]: value }));
+  const extras = remarks.trim() !== '' || Object.values(customAnswers).some((v) => filled(v) && String(v).trim() !== '');
+  const reset = () => { setAnswers({}); setCustomAnswers({}); setRemarks(''); };
   const main = data.questions.filter((q) => !q.monitor);
   const monitor = data.questions.filter((q) => q.monitor);
 
@@ -40,8 +49,10 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      const out = await sendCheckIn(answers, patientId);
-      setResult(out); setData(out); setStarted(false); setAnswers({});
+      const asked = new Set(custom.map((q) => q.key));
+      const sendCustom = Object.fromEntries(Object.entries(customAnswers).filter(([k]) => asked.has(k)));
+      const out = await sendCheckIn(answers, patientId, sendCustom, remarks.trim() || null);
+      setResult(out); setData(out); setStarted(false); reset();
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
@@ -115,13 +126,36 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
               </div>
             </details>
           )}
+          {custom.length > 0 && (
+            <div className="space-y-5">
+              <h3 className="text-sm font-semibold text-gray-900">From your care team</h3>
+              {custom.map((q) => (
+                <Question key={q.key} q={q} value={customAnswers[q.key]} onChange={(v) => customSet(q.key, v)} />
+              ))}
+            </div>
+          )}
+          <div>
+            <label htmlFor="checkin-remarks" className="text-sm font-medium text-gray-900">
+              Anything else you’d like your care team to know? (optional)
+            </label>
+            <textarea id="checkin-remarks" rows={3} maxLength={data.remarks_max || 500} value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-gray-500">
+              <span>Not for emergencies - if you feel much worse, call 911.</span>
+              <span>{remarks.length}/{data.remarks_max || 500}</span>
+            </div>
+          </div>
+          {answered === 0 && extras && (
+            <p className="text-xs text-gray-500">Answer at least one of the questions above to send.</p>
+          )}
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <div className="flex flex-wrap items-center gap-3">
             <button type="submit" disabled={busy || answered === 0}
               className="inline-flex items-center gap-2 rounded-lg bg-ns-navy px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
               {busy && <Loader2 size={14} className="animate-spin" />} Send to the care team
             </button>
-            <button type="button" onClick={() => { setStarted(false); setAnswers({}); setError(null); }}
+            <button type="button" onClick={() => { setStarted(false); reset(); setError(null); }}
               className="text-sm font-medium text-gray-600 hover:text-gray-900">Cancel</button>
             <span className="text-xs text-gray-500">{answered} answered</span>
           </div>
@@ -153,6 +187,15 @@ function Question({ q, value, onChange }) {
           })}
         </div>
       </fieldset>
+    );
+  }
+  if (q.kind === 'text') {
+    return (
+      <div>
+        <label htmlFor={id} className="text-sm font-medium text-gray-900">{q.label}</label>
+        <input id={id} type="text" maxLength={q.max} value={value ?? ''} onChange={(e) => onChange(e.target.value)}
+          className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-2 focus:ring-blue-200" />
+      </div>
     );
   }
   return (

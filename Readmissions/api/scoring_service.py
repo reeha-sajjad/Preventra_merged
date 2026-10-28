@@ -500,7 +500,11 @@ def scored_weeks(db, hospital_id: str, stay: dict, week0: dict) -> list:
                      "encounter_key": stay["encounter_key"],
                      # A patient's or caretaker's own check-in (api/checkins.py).
                      **({"reported_by": wk["reported_by"]} if wk.get("reported_by") else {}),
-                     **({"note": wk["note"]} if wk.get("note") else {})})
+                     **({"note": wk["note"]} if wk.get("note") else {}),
+                     # What the patient wrote and the care team's own questions
+                     # (api/checkins.py) - theirs, not the hospital feed's `note`.
+                     **({"remarks": wk["remarks"]} if wk.get("remarks") else {}),
+                     **({"custom_answers": wk["custom_answers"]} if wk.get("custom_answers") else {})})
         prev_adj, prev_score = adj, score
     return docs
 

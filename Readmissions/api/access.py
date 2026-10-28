@@ -104,6 +104,10 @@ ACTIONS = {
     # expected. Counts about the whole hospital and no money, so the roles that
     # run its care - a case manager included.
     "view_outcomes":  ("superadmin", "hospital_admin", "case_manager"),
+    # Adding or removing a patient's own checklist items and check-in questions
+    # (api/discharge_plan.py): the doctor and case manager who plan their care.
+    # Nurses and hospital admins tick but do not author.
+    "customise_plan": ("superadmin", "doctor", "case_manager"),
 }
 
 # ------------------------------------------------ overview and clinical layer

@@ -189,6 +189,8 @@ def test_the_summary_counts_only_the_accounts_patients(main, world):
 @pytest.mark.parametrize("path, body", [
     ("/api/patients/{pid}/notes", {"text": "hello", "author": "x"}),
     ("/api/patients/{pid}/assign", {"coordinator_name": "x"}),
+    ("/api/patients/{pid}/discharge-plan/items", {"label": "hello there"}),
+    ("/api/patients/{pid}/discharge-plan/checkin-questions", {"label": "hello there", "kind": "yes_no"}),
     ("/api/ai-insights", {"patient_id": "{pid}", "risk_score": 50, "risk_band": "Low"}),
     ("/api/week-narrative", {"patient_id": "{pid}", "week_number": 1, "risk_score": 50,
                              "risk_band": "Low"}),

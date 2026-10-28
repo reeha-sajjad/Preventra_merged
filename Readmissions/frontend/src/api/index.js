@@ -171,13 +171,25 @@ const RealAPI = {
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
   // The weekly check-in a patient or caretaker sends (api/checkins.py).
   getCheckIn: (patient) => apiFetch(`/api/my-home/checkin${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
-  sendCheckIn: (answers, patient) => apiFetch('/api/my-home/checkin', json({ answers, patient_id: patient || null })),
+  sendCheckIn: (answers, patient, customAnswers = {}, remarks = null) =>
+    apiFetch('/api/my-home/checkin', json({ answers, patient_id: patient || null, custom_answers: customAnswers, remarks })),
   // The discharge plan: checklist and social needs (api/discharge_plan.py).
   getDischargePlan: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan`),
   tickDischargeChecklist: (id, item, done) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/checklist`, json({ item, done })),
   recordSocialNeeds: (id, answers) =>
     apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/social`, json({ answers })),
+  // A patient's own checklist items and check-in questions (api/discharge_plan.py).
+  addPlanItem: (id, label) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/items`, json({ label })),
+  removePlanItem: (id, itemId) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/items/${encodeURIComponent(itemId)}`,
+      { method: 'DELETE' }),
+  addCheckinQuestion: (id, label, kind) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/checkin-questions`, json({ label, kind })),
+  removeCheckinQuestion: (id, questionId) =>
+    apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan/checkin-questions/${encodeURIComponent(questionId)}`,
+      { method: 'DELETE' }),
   // Outcomes (api/outcomes.py): the page, and one patient's 30-day outcome.
   getOutcomes: (days = 30) => apiFetch(`/api/outcomes?days=${days}`),
   getPatientOutcome: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/outcome`),
@@ -536,6 +548,10 @@ export const sendCheckIn         = realOnly(RealAPI.sendCheckIn);
 export const getDischargePlan    = realOnly(RealAPI.getDischargePlan);
 export const tickDischargeChecklist = realOnly(RealAPI.tickDischargeChecklist);
 export const recordSocialNeeds   = realOnly(RealAPI.recordSocialNeeds);
+export const addPlanItem         = realOnly(RealAPI.addPlanItem);
+export const removePlanItem      = realOnly(RealAPI.removePlanItem);
+export const addCheckinQuestion  = realOnly(RealAPI.addCheckinQuestion);
+export const removeCheckinQuestion = realOnly(RealAPI.removeCheckinQuestion);
 export const getOutcomes         = realOnly(RealAPI.getOutcomes);
 export const getPatientOutcome   = realOnly(RealAPI.getPatientOutcome);
 export const recordPatientOutcome = realOnly(RealAPI.recordPatientOutcome);

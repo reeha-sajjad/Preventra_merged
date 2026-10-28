@@ -44,9 +44,21 @@ hospital admin or insurer gives a reason first and a pharmacy never does.
 Not a caretaker: what a patient can afford or eat is theirs to share, as the
 caretaker's bell already treats cost (api/caretaker_home.py). Changes are for
 the roles that edit patients (access.ACTIONS edit_patients).
+THE PATIENT'S OWN ITEMS AND QUESTIONS
+-------------------------------------
+The doctor or case manager can add items to one patient's checklist ("oxygen
+delivered at home") and questions to that patient's weekly check-in
+(api/checkins.py), as yes/no or a short answer. They belong to this patient's
+plan for this discharge only: no hospital-wide template, and a new discharge
+starts clean. Ticks of their own items sit in the same `checklist` map as the
+built-in ones, so they count towards "plan complete" on the Outcomes page. A
+check-in answer is kept with the question's wording at the time (api/checkins
+.py), so removing a question never orphans the answers already given. Adding
+and removing is access.ACTIONS customise_plan; ticking stays with edit_patients.
 """
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -56,6 +68,13 @@ from api import access
 from api.db_utils import get_latest_batch_date
 
 COLLECTION = "discharge_plans"
+
+# What the care team may add for one patient.
+MAX_CUSTOM_ITEMS = 10
+MAX_CHECKIN_QUESTIONS = 5
+MIN_LABEL = 3
+MAX_LABEL = 150
+QUESTION_KINDS = ("yes_no", "text")
 
 # The 7-day follow-up groups - the simulator's EARLY_FOLLOWUP_GROUPS
 # (scripts/simulate_weekly_monitoring.py). Twin copies: edit together.
@@ -201,10 +220,12 @@ def plan(db, user: dict, patient_id: str) -> dict:
     discharge = str(row.get("discharge_date") or "")
     doc = db[COLLECTION].find_one({"patient_id": patient_id, "discharge_date": discharge}) or {}
     return _shape(patient_id, row, doc, _facts(db, patient_id),
-                  user["role"] in access.ACTIONS["edit_patients"])
+                  user["role"] in access.ACTIONS["edit_patients"],
+                  user["role"] in access.ACTIONS["customise_plan"])
 
 
-def _shape(patient_id: str, row: dict, doc: dict, facts: dict, can_edit: bool) -> dict:
+def _shape(patient_id: str, row: dict, doc: dict, facts: dict, can_edit: bool,
+           can_customise: bool = False) -> dict:
     band = str(row.get("risk_band") or "Low").title()
     group = row.get("clinical_group") or "general"
     social = doc.get("social") or {}
@@ -223,6 +244,17 @@ def _shape(patient_id: str, row: dict, doc: dict, facts: dict, can_edit: bool) -
             "by": (tick.get("by") or {}).get("name") if tick.get("done") else None,
             "at": _iso(tick.get("at")) if tick.get("done") else None,
             "can_toggle": can_edit and key not in AUTOMATIC_ONLY and not auto,
+            "custom": False, "can_remove": False,
+        })
+    for c in doc.get("custom_items") or []:
+        tick = ticks.get(c["id"]) or {}
+        done = bool(tick.get("done"))
+        items.append({
+            "key": c["id"], "label": c["label"], "hint": None, "done": done, "auto": False,
+            "by": (tick.get("by") or {}).get("name") if done else None,
+            "at": _iso(tick.get("at")) if done else None,
+            "can_toggle": can_edit, "custom": True,
+            "added_by": (c.get("by") or {}).get("name"), "can_remove": can_customise,
         })
     return {
         "patient_id": patient_id, "discharge_date": row.get("discharge_date"), "band": band,
@@ -237,7 +269,11 @@ def _shape(patient_id: str, row: dict, doc: dict, facts: dict, can_edit: bool) -
                            + [{"value": UNKNOWN, "label": "Not asked / prefers not to say"}]}
                           for k, (label, opts, _, _) in SOCIAL.items()],
         },
-        "can_edit": can_edit,
+        "checkin_questions": [{"id": q["id"], "label": q["label"], "kind": q["kind"],
+                               "added_by": (q.get("by") or {}).get("name"), "at": _iso(q.get("at"))}
+                              for q in doc.get("checkin_questions") or []],
+        "can_edit": can_edit, "can_customise": can_customise,
+        "limits": {"items": MAX_CUSTOM_ITEMS, "questions": MAX_CHECKIN_QUESTIONS, "label": MAX_LABEL},
     }
 
 
@@ -251,14 +287,15 @@ def _editable(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
 def tick(db, user: dict, scope: Optional[list], patient_id: str, item: str, done: bool) -> dict:
     patient_id = str(patient_id)
     row = _editable(db, user, scope, patient_id)
-    if item not in LABELS:
+    discharge = str(row.get("discharge_date") or "")
+    own = _own_doc(db, patient_id, row)
+    if item not in LABELS and item not in {c["id"] for c in own.get("custom_items") or []}:
         raise HTTPException(status_code=422, detail="Not a checklist item")
     if item in AUTOMATIC_ONLY:
         raise HTTPException(status_code=422, detail="This one ticks itself when the social needs are recorded")
     if not done and _facts(db, patient_id).get(item):
         raise HTTPException(status_code=409, detail="This is on file, so it stays ticked")
     ensure_indexes(db)
-    discharge = str(row.get("discharge_date") or "")
     db[COLLECTION].update_one(
         {"patient_id": patient_id, "discharge_date": discharge},
         {"$set": {f"checklist.{item}": {"done": bool(done), "by": _who(user), "at": _now()},
@@ -291,6 +328,118 @@ def record_social(db, user: dict, scope: Optional[list], patient_id: str, answer
          "$setOnInsert": {"created_at": _now()}},
         upsert=True)
     return plan(db, user, patient_id)
+
+
+# ------------------------------------------------------------ the patient's own
+def _label(text) -> str:
+    label = " ".join(str(text or "").split())
+    if len(label) < MIN_LABEL:
+        raise HTTPException(status_code=422, detail="Write a few words")
+    if len(label) > MAX_LABEL:
+        raise HTTPException(status_code=422, detail=f"Keep it under {MAX_LABEL} characters")
+    return label
+
+
+def _customisable(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
+    access.require_patient(scope, patient_id)
+    access.require(user, "customise_plan")
+    return _discharge(db, patient_id)
+
+
+def _own_doc(db, patient_id: str, row: dict) -> dict:
+    return db[COLLECTION].find_one({"patient_id": patient_id,
+                                    "discharge_date": str(row.get("discharge_date") or "")}) or {}
+
+
+def _stamped(db, patient_id: str) -> dict:
+    return {"hospital_id": _hospital(db, patient_id), "updated_at": _now()}
+
+
+def add_item(db, user: dict, scope: Optional[list], patient_id: str, label: str) -> dict:
+    patient_id = str(patient_id)
+    row = _customisable(db, user, scope, patient_id)
+    label = _label(label)
+    doc = _own_doc(db, patient_id, row)
+    have = doc.get("custom_items") or []
+    if len(have) >= MAX_CUSTOM_ITEMS:
+        raise HTTPException(status_code=409,
+                            detail=f"This patient already has {MAX_CUSTOM_ITEMS} items of their own")
+    band = str(row.get("risk_band") or "Low").title()
+    days, _ = followup_days(row.get("clinical_group") or "general", band, doc.get("social") or {})
+    taken = {c["label"].lower() for c in have} | {t.format(days=days).lower() for t in LABELS.values()}
+    if label.lower() in taken:
+        raise HTTPException(status_code=409, detail="That item is already on the checklist")
+    ensure_indexes(db)
+    item = {"id": "ci_" + secrets.token_hex(4), "label": label, "by": _who(user), "at": _now()}
+    db[COLLECTION].update_one(
+        {"patient_id": patient_id, "discharge_date": str(row.get("discharge_date") or "")},
+        {"$push": {"custom_items": item}, "$set": _stamped(db, patient_id),
+         "$setOnInsert": {"created_at": _now()}},
+        upsert=True)
+    return plan(db, user, patient_id)
+
+
+def remove_item(db, user: dict, scope: Optional[list], patient_id: str, item_id: str) -> dict:
+    patient_id = str(patient_id)
+    row = _customisable(db, user, scope, patient_id)
+    doc = _own_doc(db, patient_id, row)
+    if item_id not in {c["id"] for c in doc.get("custom_items") or []}:
+        raise HTTPException(status_code=404, detail="No such item")
+    db[COLLECTION].update_one(
+        {"patient_id": patient_id, "discharge_date": str(row.get("discharge_date") or "")},
+        {"$pull": {"custom_items": {"id": item_id}}, "$unset": {f"checklist.{item_id}": ""},
+         "$set": _stamped(db, patient_id)})
+    return plan(db, user, patient_id)
+
+
+def add_question(db, user: dict, scope: Optional[list], patient_id: str, label: str, kind: str) -> dict:
+    patient_id = str(patient_id)
+    row = _customisable(db, user, scope, patient_id)
+    if kind not in QUESTION_KINDS:
+        raise HTTPException(status_code=422, detail="Choose yes/no or a short answer")
+    label = _label(label)
+    doc = _own_doc(db, patient_id, row)
+    have = doc.get("checkin_questions") or []
+    if len(have) >= MAX_CHECKIN_QUESTIONS:
+        raise HTTPException(status_code=409,
+                            detail=f"This patient already has {MAX_CHECKIN_QUESTIONS} questions of their own")
+    if label.lower() in {q["label"].lower() for q in have}:
+        raise HTTPException(status_code=409, detail="That question is already asked")
+    ensure_indexes(db)
+    question = {"id": "cq_" + secrets.token_hex(4), "label": label, "kind": kind,
+                "by": _who(user), "at": _now()}
+    db[COLLECTION].update_one(
+        {"patient_id": patient_id, "discharge_date": str(row.get("discharge_date") or "")},
+        {"$push": {"checkin_questions": question}, "$set": _stamped(db, patient_id),
+         "$setOnInsert": {"created_at": _now()}},
+        upsert=True)
+    return plan(db, user, patient_id)
+
+
+def remove_question(db, user: dict, scope: Optional[list], patient_id: str, question_id: str) -> dict:
+    patient_id = str(patient_id)
+    row = _customisable(db, user, scope, patient_id)
+    doc = _own_doc(db, patient_id, row)
+    if question_id not in {q["id"] for q in doc.get("checkin_questions") or []}:
+        raise HTTPException(status_code=404, detail="No such question")
+    db[COLLECTION].update_one(
+        {"patient_id": patient_id, "discharge_date": str(row.get("discharge_date") or "")},
+        {"$pull": {"checkin_questions": {"id": question_id}}, "$set": _stamped(db, patient_id)})
+    return plan(db, user, patient_id)
+
+
+def checkin_questions(db, patient_id: str) -> list:
+    """The questions the care team added for this patient's current discharge,
+    for the weekly check-in form (api/checkins.py). The discharge date is the
+    worklist row's, as plan() reads it, not the check-in's."""
+    try:
+        row = _discharge(db, str(patient_id))
+    except HTTPException:
+        return []
+    doc = db[COLLECTION].find_one(
+        {"patient_id": {"$in": access.id_variants([str(patient_id)])},
+         "discharge_date": str(row.get("discharge_date") or "")}, {"checkin_questions": 1}) or {}
+    return list(doc.get("checkin_questions") or [])
 
 
 def _hospital(db, patient_id: str) -> Optional[str]:

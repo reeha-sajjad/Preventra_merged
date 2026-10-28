@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Check, Loader2, HeartHandshake } from 'lucide-react';
-import { getDischargePlan, tickDischargeChecklist, recordSocialNeeds } from '../../api';
+import { ClipboardList, Check, Loader2, HeartHandshake, MessageSquarePlus } from 'lucide-react';
+import { getDischargePlan, tickDischargeChecklist, recordSocialNeeds, addPlanItem, removePlanItem,
+  addCheckinQuestion, removeCheckinQuestion } from '../../api';
+import { can, CUSTOMISE_PLAN_ROLES } from '../../roles';
 
 const when = (iso) => (iso
   ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
@@ -10,13 +12,16 @@ const when = (iso) => (iso
  * checklist that depends on the patient's band, condition and home situation,
  * and the social needs asked at discharge with the action each one calls for.
  * Items backed by a fact on file (a linked caretaker, a pharmacy) tick
- * themselves. Read only for the roles that cannot edit patients.
+ * themselves. Read only for the roles that cannot edit patients. The doctor and
+ * case manager can also add items to this patient's checklist and questions to
+ * their weekly check-in (api/access.py customise_plan).
  */
 export default function DischargePlanCard({ patientId }) {
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [addingItem, setAddingItem] = useState(false);
 
   const load = useCallback(() => {
     getDischargePlan(patientId).then(setPlan).catch(() => setPlan(null));
@@ -30,6 +35,15 @@ export default function DischargePlanCard({ patientId }) {
     catch (e) { setError(e.message); }
     finally { setBusy(null); }
   };
+  const remove = async (item) => {
+    if (item.done && !window.confirm(`Remove "${item.label}"? It has been ticked.`)) return;
+    setBusy(item.key); setError(null);
+    try { setPlan(await removePlanItem(patientId, item.key)); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  };
+  const canCustomise = plan.can_customise && can(CUSTOMISE_PLAN_ROLES);
+  const ownItems = plan.items.filter((i) => i.custom).length;
   const social = plan.social;
   const recorded = Boolean(social.recorded_at);
 
@@ -70,10 +84,53 @@ export default function DischargePlanCard({ patientId }) {
               {item.done && (item.auto
                 ? <div className="mt-0.5 text-xs text-gray-500">On file</div>
                 : item.by && <div className="mt-0.5 text-xs text-gray-500">{item.by} · {when(item.at)}</div>)}
+              {item.custom && item.added_by && <div className="mt-0.5 text-xs text-gray-500">Added by {item.added_by}</div>}
             </div>
+            {item.can_remove && canCustomise && (
+              <button type="button" onClick={() => remove(item)} disabled={busy === item.key}
+                aria-label={`Remove: ${item.label}`}
+                className="text-xs font-medium text-gray-600 hover:text-red-700 disabled:opacity-50">
+                Remove
+              </button>
+            )}
           </li>
         ))}
       </ul>
+      {canCustomise && (
+        <div className="mt-3">
+          {addingItem ? (
+            <AddForm label="Add an item for this patient" maxLength={plan.limits.label}
+              onCancel={() => setAddingItem(false)}
+              onSave={async (label) => {
+                setPlan(await addPlanItem(patientId, label)); setAddingItem(false);
+              }} />
+          ) : ownItems >= plan.limits.items ? (
+            <p className="text-xs text-gray-500">{plan.limits.items} items of their own is the limit.</p>
+          ) : (
+            <button type="button" onClick={() => setAddingItem(true)} className="text-sm font-semibold text-ns-navy hover:underline">
+              Add an item for this patient
+            </button>
+          )}
+        </div>
+      )}
+
+      {(plan.checkin_questions.length > 0 || canCustomise) && (
+        <div className="mt-5 border-t border-gray-100 pt-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+            <MessageSquarePlus size={15} className="text-gray-400" /> Extra check-in questions
+          </h3>
+          <p className="mt-0.5 text-xs text-gray-500">
+            Asked in this patient’s weekly check-in, after the usual questions. Answers show on the week’s card;
+            they don’t change the risk score.
+          </p>
+          <CheckinQuestions plan={plan} canCustomise={canCustomise}
+            onAdd={async (label, kind) => setPlan(await addCheckinQuestion(patientId, label, kind))}
+            onRemove={async (q) => {
+              setError(null);
+              try { setPlan(await removeCheckinQuestion(patientId, q.id)); } catch (e) { setError(e.message); }
+            }} />
+        </div>
+      )}
 
       <div className="mt-5 border-t border-gray-100 pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -155,5 +212,106 @@ function SocialForm({ social, onSave, onCancel }) {
         <button type="button" onClick={onCancel} className="text-sm font-medium text-gray-600 hover:text-gray-900">Cancel</button>
       </div>
     </form>
+  );
+}
+
+function AddForm({ label, maxLength, onSave, onCancel }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try { await onSave(text); } catch (err) { setError(err.message); setBusy(false); }
+  };
+  return (
+    <form onSubmit={save}>
+      <label htmlFor="plan-new-item" className="text-sm font-medium text-gray-900">{label}</label>
+      <input id="plan-new-item" type="text" value={text} maxLength={maxLength} onChange={(e) => setText(e.target.value)}
+        className="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-2 focus:ring-blue-200" />
+      {error && <p role="alert" className="mt-1.5 text-sm text-red-700">{error}</p>}
+      <div className="mt-2 flex items-center gap-3">
+        <button type="submit" disabled={busy || text.trim().length === 0}
+          className="inline-flex items-center gap-2 rounded-lg bg-ns-navy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {busy && <Loader2 size={14} className="animate-spin" />} Add
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm font-medium text-gray-600 hover:text-gray-900">Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+const KIND_LABELS = { yes_no: 'Yes / No', text: 'Short answer' };
+
+function CheckinQuestions({ plan, canCustomise, onAdd, onRemove }) {
+  const [label, setLabel] = useState('');
+  const [kind, setKind] = useState('yes_no');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const questions = plan.checkin_questions;
+  const add = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try { await onAdd(label, kind); setLabel(''); } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <>
+      {questions.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-500">None yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {questions.map((q) => (
+            <li key={q.id} className="flex items-start gap-3 rounded-lg border border-gray-100 p-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-gray-900">{q.label}</div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span className="rounded-full border border-gray-200 px-2 py-0.5 text-gray-600">{KIND_LABELS[q.kind] || q.kind}</span>
+                  {q.added_by && <span>Added by {q.added_by}</span>}
+                </div>
+              </div>
+              {canCustomise && (
+                <button type="button" onClick={() => onRemove(q)} aria-label={`Remove: ${q.label}`}
+                  className="text-xs font-medium text-gray-600 hover:text-red-700">
+                  Remove
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canCustomise && (questions.length >= plan.limits.questions ? (
+        <p className="mt-3 text-xs text-gray-500">{plan.limits.questions} questions of their own is the limit.</p>
+      ) : (
+        <form onSubmit={add} className="mt-3">
+          <label htmlFor="plan-new-question" className="text-sm font-medium text-gray-900">Add a question</label>
+          <input id="plan-new-question" type="text" value={label} maxLength={plan.limits.label}
+            onChange={(e) => setLabel(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          <fieldset className="mt-2">
+            <legend className="sr-only">Kind of answer</legend>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(KIND_LABELS).map(([value, text]) => {
+                const on = kind === value;
+                return (
+                  <label key={value}
+                    className={`relative cursor-pointer rounded-full border px-3 py-1 text-sm focus-within:ring-2 focus-within:ring-blue-400 ${
+                      on ? 'border-ns-navy bg-ns-navy text-white' : 'border-gray-300 bg-white text-gray-800 hover:border-gray-400'}`}>
+                    <input type="radio" name="plan-question-kind" value={value} checked={on} className="sr-only"
+                      onChange={() => setKind(value)} />
+                    {text}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+          {error && <p role="alert" className="mt-1.5 text-sm text-red-700">{error}</p>}
+          <button type="submit" disabled={busy || label.trim().length === 0}
+            className="mt-2 inline-flex items-center gap-2 rounded-lg bg-ns-navy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            {busy && <Loader2 size={14} className="animate-spin" />} Add question
+          </button>
+        </form>
+      ))}
+    </>
   );
 }

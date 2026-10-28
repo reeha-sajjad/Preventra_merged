@@ -37,6 +37,10 @@ export const COST_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'i
 // follow-ups, discharge plans, readmissions observed against expected. No
 // money on it, so a case manager sees it too.
 export const OUTCOME_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
+// Adding or removing a patient's own checklist items and check-in questions
+// (api/access.py ACTIONS customise_plan). Nurses and hospital admins tick but
+// do not author.
+export const CUSTOMISE_PLAN_ROLES = ['superadmin', 'doctor', 'case_manager'];
 // Doctors and nurses: their own patients are their home page (GLP-1's
 // CARE_TEAM_ROLES in RoleContext.jsx).
 export const MY_PATIENTS_ROLES = ['doctor', 'nurse'];

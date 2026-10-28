@@ -266,6 +266,34 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
         </div>
       )}
 
+      {/* What the patient or caretaker sent with the check-in: the care team's
+          own questions and a free-text remark. Shown as text only, never scored,
+          and not sent to the narrative (api/checkins.py). */}
+      {weekly && (week.custom_answers?.length > 0 || week.remarks) && (
+        <div className="mt-3 pt-2 border-t border-gray-100">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
+            From the {week.reported_by === 'caretaker' ? 'caretaker’s' : 'patient’s'} check-in
+          </div>
+          {week.custom_answers?.length > 0 && (
+            <dl className="space-y-1 text-xs">
+              {week.custom_answers.map((a) => (
+                <div key={a.id}>
+                  <dt className="text-gray-600">{a.label}</dt>
+                  <dd className="font-medium text-gray-800 break-words">
+                    {a.kind === 'yes_no' ? (a.answer === 'yes' ? 'Yes' : 'No') : a.answer}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {week.remarks && (
+            <blockquote className="mt-1 border-l-2 border-ns-navy/25 pl-2 text-xs text-gray-700 whitespace-pre-wrap break-words">
+              {week.remarks}
+            </blockquote>
+          )}
+        </div>
+      )}
+
       {/* Which systems were heard from this week - not just the ones that
           happened to make the top three drivers. */}
       {week.sources?.length > 0 && (

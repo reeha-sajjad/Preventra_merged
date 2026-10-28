@@ -37,6 +37,14 @@ summary is refreshed and the alert check runs at once - a red flag a patient
 types in reaches their doctor the same minute. The patient is never shown the
 score; a red flag gets the safety advice instead.
 
+A check-in can also carry what the care team asked for this patient alone
+(api/discharge_plan.py, yes/no or a short answer) and a free-text remark from
+the patient. Neither is scored and neither raises an alert: they are kept with
+the week for the clinician to read, stored under their own names (`custom_answers`
+with the question's wording at the time, and `remarks`) so a later feed for the
+same week, which writes `note`, never overwrites them. At least one of the usual
+questions must still be answered.
+
 Every submission is kept in `checkins` (who, when, which week, what was asked),
 which is what the Outcomes page counts.
 """
@@ -59,6 +67,8 @@ from models.monitoring_rules import (CARRY, MONITORING_DAYS, RED_FLAGS, red_flag
 
 COLLECTION = "checkins"
 WEEKLY = "weekly_monitoring"
+MAX_REMARKS = 500
+MAX_CUSTOM_ANSWER = 500
 
 # The phone-number advice, shown when an answer is a red flag (the same words
 # as the patient's home page, api/patient_home.SAFETY).
@@ -207,6 +217,20 @@ def questions_for(group: str, baseline: Optional[dict]) -> list:
     return out
 
 
+def custom_questions_for(db, pid: str) -> list:
+    """The care team's own questions for this patient, as form entries."""
+    from api import discharge_plan
+    out = []
+    for q in discharge_plan.checkin_questions(db, pid):
+        if q["kind"] == "yes_no":
+            out.append({"key": q["id"], "label": q["label"], "kind": "choice", "custom": True,
+                        "options": [{"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"}]})
+        else:
+            out.append({"key": q["id"], "label": q["label"], "kind": "text", "custom": True,
+                        "max": MAX_CUSTOM_ANSWER})
+    return out
+
+
 # ------------------------------------------------------------ the form
 def form(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None,
          today=None) -> dict:
@@ -219,7 +243,8 @@ def form(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None
 def _state(db, pid: str, today) -> dict:
     docs, week0, group, groups, baseline, discharged = _plan(db, pid)
     base = {"patient_id": pid, "open": False, "closed_reason": None, "questions": [],
-            "week_number": None, "done_this_week": False, "last": _last(db, pid)}
+            "week_number": None, "done_this_week": False, "last": _last(db, pid),
+            "custom_questions": [], "remarks_max": MAX_REMARKS}
     if not week0 or discharged is None:
         return {**base, "closed_reason": "not_started"}
     days = (today - discharged).days
@@ -236,7 +261,8 @@ def _state(db, pid: str, today) -> dict:
     next_opens = discharged + timedelta(days=7 * n + 1)
     return {**base, "open": not done, "week_number": n, "done_this_week": bool(done),
             "next_opens": next_opens.isoformat() if next_opens <= ends else None,
-            "questions": [] if done else questions_for(group, baseline)}
+            "questions": [] if done else questions_for(group, baseline),
+            "custom_questions": [] if done else custom_questions_for(db, pid)}
 
 
 def _last(db, pid: str) -> Optional[dict]:
@@ -282,8 +308,43 @@ def _readings(answers: dict, questions: list) -> dict:
         raise HTTPException(status_code=422, detail=[e["msg"] for e in exc.errors()])
 
 
+def _custom(custom_answers: dict, questions: list) -> list:
+    """The answers to the care team's own questions, checked against what was
+    asked, each kept with the question's wording. A blank answer is no answer.
+    An answer to a question that is no longer asked is dropped: one the care team
+    removed while the form was open must not cost the patient their check-in."""
+    asked = {q["key"]: q for q in questions}
+    out = []
+    for key, q in asked.items():
+        value = custom_answers.get(key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if q["kind"] == "choice":
+            if value not in ("yes", "no"):
+                raise HTTPException(status_code=422, detail=f"Choose one of the answers for: {q['label']}")
+            out.append({"id": key, "label": q["label"], "kind": "yes_no", "answer": value})
+        else:
+            if not isinstance(value, str):
+                raise HTTPException(status_code=422, detail=f"Enter text for: {q['label']}")
+            text = value.strip()
+            if len(text) > MAX_CUSTOM_ANSWER:
+                raise HTTPException(status_code=422,
+                                    detail=f"Keep the answer under {MAX_CUSTOM_ANSWER} characters: {q['label']}")
+            out.append({"id": key, "label": q["label"], "kind": "text", "answer": text})
+    return out
+
+
+def _remarks(text) -> Optional[str]:
+    text = (text or "").strip()
+    if not text:
+        return None
+    if len(text) > MAX_REMARKS:
+        raise HTTPException(status_code=422, detail=f"Keep it under {MAX_REMARKS} characters")
+    return text
+
+
 def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Optional[str] = None,
-           today=None) -> dict:
+           today=None, custom_answers: Optional[dict] = None, remarks: Optional[str] = None) -> dict:
     """Send this week's check-in. 409 once this week's is in."""
     from api.followups import own_patient
     if user["role"] not in REPORTERS:
@@ -299,11 +360,14 @@ def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Opt
             "too_soon": "Your check-ins start the day after you go home",
             "ended": "Your 30 days of check-ins have finished"}[state["closed_reason"]])
     readings = _readings(answers or {}, state["questions"])
+    extras = _custom(custom_answers or {}, state["custom_questions"])
+    note = _remarks(remarks)
+    extra = {**({"remarks": note} if note else {}), **({"custom_answers": extras} if extras else {})}
     ensure_indexes(db)
     n, discharged = state["week_number"], state["discharge_date"]
     record = {"patient_id": pid, "discharge_date": discharged, "week_number": n,
               "week_date": today.isoformat(), "at": _now(), "by_role": user["role"],
-              "by_user": str(user["_id"]), "answered": sorted(readings)}
+              "by_user": str(user["_id"]), "answered": sorted(readings), **extra}
     try:
         db[COLLECTION].insert_one(record)
     except DuplicateKeyError:                                      # a second tab, same week
@@ -312,9 +376,9 @@ def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Opt
     stay = _stay(db, pid)
     week0 = next((d for d in _series(db, pid) if int(d.get("week_number", -1)) == 0), {})
     if stay and stay.get("encounter_key") == week0.get("encounter_key"):
-        flags = _through_ingest(db, stay, pid, n, today, readings, user["role"])
+        flags = _through_ingest(db, stay, pid, n, today, readings, user["role"], extra)
     else:
-        flags = _score_here(db, pid, n, today, readings, user["role"])
+        flags = _score_here(db, pid, n, today, readings, user["role"], extra)
     db[COLLECTION].update_one({"_id": record["_id"]}, {"$set": {"red_flags": flags,
                                                                 "hospital_id": _hospital(db, pid)}})
     return {**_state(db, pid, today), "sent": True, "urgent": bool(flags),
@@ -327,7 +391,8 @@ def _hospital(db, pid: str) -> Optional[str]:
     return (own or {}).get("hospital_id")
 
 
-def _through_ingest(db, stay: dict, pid: str, n: int, today, readings: dict, role: str) -> list:
+def _through_ingest(db, stay: dict, pid: str, n: int, today, readings: dict, role: str,
+                    extra: Optional[dict] = None) -> list:
     """An ingested patient: the answers join the week in ingest_weeks, and the
     worker's own scoring writes the week, refreshes the worklist and alerts."""
     from api import scoring_service
@@ -337,7 +402,7 @@ def _through_ingest(db, stay: dict, pid: str, n: int, today, readings: dict, rol
         {"hospital_id": hospital, "encounter_key": stay["encounter_key"], "week_number": n},
         {"$set": {**{f"readings.{k}": v for k, v in readings.items()}, "patient_key": stay.get("patient_key"),
                   "patient_id": stay["patient_id"], "week_date": when, "received_at": datetime.utcnow(),
-                  "reported_by": role},
+                  "reported_by": role, **(extra or {})},
          "$setOnInsert": {"source": "patient_app"}},
         upsert=True)
     scoring_service.score_weeks(db, hospital, [stay["patient_id"]])
@@ -345,7 +410,8 @@ def _through_ingest(db, stay: dict, pid: str, n: int, today, readings: dict, rol
     return list((doc or {}).get("red_flags") or [])
 
 
-def _score_here(db, pid: str, n: int, today, readings: dict, role: str) -> list:
+def _score_here(db, pid: str, n: int, today, readings: dict, role: str,
+                extra: Optional[dict] = None) -> list:
     """Anyone else: the monitoring rules against the patient's own series, as
     api/scoring_service.scored_weeks applies them to an ingested week."""
     from api import scoring_service
@@ -375,7 +441,7 @@ def _score_here(db, pid: str, n: int, today, readings: dict, role: str) -> list:
                   "scored_by": "monitoring_rules", "model_version": week0.get("model_version"),
                   # The series' own source, so whatever replaces the series
                   # (a new discharge, a regenerated simulation) replaces this too.
-                  "source": week0.get("source"), "reported_by": role,
+                  "source": week0.get("source"), "reported_by": role, **(extra or {}),
                   "clinical_group": group, "group_label": week0.get("group_label"),
                   "group_evidence": week0.get("group_evidence"),
                   "group_confidence": week0.get("group_confidence"),
