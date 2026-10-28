@@ -29,6 +29,15 @@ export const WATCH_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
 // Model Studio: training, comparing and deploying the hospital's own models
 // (api/access.py manage_models).
 export const STUDIO_ROLES = ['superadmin', 'hospital_admin'];
+// Who calculates a risk score for a typed or uploaded patient, which writes
+// nothing (api/access.py ACTIONS score_patients), and who may then ADD that
+// patient to the list (add_patients - admins only, and only while the
+// deployment has manual entry switched on).
+export const SCORE_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'case_manager'];
+export const ADD_PATIENT_ROLES = ['superadmin', 'hospital_admin'];
+// Who may re-run the models on a patient already on the list, with no typing
+// (api/access.py ACTIONS rescore_patients).
+export const RESCORE_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'case_manager'];
 // Cost and ROI figures (api/access.py ACTIONS view_costs). A case manager
 // coordinates care and does not manage money: they see the counterfactual and
 // the care plan, without the dollar figures.

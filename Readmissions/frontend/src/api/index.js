@@ -10,9 +10,10 @@ const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').
 export const API_BASE_URL = BASE_URL;
 const API_KEY = import.meta.env.VITE_API_KEY || '';
 
-// Adding a patient by hand is off by default and must match MANUAL_ENTRY_ENABLED
+// ADDING a patient by hand is off by default and must match MANUAL_ENTRY_ENABLED
 // on the backend, which refuses the create endpoints regardless of what this
-// says. Hiding the page is the courtesy; the server is the control.
+// says. Hiding the button is the courtesy; the server is the control. Only
+// calculating a score is always available (to SCORE_ROLES).
 export const MANUAL_ENTRY_ENABLED =
   String(import.meta.env.VITE_MANUAL_ENTRY_ENABLED ?? 'false').trim().toLowerCase() === 'true';
 
@@ -391,6 +392,30 @@ const RealAPI = {
       body: JSON.stringify(payload),
     }),
 
+  // ── Score a patient who is not on the list (api/manual_patients.py) ───────
+  /** The upload file's columns and an example row. */
+  getManualTemplate: () => apiFetch('/api/manual-entry/template'),
+  /** Risk score and drivers for typed records. Writes nothing. */
+  scoreManualRecords: (records) =>
+    apiFetch('/api/manual-entry/score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records }),
+    }),
+  /** Read a CSV and score each valid row. Writes nothing. */
+  parseManualFile: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiFetch('/api/manual-entry/parse', { method: 'POST', body: form });
+  },
+  /** Add the records to the caller's hospital, all or none. */
+  addManualRecords: (records) =>
+    apiFetch('/api/manual-entry/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records }),
+    }),
+
   /**
    * Ask the dashboard chatbot a natural-language question about patient risk data.
    * `history` carries the recent transcript so follow-ups ("what about the top
@@ -470,6 +495,16 @@ const RealAPI = {
       body: JSON.stringify(payload),
     }),
 
+  /** Re-run the models on a patient already on the list (preview, or commit). */
+  getRescoreOptions: (patientId) => apiFetch(`/api/patients/${patientId}/rescore`),
+
+  rescorePatient: (patientId, body) =>
+    apiFetch(`/api/patients/${patientId}/rescore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
   /**
    * Score-change alerts raised by the patient update workflow.
    */
@@ -508,6 +543,8 @@ const HOSPITAL_MOCK_ERROR = 'The hospital pages require the real backend. Set VI
 const realOnly = (fn) => (USE_MOCK ? () => Promise.reject(new Error(HOSPITAL_MOCK_ERROR)) : fn);
 export const getAccount        = realOnly(RealAPI.getAccount);
 export const changePassword    = realOnly(RealAPI.changePassword);
+export const getRescoreOptions = realOnly(RealAPI.getRescoreOptions);
+export const rescorePatient    = realOnly(RealAPI.rescorePatient);
 export const getOverview       = realOnly(RealAPI.getOverview);
 export const getStaff          = realOnly(RealAPI.getStaff);
 export const getMyPatients     = realOnly(RealAPI.getMyPatients);
@@ -631,6 +668,11 @@ export const predictPatient = USE_MOCK
 export const savePatientToWorklist = USE_MOCK
   ? () => Promise.reject(new Error('Manual entry requires the real backend. Set VITE_USE_MOCK=false.'))
   : RealAPI.savePatientToWorklist;
+
+export const getManualTemplate = realOnly(RealAPI.getManualTemplate);
+export const scoreManualRecords = realOnly(RealAPI.scoreManualRecords);
+export const parseManualFile = realOnly(RealAPI.parseManualFile);
+export const addManualRecords = realOnly(RealAPI.addManualRecords);
 
 export const askChatbot = USE_MOCK
   ? () => Promise.reject(new Error('The chatbot requires the real backend. Set VITE_USE_MOCK=false.'))

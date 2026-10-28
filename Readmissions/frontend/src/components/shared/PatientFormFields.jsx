@@ -348,6 +348,87 @@ export function DateField({ label, value, onChange }) {
   );
 }
 
+/** Free-text input; clearing it means unknown. */
+export function TextField({ label, hint, value, onChange, placeholder, maxLength = 200 }) {
+  return (
+    <div>
+      <FieldLabel label={label} hint={hint} />
+      <input
+        type="text"
+        maxLength={maxLength}
+        placeholder={placeholder || 'Unknown'}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
+        className={CONTROL_CLASS}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Who the patient is and what they were treated for. These are not model
+// inputs (the model reads MimicPatientForm); they decide where the patient is
+// filed if they are added to the list, and the baseline weekly readings are
+// measured against the discharge vitals. Typed here for patients from outside
+// the hospital's own records.
+// ---------------------------------------------------------------------------
+
+export const IDENTITY_KEYS = [
+  'external_ref', 'admit_date', 'discharge_date', 'primary_icd_code', 'primary_diagnosis',
+  'secondary_diagnoses', 'weight_kg', 'spo2', 'sbp', 'heart_rate',
+];
+
+export function emptyIdentity() {
+  const f = {};
+  IDENTITY_KEYS.forEach((k) => { f[k] = null; });
+  return f;
+}
+
+/** The identity values as the API wants them: blanks dropped, secondary
+ *  diagnoses split on ";" into a list. */
+export function identityPayload(identity) {
+  const out = {};
+  IDENTITY_KEYS.forEach((k) => {
+    const v = identity?.[k];
+    if (v === null || v === undefined || v === '') return;
+    if (k === 'secondary_diagnoses') {
+      const list = String(v).split(';').map((x) => x.trim()).filter(Boolean);
+      if (list.length) out[k] = list;
+    } else {
+      out[k] = typeof v === 'string' ? v.trim() : v;
+    }
+  });
+  return out;
+}
+
+export function IdentityFields({ identity, set }) {
+  return (
+    <FormSection
+      title="Patient & Diagnosis"
+      subtitle="Needed to add the patient to the list. A risk score can be calculated without them."
+    >
+      <TextField label="Your reference" hint="optional, kept with the patient" value={identity.external_ref}
+        onChange={set('external_ref')} placeholder="e.g. a hospital record number" />
+      <DateField label="Admission date" value={identity.admit_date} onChange={set('admit_date')} />
+      <DateField label="Discharge date" value={identity.discharge_date} onChange={set('discharge_date')} />
+      <TextField label="Diagnosis code" hint="ICD, e.g. I50.9" value={identity.primary_icd_code}
+        onChange={set('primary_icd_code')} maxLength={12} />
+      <TextField label="Diagnosis" hint="in words" value={identity.primary_diagnosis}
+        onChange={set('primary_diagnosis')} />
+      <TextField label="Other diagnoses" hint="separate with ;" value={identity.secondary_diagnoses}
+        onChange={set('secondary_diagnoses')} maxLength={500} />
+      <NumberField label="Weight at discharge" hint="kg" value={identity.weight_kg}
+        onChange={set('weight_kg')} min={1} max={500} step={0.1} />
+      <NumberField label="Oxygen saturation at discharge" hint="%" value={identity.spo2}
+        onChange={set('spo2')} min={50} max={100} />
+      <NumberField label="Systolic blood pressure at discharge" hint="mmHg" value={identity.sbp}
+        onChange={set('sbp')} min={40} max={300} />
+      <NumberField label="Heart rate at discharge" hint="beats per minute" value={identity.heart_rate}
+        onChange={set('heart_rate')} min={20} max={300} />
+    </FormSection>
+  );
+}
+
 export function getScoreColor(band) {
   const n = band?.toLowerCase();
   if (n === 'high')   return 'text-risk-high';

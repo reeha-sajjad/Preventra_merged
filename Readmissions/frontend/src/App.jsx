@@ -21,10 +21,9 @@ import MyPatients from './pages/MyPatients';
 import FollowUps from './pages/FollowUps';
 import PharmacyHome from './pages/PharmacyHome';
 import Outcomes from './pages/Outcomes';
-import { MANUAL_ENTRY_ENABLED } from './api';
 import { readClaims } from './api/auth';
 import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES,
-         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, OUTCOME_ROLES } from './roles';
+         FOLLOWUP_HANDLE_ROLES, PHARMACY_ROLES, OUTCOME_ROLES, SCORE_ROLES } from './roles';
 import LoadingScreen from './components/LoadingScreen';
 import { useAppLoader } from './hooks/useAppLoader';
 
@@ -107,9 +106,9 @@ function AppRoutes() {
           <Route path="/analytics" element={<Analytics />} />
           {can(CONSOLE_ROLES) && <Route path="/doctor" element={<DoctorConsole />} />}
           {can(STUDIO_ROLES) && <Route path="/model-studio" element={<ModelStudio />} />}
-          {/* Off by default. The backend refuses the create endpoints too, so
-              typing the URL gets you a form that cannot save. */}
-          {MANUAL_ENTRY_ENABLED && <Route path="/manual-entry" element={<ManualEntry />} />}
+          {/* Calculating a score is open to the roles that score patients; the
+              page shows the add buttons only where the server would allow it. */}
+          {can(SCORE_ROLES) && <Route path="/manual-entry" element={<ManualEntry />} />}
           <Route path="/about" element={<About />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/test-components" element={<TestComponents />} />

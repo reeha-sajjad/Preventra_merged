@@ -87,15 +87,10 @@ def _builtin_scores(rows: pd.DataFrame) -> list:
     """The built-in model with real SHAP drivers, one row at a time - the same
     call as manual entry (api/mimic_scoring.score_frame)."""
     from api import mimic_scoring
-    state = mimic_scoring._load()
+    features = mimic_scoring._load()["features"]
     out = []
     for _, row in rows.iterrows():
-        frame = pd.DataFrame([row[state["features"]].to_dict()])
-        for col in state["features"]:
-            levels = state["categoricals"].get(col)
-            frame[col] = (pd.Categorical(frame[col].astype(object), categories=levels) if levels
-                          else pd.to_numeric(frame[col], errors="coerce"))
-        scored = mimic_scoring.score_frame(frame)
+        scored = mimic_scoring.score_features(row[features].to_dict())
         out.append({"score": scored["risk_score"],
                     "drivers": [scored.get(f"driver_{i}_raw", "") for i in (1, 2, 3)]})
     return out
@@ -256,32 +251,44 @@ def _baseline(stay: dict, group: str) -> Optional[dict]:
     return {**fields, "source": "recorded", "group": group} if fields else None
 
 
-def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
+def _load_discharges(db, hospital_id: str, encounter_keys: list) -> tuple:
+    """(targets, feats, not_scored): the stored stays asked for, and the 94
+    inputs built from ALL stays of their patients. Reads only."""
     keys = [str(k) for k in encounter_keys]
     targets = {s["encounter_key"]: s for s in db[STAYS].find(
         {"hospital_id": hospital_id, "encounter_key": {"$in": keys}}, {"_id": 0})}
     not_scored = [{"encounter_key": k, "reason": "no stored discharge with this key"}
                   for k in keys if k not in targets]
     if not targets:
-        return {"scored": 0, "not_scored": not_scored}
+        return targets, None, not_scored
     patients = list({s["patient_id"] for s in targets.values()})
     stays = list(db[STAYS].find({"hospital_id": hospital_id, "patient_id": {"$in": patients}}, {"_id": 0}))
-    feats = canonical.features(stays, as_of=pd.Timestamp.now(), include_excluded=True)
-    link_outcomes(db, hospital_id, feats)
-    retired = _retire_ended(db, hospital_id, feats)
+    return targets, canonical.features(stays, as_of=pd.Timestamp.now(), include_excluded=True), not_scored
 
+
+def _compute_discharges(db, hospital_id: str, encounter_keys: list, loaded: Optional[tuple] = None) -> dict:
+    """Score the asked-for discharges WITHOUT writing anything - no outcome
+    links, no retiring of ended stays, no worklist rows. `results` lines up
+    with feats[scorable]. score_discharges writes; a preview only reads this."""
+    targets, feats, not_scored = loaded or _load_discharges(db, hospital_id, encounter_keys)
+    out = {"targets": targets, "feats": feats, "scorable": None, "results": [], "version": None,
+           "bands": None, "note": None, "not_scored": not_scored, "fingerprint": None}
+    if not targets:
+        return out
     wanted = feats["encounter_key"].isin(list(targets))
     for _, row in feats[wanted & feats["excluded"].ne("")].iterrows():
         not_scored.append({"encounter_key": row["encounter_key"], "reason": f"not scored: {row['excluded']}"})
     scorable = wanted & feats["excluded"].eq("")
+    out["scorable"] = scorable
     if not scorable.any():
-        return {"scored": 0, "not_scored": not_scored}
+        return out
 
-    fingerprint = deployed_fingerprint(db, hospital_id)
+    out["fingerprint"] = deployed_fingerprint(db, hospital_id)
     scoring_keys = list(feats.loc[scorable, "encounter_key"])
     sent = {k: dict(targets[k].get("source") or []) for k in scoring_keys}
     model, note, inputs = _choose_model(db, hospital_id, feats,
                                         {c for row in sent.values() for c in row})
+    out["note"] = note
     if model is None:
         # The built-in model reads only what it was trained on: a stay without
         # those fields (or a child's) waits for the hospital's own model.
@@ -292,22 +299,40 @@ def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
                     "the built-in model needs " + ", ".join(m.replace("_", " ") for m in missing)
                     + "; train a model on your own data to score it")})
         scorable = scorable & ~feats["encounter_key"].isin([k for k, m in lacking.items() if m])
+        out["scorable"] = scorable
         if not scorable.any():
-            return {"scored": 0, "not_scored": not_scored, **({"note": note} if note else {})}
-        results = _builtin_scores(feats[scorable])
-        version, bands = BUILTIN_VERSION, model_studio._mimic_bands()
+            return out
+        out["results"] = _builtin_scores(feats[scorable])
+        out["version"], out["bands"] = BUILTIN_VERSION, model_studio._mimic_bands()
     elif inputs == "source":
         # The rows as sent, in the order the stays are written below. Only the
         # discharges being scored: a model trained on a flat export reads one
         # row per discharge and no earlier admissions.
         rows = pd.DataFrame([sent[k] for k in scoring_keys])
-        results = _studio_scores(db, model, rows, pd.Series([True] * len(rows)))
-        version = f"studio:{model['model_id']}"
-        bands = model.get("bands") or model_studio._mimic_bands()
+        out["results"] = _studio_scores(db, model, rows, pd.Series([True] * len(rows)))
+        out["version"] = f"studio:{model['model_id']}"
+        out["bands"] = model.get("bands") or model_studio._mimic_bands()
     else:
-        results = _studio_scores(db, model, feats.drop(columns=["excluded"]), scorable)
-        version = f"studio:{model['model_id']}"
-        bands = model.get("bands") or model_studio._mimic_bands()
+        out["results"] = _studio_scores(db, model, feats.drop(columns=["excluded"]), scorable)
+        out["version"] = f"studio:{model['model_id']}"
+        out["bands"] = model.get("bands") or model_studio._mimic_bands()
+    return out
+
+
+def score_discharges(db, hospital_id: str, encounter_keys: list) -> dict:
+    loaded = _load_discharges(db, hospital_id, encounter_keys)
+    targets, feats, not_scored = loaded
+    if not targets:
+        return {"scored": 0, "not_scored": not_scored}
+    link_outcomes(db, hospital_id, feats)
+    retired = _retire_ended(db, hospital_id, feats)
+
+    computed = _compute_discharges(db, hospital_id, encounter_keys, loaded=loaded)
+    scorable, results, version, bands = (computed["scorable"], computed["results"],
+                                         computed["version"], computed["bands"])
+    note, fingerprint = computed["note"], computed["fingerprint"]
+    if not results:
+        return {"scored": 0, "not_scored": not_scored, **({"note": note} if note else {})}
 
     batch = _batch(db)
     # The worklist row is the latest discharge that could be scored.
@@ -584,3 +609,140 @@ def _score_weeks_with_model(db, model: dict, stay: dict, week0: dict, docs: list
         d["scored_by"] = f"studio:{model['model_id']}"
         d["model_version"] = f"studio:{model['model_id']}"
     return None
+
+
+# ------------------------------------------------- one patient, on demand
+# Re-evaluating a patient already on the list (api/patient_rescore.py). A
+# preview reads and computes; nothing here writes unless asked to.
+def _model_name(db, hospital_id: str, version: Optional[str]) -> str:
+    if version and version.startswith("studio:"):
+        try:
+            return model_studio.get_model(db, version.split(":", 1)[1],
+                                          model_studio.system_actor(hospital_id)).get("name") or "Hospital model"
+        except LookupError:
+            return "Hospital model"
+    return "Built-in model"
+
+
+def preview_discharge(db, hospital_id: str, encounter_key: str) -> dict:
+    """The score the hospital's deployed model gives one stored discharge now,
+    without writing. ValueError(reason) when it cannot be scored."""
+    got = _compute_discharges(db, hospital_id, [encounter_key])
+    if not got["results"]:
+        reasons = [n["reason"] for n in got["not_scored"] if n.get("encounter_key") == str(encounter_key)]
+        raise ValueError(reasons[0] if reasons else "this discharge could not be scored")
+    result = got["results"][0]
+    score = round(float(result["score"]), 1)
+    return {"score": score, "band": _band(score, got["bands"]),
+            "drivers": (list(result["drivers"]) + ["", "", ""])[:3],
+            "model_version": got["version"], "model_name": _model_name(db, hospital_id, got["version"]),
+            "note": got["note"], "bands": got["bands"]}
+
+
+def preview_weeks(db, hospital_id: str, patient_id: str, base_override: Optional[float] = None,
+                  bands: Optional[dict] = None) -> list:
+    """The patient's weekly documents as they would be scored now (not written):
+    the monitoring rules against the discharge score - `base_override` in place
+    of the stored one - or a deployed weekly model."""
+    stays = list(db[STAYS].find({"hospital_id": hospital_id, "patient_id": patient_id},
+                                {"_id": 0}).sort("encounter.discharge_datetime", -1).limit(1))
+    if not stays:
+        raise LookupError("no stored discharge for this patient")
+    stay = stays[0]
+    week0 = week0_for(db, hospital_id, stay)
+    if not week0:
+        raise ValueError("the discharge these weeks follow has not been scored")
+    week0 = dict(week0)
+    if base_override is not None:
+        week0["risk_score"] = round(float(base_override), 1)
+        week0["risk_band"] = _band(week0["risk_score"],
+                                   bands or _bands_of(db, hospital_id, week0.get("model_version")))
+    docs = scored_weeks(db, hospital_id, stay, week0)
+    weekly_model = model_studio.active_model_for(db, hospital_id, "weekly")
+    if docs and weekly_model and weekly_model.get("can_score", True):
+        _score_weeks_with_model(db, weekly_model, stay, week0, docs)
+    return docs
+
+
+def rescore_series(db, patient_id: str, base: Optional[float] = None, write: bool = False,
+                   week0_drivers: Optional[list] = None, model_version: Optional[str] = None) -> dict:
+    """Re-score the weekly series of a patient that did not come through
+    ingestion (a loaded MIMIC patient, a typed one), by the monitoring rules
+    against `base` - the new discharge score - or the stored one.
+
+    Only the score fields of each week are set; the readings, who reported the
+    week, the patient's remarks and answers and the note are left as they are.
+    A week not observed holds the previous week's score; a week with no stored
+    readings keeps its score (they cannot be re-scored). LookupError when the
+    patient has no week 0."""
+    from api.access import id_variants
+    docs = list(db["weekly_monitoring"].find({"patient_id": {"$in": id_variants([patient_id])}})
+                .sort("week_number", 1))
+    week0 = next((d for d in docs if int(d.get("week_number", -1)) == 0), None)
+    if not week0:
+        raise LookupError("no discharge score to build the weekly trend from")
+    old_base = float(week0.get("risk_score") or 0)
+    base = old_base if base is None else round(float(base), 1)
+    row = db["patient_worklist"].find_one({"patient_id": {"$in": id_variants([patient_id])},
+                                           "batch_date": _batch(db)}, {"_id": 0}) or {}
+    group = week0.get("clinical_group") or row.get("clinical_group") or "general"
+    groups = next((d["monitoring_groups"] for d in docs if d.get("monitoring_groups")), None) \
+        or row.get("clinical_groups") or [group]
+    if group in groups:
+        groups = [group] + [g for g in groups if g != group]
+    care = db["care_actions"].find_one({"patient_id": {"$in": id_variants([patient_id])}}, {"hospital_id": 1})
+    hosp = (care or {}).get("hospital_id") or week0.get("hospital_id") or ""
+    bands = _bands_of(db, hosp, week0.get("model_version"))
+
+    def line(doc, new, new_band, **more):
+        changed = abs(new - float(doc.get("risk_score") or 0)) > 1e-9 or new_band != doc.get("risk_band")
+        return {"week_number": int(doc["week_number"]), "old_score": doc.get("risk_score"),
+                "new_score": new, "old_band": doc.get("risk_band"), "new_band": new_band,
+                "changed": changed, "rescored": True, **more}
+
+    base_band = _band(base, bands)
+    weeks, sets = [line(week0, base, base_band)], {}
+    fields = {"risk_score": base, "risk_band": base_band}
+    if week0_drivers is not None:
+        d = (list(week0_drivers) + ["", "", ""])[:3]
+        fields.update({"driver_1": d[0], "driver_2": d[1], "driver_3": d[2]})
+    if model_version:
+        fields["model_version"] = model_version
+    if weeks[0]["changed"] or week0_drivers is not None:
+        sets[week0["_id"]] = fields
+
+    prev_adj, prev_score = 0.0, base
+    for doc in docs:
+        n = int(doc.get("week_number", 0))
+        if n <= 0:
+            continue
+        mon = doc.get("monitoring")
+        if doc.get("observed", True) is False:
+            score = prev_score
+            band = _band(score, bands)
+            weeks.append(line(doc, score, band))
+            if weeks[-1]["changed"]:
+                sets[doc["_id"]] = {"risk_score": score, "risk_band": band, "red_flags": []}
+        elif isinstance(mon, dict):
+            score, adj, contribs = score_week(base, mon, CARRY * prev_adj, variant=variant_for(str(patient_id), n),
+                                              group=group, groups=groups, prev_score=prev_score,
+                                              flag_floor=bands["low_score_threshold"])
+            band = _band(score, bands)
+            lines = ([d for _, d in contribs[:3]] + ["", "", ""])[:3]
+            weeks.append(line(doc, score, band))
+            if weeks[-1]["changed"]:
+                sets[doc["_id"]] = {"risk_score": score, "risk_band": band, "driver_1": lines[0],
+                                    "driver_2": lines[1], "driver_3": lines[2],
+                                    "red_flags": red_flags(mon), "rule_adjustment": round(adj, 2)}
+            prev_adj = adj
+        else:
+            score = float(doc.get("risk_score") or 0)
+            weeks.append(line(doc, score, doc.get("risk_band"), rescored=False, reason="no readings stored"))
+            weeks[-1]["changed"] = False
+            prev_adj = float(doc.get("rule_adjustment") or 0)
+        prev_score = score
+    if write:
+        for _id, fields in sets.items():
+            db["weekly_monitoring"].update_one({"_id": _id}, {"$set": fields})
+    return {"weeks": weeks, "base": base, "old_base": old_base,
+            "changed": any(w["changed"] for w in weeks)}

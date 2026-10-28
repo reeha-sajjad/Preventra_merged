@@ -6,7 +6,7 @@ import TrendStatusBadge, { trendStatusConfig } from '../shared/TrendStatusBadge'
 import RiskBadge from '../shared/RiskBadge';
 import BulletList from '../shared/BulletList';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
   AlertCircle, ArrowUpRight, ArrowDownRight, Minus, ChevronRight, CalendarClock, Sparkles, Loader2,
@@ -14,7 +14,11 @@ import {
   Target, Info, ClipboardList,
 } from 'lucide-react';
 
-const BAND_DOT_COLOR = { High: '#C0392B', Medium: '#F0A500', Low: '#1E7D44' };
+// Medium uses the darker amber from index.css: the theme's #F0A500 is under 3:1
+// against white, which a dot needs (DESIGN.md).
+const BAND_DOT_COLOR = {
+  High: 'var(--color-risk-high)', Medium: 'var(--risk-medium-fill)', Low: 'var(--color-risk-low)',
+};
 
 /**
  * Which system a number arrived from.
@@ -53,14 +57,38 @@ function SourceTag({ source, className = '' }) {
   );
 }
 
-// A week without readings is drawn hollow: its score is only held from the
-// last readings, not measured.
-function TrendDot(props) {
-  const { cx, cy, payload } = props;
-  const color = BAND_DOT_COLOR[payload.risk_band] || '#0F2A4A';
+// Past weeks are drawn grey so the eye lands on the latest point. A week
+// without readings is hollow: its score is only held from the last readings,
+// not measured.
+function PastDot({ cx, cy, payload }) {
+  if (cx == null || cy == null) return null;
   return payload.observed === false
-    ? <Dot cx={cx} cy={cy} r={5} fill="#fff" stroke={color} strokeWidth={2} />
-    : <Dot cx={cx} cy={cy} r={5} fill={color} stroke="#fff" strokeWidth={1.5} />;
+    ? <circle cx={cx} cy={cy} r={4} fill="#fff" stroke="var(--color-gray-500)" strokeWidth={2} />
+    : <circle cx={cx} cy={cy} r={4} fill="var(--color-gray-500)" stroke="#fff" strokeWidth={1.5} />;
+}
+
+// The latest point: band-coloured, labelled with its word, and pulsing only
+// while the patient is still inside the monitoring window.
+function LiveDot({ cx, cy, index, payload, last, live, single, prefersReducedMotion }) {
+  if (index !== last || cx == null || cy == null) return null;
+  const color = BAND_DOT_COLOR[payload.risk_band] || 'var(--color-ns-navy)';
+  const word = single ? 'At discharge' : live ? 'Now' : 'Latest';
+  const below = cy < 24;
+  return (
+    <g>
+      {live && !prefersReducedMotion && (
+        <circle cx={cx} cy={cy} r={6} fill={color} opacity={0.35}
+          className="motion-safe:animate-ping origin-center [transform-box:fill-box]" />
+      )}
+      {payload.observed === false
+        ? <circle cx={cx} cy={cy} r={6} fill="#fff" stroke={color} strokeWidth={2.5} />
+        : <circle cx={cx} cy={cy} r={6} fill={color} stroke="#fff" strokeWidth={2} />}
+      <text x={cx + 8} y={below ? cy + 22 : cy - 12} textAnchor="end" fontSize={11} fontWeight={600}
+        fill="var(--color-gray-700)">
+        {word} · {payload.risk_band}
+      </text>
+    </g>
+  );
 }
 
 const weekDate = (iso) => (iso
@@ -90,10 +118,10 @@ function TrendTooltip({ active, payload }) {
 // The first week after it is measured from the last readings, and says which.
 function DeltaIndicator({ delta, held = false, sinceWeek = null }) {
   if (held) {
-    return <span className="text-xs text-gray-400">held</span>;
+    return <span className="text-xs text-gray-500">held</span>;
   }
   if (delta === null || delta === undefined) {
-    return <span className="text-xs text-gray-400">baseline</span>;
+    return <span className="text-xs text-gray-500">baseline</span>;
   }
   const since = sinceWeek != null && (
     <span className="block text-[10px] font-normal text-gray-500 text-right">
@@ -117,14 +145,23 @@ function DeltaIndicator({ delta, held = false, sinceWeek = null }) {
     );
   }
   return (
-    <span className="text-xs font-semibold text-gray-400">
+    <span className="text-xs font-semibold text-gray-500">
       <span className="inline-flex items-center"><Minus size={13} className="mr-0.5" /> {delta.toFixed(1)}</span>
       {since}
     </span>
   );
 }
 
-function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus }) {
+function monitoringCaption(liveInfo, live) {
+  const day = liveInfo?.days_since_discharge;
+  if (typeof day !== 'number' || day < 0) return ' Discharge date unknown.';
+  if (!live) return ' Monitoring has ended.';
+  return day > 30
+    ? ` Monitoring window closing (day ${day} since discharge).`
+    : ` Monitoring is live (day ${day} of 30).`;
+}
+
+function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus, newest = false, live = false }) {
   const explains = aiOn(useAiStatus(), 'insights');
   const [narrative, setNarrative] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -182,6 +219,11 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
             <span className="text-xs text-gray-500">
               · {weekly ? week.week_date : `discharged ${week.discharge_date || week.batch_date}`}
             </span>
+            {newest && (
+              <span className="rounded-full bg-ns-navy px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                {live ? 'Now' : 'Latest'}
+              </span>
+            )}
           </div>
           {/* The elapsed time is the context that makes the delta readable: the
               same +16 points means something very different after 7 days than
@@ -203,7 +245,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
             <div className="text-xs text-gray-600 mt-1 font-medium">
               {week.primary_diagnosis}
               {week.primary_icd_code && (
-                <span className="text-gray-400 font-normal"> · ICD {week.primary_icd_code}</span>
+                <span className="text-gray-500 font-normal"> · ICD {week.primary_icd_code}</span>
               )}
             </div>
           )}
@@ -298,7 +340,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
           happened to make the top three drivers. */}
       {week.sources?.length > 0 && (
         <div className="mt-3 pt-2 border-t border-gray-100">
-          <div className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold mb-1">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
             Data received from
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -327,7 +369,7 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus 
           </button>
         )}
         {loading && (
-          <span className="flex items-center space-x-1.5 text-xs text-gray-400">
+          <span className="flex items-center space-x-1.5 text-xs text-gray-500">
             <Loader2 size={13} className="animate-spin" />
             <span>Generating…</span>
           </span>
@@ -427,6 +469,18 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
   const cfg = trendStatusConfig(trend.monitoring_status);
   const weekly = trend.series_kind === 'weekly';
   const weeksToShow = compact ? trend.weeks.slice(-3) : trend.weeks;
+  const live = Boolean(weekly && trend.live?.active);
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  // Two series over the same weeks: the past in grey, and the last step plus
+  // the latest point in colour (the live segment starts at the previous point
+  // so the line is unbroken).
+  const count = trend.weeks.length;
+  const chartData = trend.weeks.map((w, i) => ({
+    ...w,
+    past_score: i < count - 1 ? w.risk_score : null,
+    live_score: i >= count - 2 ? w.risk_score : null,
+  }));
 
   return (
     <div className={`bg-white rounded-xl border border-gray-200 shadow-sm ${compact ? 'p-4' : 'p-6'}`}>
@@ -443,15 +497,15 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
           than repeated on each card. */}
       {weekly && trend.primary_diagnosis && (
         <div className="flex items-baseline flex-wrap gap-x-2 mb-3">
-          <span className="text-xs uppercase tracking-wide text-gray-400 font-semibold">
+          <span className="text-xs uppercase tracking-wide text-gray-500 font-semibold">
             Admitted for
           </span>
           <span className="text-sm font-semibold text-ns-navy">{trend.primary_diagnosis}</span>
           {trend.primary_icd_code && (
-            <span className="text-xs text-gray-400">ICD {trend.primary_icd_code}</span>
+            <span className="text-xs text-gray-500">ICD {trend.primary_icd_code}</span>
           )}
           {trend.index_discharge_date && (
-            <span className="text-xs text-gray-400">· discharged {trend.index_discharge_date}</span>
+            <span className="text-xs text-gray-500">· discharged {trend.index_discharge_date}</span>
           )}
         </div>
       )}
@@ -479,7 +533,7 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
               {trend.signal_plan?.focus && (
                 <div className="text-xs text-gray-600 mt-0.5">{trend.signal_plan.focus}</div>
               )}
-              <div className="text-xs text-gray-400 mt-1">
+              <div className="text-xs text-gray-500 mt-1">
                 Decided on: {trend.clinical_group.evidence}
               </div>
               {/* What this group is asked for beyond the shared seven. These are
@@ -487,12 +541,12 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
                   form would never request. */}
               {trend.signal_plan?.condition_specific?.length > 0 && (
                 <div className="text-xs text-gray-600 mt-1.5">
-                  <span className="text-gray-400">Also monitored for this condition: </span>
+                  <span className="text-gray-500">Also monitored for this condition: </span>
                   {trend.signal_plan.condition_specific.map((s) => s.label).join(', ')}
                 </div>
               )}
               {trend.signal_plan?.low_value?.length > 0 && (
-                <div className="text-xs text-gray-400 mt-1 flex items-start gap-1">
+                <div className="text-xs text-gray-500 mt-1 flex items-start gap-1">
                   <Info size={11} className="mt-0.5 shrink-0" />
                   <span>
                     Carries little weight for this condition:{' '}
@@ -511,13 +565,13 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
                   <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1">
                     {trend.baseline_rows.map((r) => (
                       <div key={r.key} className="text-xs" title={r.why}>
-                        <span className="text-gray-400">{r.label}: </span>
+                        <span className="text-gray-500">{r.label}: </span>
                         <span className="font-semibold text-gray-700">{r.value} {r.unit}</span>
                       </div>
                     ))}
                   </div>
                   {trend.discharge_baseline?.source === 'simulated' && (
-                    <div className="text-xs text-gray-400 mt-1.5 italic">
+                    <div className="text-xs text-gray-500 mt-1.5 italic">
                       Simulated. In a live programme this is recorded by whoever discharges
                       the patient.
                     </div>
@@ -580,32 +634,41 @@ export default function WeeklyTrendPanel({ patientId, compact = false, onLoaded 
       {/* Chart */}
       <div className={compact ? 'h-44 w-full mb-2' : 'h-64 w-full mb-2'}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={trend.weeks} margin={{ top: 5, right: 52, left: -20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-            <XAxis dataKey="week_label" tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false}
+          <LineChart data={chartData} margin={{ top: 5, right: 52, left: -20, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-gray-200)" />
+            <XAxis dataKey="week_label" tick={{ fill: 'var(--color-gray-500)', fontSize: 12 }} axisLine={false} tickLine={false}
               padding={{ left: 12, right: 12 }} />
-            <YAxis domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 12 }} axisLine={false} tickLine={false} />
+            <YAxis domain={[0, 100]} tick={{ fill: 'var(--color-gray-500)', fontSize: 12 }} axisLine={false} tickLine={false} />
             {/* Where the bands start (fixed product bands: 20% Medium, 40% High). */}
-            <ReferenceLine y={40} stroke="#C0392B" strokeDasharray="4 4" strokeOpacity={0.5}
-              label={{ value: 'High', position: 'right', fill: '#b91c1c', fontSize: 11 }} />
-            <ReferenceLine y={20} stroke="#c58700" strokeDasharray="4 4" strokeOpacity={0.5}
-              label={{ value: 'Medium', position: 'right', fill: '#92400e', fontSize: 11 }} />
+            <ReferenceLine y={40} stroke="var(--color-risk-high)" strokeDasharray="4 4" strokeOpacity={0.5}
+              label={{ value: 'High', position: 'right', fill: 'var(--color-risk-high)', fontSize: 11 }} />
+            <ReferenceLine y={20} stroke="var(--risk-medium-fill)" strokeDasharray="4 4" strokeOpacity={0.5}
+              label={{ value: 'Medium', position: 'right', fill: 'var(--risk-medium-ink)', fontSize: 11 }} />
             <Tooltip content={<TrendTooltip />} />
-            <Line type="monotone" dataKey="risk_score" stroke="#0F2A4A" strokeWidth={2.5} dot={<TrendDot />} activeDot={{ r: 7 }} />
+            <Line type="monotone" dataKey="past_score" stroke="var(--color-gray-500)" strokeWidth={2}
+              connectNulls={false} dot={<PastDot />} activeDot={{ r: 6 }}
+              isAnimationActive={!prefersReducedMotion} />
+            <Line type="monotone" dataKey="live_score" stroke="var(--color-ns-navy)" strokeWidth={2.5}
+              connectNulls={false}
+              dot={<LiveDot last={count - 1} live={live} single={weekly && count === 1}
+                            prefersReducedMotion={prefersReducedMotion} />}
+              activeDot={{ r: 7 }} isAnimationActive={!prefersReducedMotion} />
           </LineChart>
         </ResponsiveContainer>
       </div>
       <p className={`text-xs text-gray-500 ${compact ? 'mb-4' : 'mb-6'}`}>
         {weekly ? (trend.weeks.length > 1
-          ? `Discharge ${weekDate(trend.weeks[0].week_date)}, then one score per week since. Hollow points are weeks with no readings.`
+          ? `Discharge ${weekDate(trend.weeks[0].week_date)}, then one score per week since. Grey points are past weeks; the coloured point is the latest. Hollow points are weeks with no readings.`
           : `Discharge score only - no weekly readings since ${weekDate(trend.weeks[0]?.week_date)}.`)
-          : 'One point per scored admission.'}
+          : 'One point per scored admission. Grey points are past admissions; the coloured point is the latest.'}
+        {weekly && monitoringCaption(trend.live, live)}
       </p>
 
       {/* Per-week breakdown */}
       <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
-        {weeksToShow.slice().reverse().map((week) => (
+        {weeksToShow.slice().reverse().map((week, i) => (
           <WeekCard key={week.week_number} week={week} patientId={patientId} weekly={weekly}
+                    newest={i === 0} live={live}
                     seriesDiagnosis={trend.primary_diagnosis}
                     group={trend.clinical_group?.label}
                     groupFocus={trend.signal_plan?.focus} />

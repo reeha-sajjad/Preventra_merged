@@ -189,6 +189,92 @@ def build_feature_frame(payload: dict) -> pd.DataFrame:
     return df
 
 
+def frame_from_features(features: dict) -> pd.DataFrame:
+    """
+    One-row frame over the model's 94 inputs from a dict of feature values
+    (missing -> NaN), with the categorical columns cast to the training levels.
+    The same frame a stored discharge row or a stored input set is scored on.
+    """
+    st = _load()
+    frame = pd.DataFrame([{f: (features or {}).get(f, np.nan) for f in st["features"]}])
+    for col in st["features"]:
+        levels = st["categoricals"].get(col)
+        frame[col] = (pd.Categorical(frame[col].astype(object), categories=levels) if levels
+                      else pd.to_numeric(frame[col], errors="coerce"))
+    return frame
+
+
+def score_features(features: dict) -> dict:
+    """Score a dict of the model's 94 inputs; same keys as score_manual_entry."""
+    return score_frame(frame_from_features(features))
+
+
+def features_for_storage(values) -> dict:
+    """The 94 inputs as plain, BSON-safe values: unknown -> None, categories ->
+    their level as text, whole numbers -> int, the rest full-precision floats
+    (rounding would move a score)."""
+    out = {}
+    for key, value in dict(values).items():
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            out[key] = None
+        elif isinstance(value, (bool, np.bool_)):
+            out[key] = int(value)
+        elif isinstance(value, (int, np.integer)):
+            out[key] = int(value)
+        elif isinstance(value, (float, np.floating)):
+            out[key] = float(value)
+        else:
+            out[key] = str(value)
+    return out
+
+
+def _known(value) -> bool:
+    return value is not None and not (not isinstance(value, str) and pd.isna(value))
+
+
+def overlay_manual(features: dict, manual: dict) -> dict:
+    """Stored inputs with the values a person edited laid over them. Only the
+    fields they filled in change; charlson_score and prior_adm_flag are
+    derived again, never taken from the form."""
+    st = _load()
+    out = dict(features)
+    for key, value in (manual or {}).items():
+        if key in st["features"] and key not in ("charlson_score", "prior_adm_flag") \
+                and value is not None and value != "":
+            out[key] = (1.0 if value else 0.0) if key in CHARLSON_FLAGS else value
+    if any(c in (manual or {}) for c in CHARLSON_FLAGS):
+        flags = [out.get(c) for c in CHARLSON_FLAGS]
+        if any(_known(f) and f for f in flags):
+            out["charlson_score"] = float(sum(CHARLSON_WEIGHTS[c] for c in CHARLSON_FLAGS
+                                              if _known(out.get(c)) and out.get(c)))
+        else:
+            out["charlson_score"] = 0.0 if any(_known(f) for f in flags) else np.nan
+    npa = (manual or {}).get("n_prior_adm")
+    if npa not in (None, ""):
+        out["prior_adm_flag"] = 1.0 if float(npa) > 0 else 0.0
+    return out
+
+
+def manual_from_features(features: dict) -> dict:
+    """The manual-entry fields held in a stored set of inputs, for pre-filling
+    the edit form (comorbidities as yes / no, other flags as 1 / 0)."""
+    out = {}
+    for key in (ENTERABLE_CATEGORICAL + ENTERABLE_NUMERIC + ENTERABLE_FLAGS
+                + CHARLSON_FLAGS + ENTERABLE_LABS):
+        value = (features or {}).get(key)
+        if not _known(value):
+            continue
+        if key in CHARLSON_FLAGS:
+            out[key] = bool(value)
+        elif key in ENTERABLE_FLAGS:
+            out[key] = int(value)
+        elif key in ENTERABLE_CATEGORICAL:
+            out[key] = str(value)
+        else:
+            out[key] = float(value)
+    return out
+
+
 def risk_band(score_pct: float) -> str:
     b = _load()["bands"]
     if score_pct >= b["high_score_threshold"]:

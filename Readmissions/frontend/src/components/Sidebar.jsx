@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, HeartPulse, BarChart, UserPlus, Info, Stethoscope, UsersRound, ClipboardList, X,
          FlaskConical, Settings, CalendarClock, Pill, List, Target } from 'lucide-react';
-import { MANUAL_ENTRY_ENABLED, getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
+import { getFollowUpsWaiting, FOLLOWUPS_CHANGED } from '../api';
 import { readClaims } from '../api/auth';
 import { can, INSURER_ROLES, OVERVIEW_ROLES, STAFF_ROLES, CONSOLE_ROLES, STUDIO_ROLES, MY_PATIENTS_ROLES, FOLLOWUP_HANDLE_ROLES,
-         PHARMACY_ROLES, OUTCOME_ROLES, ROLE_LABELS } from '../roles';
+         PHARMACY_ROLES, OUTCOME_ROLES, SCORE_ROLES, ROLE_LABELS } from '../roles';
 import AppSwitcher from './AppSwitcher';
 
 // Below `md` the sidebar is an off-canvas drawer; at `md` and above it is the
@@ -66,8 +66,8 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
     ...(can(FOLLOWUP_HANDLE_ROLES)
       ? [{ name: 'Follow-ups', path: '/follow-ups', icon: <CalendarClock size={20} />, badge: waiting }] : []),
     ...(can(OUTCOME_ROLES) ? [{ name: 'Outcomes', path: '/outcomes', icon: <Target size={20} /> }] : []),
-    ...(MANUAL_ENTRY_ENABLED
-      ? [{ name: 'Manual Entry', path: '/manual-entry', icon: <UserPlus size={20} /> }]
+    ...(can(SCORE_ROLES)
+      ? [{ name: 'Score a patient', path: '/manual-entry', icon: <UserPlus size={20} /> }]
       : []),
     { name: 'Analytics', path: '/analytics', icon: <BarChart size={20} /> },
     ...(can(STUDIO_ROLES) ? [{ name: 'Model Studio', path: '/model-studio', icon: <FlaskConical size={20} /> }] : []),

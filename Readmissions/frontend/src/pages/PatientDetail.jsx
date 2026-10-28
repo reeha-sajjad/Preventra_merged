@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getPatientById, getPatientSummary } from '../api';
-import { myRole, can, ASSIGN_ROLES, INSURER_ROLES } from '../roles';
+import { myRole, can, ASSIGN_ROLES, INSURER_ROLES, RESCORE_ROLES } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
+import RescoreDialog from '../components/patient/RescoreDialog';
 import CareTeamCard from '../components/shared/CareTeamCard';
 import FollowUpCard from '../components/followups/FollowUpCard';
 import { EmergencyBanner } from '../components/emergency/EmergencyAccess';
@@ -198,6 +199,7 @@ export default function PatientDetail() {
             <span>Readmission Risk Trend</span>
             <ChevronRight size={14} />
           </button>
+          {can(RESCORE_ROLES) && !isPatient && !isCarer && <RescoreDialog patientId={patient.id} onSaved={reload} />}
         </div>
 
         <div className="flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-8 bg-gray-50 px-8 py-4 rounded-xl border border-gray-100">

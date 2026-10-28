@@ -58,7 +58,8 @@ from api import auth
 # through a ScopedDB are limited to the caller's patients on all of them.
 PATIENT_COLLECTIONS = ("patient_worklist", "weekly_monitoring", "care_actions", "alerts",
                        "clinical_alerts", "risk_registry", "notifications", "followups",
-                       "care_team_history", "checkins", "discharge_plans", "readmission_outcomes")
+                       "care_team_history", "checkins", "discharge_plans", "readmission_outcomes",
+                       "model_inputs", "rescore_log")
 
 # Which roles may do each kind of change. Reading is governed by the scope
 # alone; insurers and patients are read-only.
@@ -67,6 +68,12 @@ ACTIONS = {
     "edit_patients":  ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager"),
     "assign":         ("superadmin", "hospital_admin", "case_manager"),
     "add_patients":   ("superadmin", "hospital_admin"),
+    # Calculating a risk score for a typed or uploaded patient writes nothing,
+    # so every role that works with patients may; ADDING one stays add_patients.
+    "score_patients": ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager"),
+    # Re-running the models on one patient already on the list (api/patient_rescore.py):
+    # the server re-scores from the inputs it holds, never from a number the browser sends.
+    "rescore_patients": ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager"),
     "manage_doctors": ("superadmin", "hospital_admin"),
     "respond_alerts": ("superadmin", "doctor", "nurse", "case_manager"),
     # A forecast sweep scans and writes alerts for the whole cohort, every

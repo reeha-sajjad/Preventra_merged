@@ -6,6 +6,7 @@ import {
 import RiskBadge from '../components/shared/RiskBadge';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
+import { WeekTable } from '../components/patient/RescoreDialog';
 import {
   MimicPatientForm, emptyForm, filledFieldCount, getScoreColor,
 } from '../components/shared/PatientFormFields';
@@ -31,6 +32,9 @@ export default function UpdatePatient() {
   const [originalBand, setOriginalBand]   = useState(null);
   const [loadingPatient, setLoadingPatient] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  // False for a patient whose discharge comes from the hospital's feed.
+  const [editable, setEditable] = useState(true);
+  const [lockedReason, setLockedReason] = useState(null);
 
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState(null);
@@ -60,6 +64,8 @@ export default function UpdatePatient() {
         setForm(merged);
         setOriginalScore(data.risk_score);
         setOriginalBand(data.risk_band);
+        setEditable(data.editable !== false);
+        setLockedReason(data.reason || null);
         setLoadingPatient(false);
       })
       .catch((err) => {
@@ -104,14 +110,10 @@ export default function UpdatePatient() {
     setSaveError(null);
 
     try {
+      // The server scores the inputs itself; no score is sent.
       const res = await commitPatientUpdate(id, {
-        risk_score:     result.risk_score,
-        risk_band:      result.risk_band,
-        discharge_date: result.discharge_date,
-        driver_1:       result.driver_1_raw,
-        driver_2:       result.driver_2_raw,
-        driver_3:       result.driver_3_raw,
         raw_inputs:     form,
+        discharge_date: result.discharge_date,
       });
       setAlertCreated(!!res.alert_created);
       setSaved(true);
@@ -175,7 +177,20 @@ export default function UpdatePatient() {
       {/* A batch-loaded patient has no stored inputs to edit. Recalculating from
           a blank form scores a different, mostly-unknown patient, so say so
           rather than letting the new number look like a like-for-like update. */}
-      {filledFieldCount(form) === 0 && (
+      {!editable && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-start space-x-3 text-gray-800">
+          <Info size={18} className="mt-0.5 shrink-0" />
+          <div className="text-sm">
+            <div className="font-semibold">This patient can't be edited by hand</div>
+            <p className="mt-0.5">
+              {lockedReason || 'Their record comes from the hospital\'s feed.'} Use Re-evaluate on the
+              patient page to score it again with the current model.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {editable && filledFieldCount(form) === 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start space-x-3 text-amber-900">
           <Info size={18} className="mt-0.5 shrink-0" />
           <div className="text-sm">
@@ -191,6 +206,7 @@ export default function UpdatePatient() {
       )}
 
       {/* Form */}
+      {editable && (
       <form onSubmit={handleSubmit} className="space-y-5">
 
         <MimicPatientForm form={form} set={set} categoricals={categoricals} />
@@ -225,6 +241,7 @@ export default function UpdatePatient() {
           </button>
         </div>
       </form>
+      )}
 
       {/* Result panel */}
       {result && (
@@ -275,6 +292,16 @@ export default function UpdatePatient() {
               ))}
             </div>
           </div>
+
+          {result.weeks?.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+              <h3 className="text-base font-semibold text-ns-navy mb-1">Weekly scores</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                The weekly scores are recomputed from the new discharge score.
+              </p>
+              <WeekTable weeks={result.weeks} />
+            </div>
+          )}
 
           <AiInsightsPanel
             patientId={id}

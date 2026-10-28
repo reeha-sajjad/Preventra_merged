@@ -8,6 +8,14 @@
   --color-trend-improving: #2563EB;
 }
 
+/* Plain custom properties are always emitted; theme variables only when used.
+   The chart's Medium dot and line label need the darker amber (DESIGN.md): the
+   theme's #F0A500 is under 3:1 on white. */
+:root {
+  --risk-medium-fill: #c58700;
+  --risk-medium-ink: #92400e;
+}
+
 @layer base {
   body {
     @apply bg-gray-50 text-gray-900 m-0 p-0 font-sans;

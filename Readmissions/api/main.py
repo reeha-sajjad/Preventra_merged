@@ -7,7 +7,7 @@ import time
 import shutil
 import threading
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import certifi
 from dotenv import load_dotenv
@@ -50,7 +50,8 @@ from api.chatbot_queries import _patient_id_filter
 from api.ai_insights import generate_roi_and_counterfactual, generate_week_narrative
 from models import early_warning
 from api.forecasting import ForecastContext, mimic_scoring_bands  # noqa: E402
-from models.monitoring_rules import (RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
+from models.monitoring_rules import (CONTACT_DUE_DAYS, MONITORING_DAYS, _discharge_date,
+                                     RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
                                      LABEL_TO_SIGNAL, MODEL_SOURCE, SIGNAL_RULES,
                                      contact_gap, contact_gap_text, score_week, signal_plan,
                                      signals_for, source_for, variant_for, week_sources)
@@ -73,16 +74,18 @@ API_KEY = os.environ.get("API_KEY")
 # ---------------------------------------------------------------------------
 # Manual entry
 # ---------------------------------------------------------------------------
-# Typing a new patient into the worklist by hand is off by default. The three
-# create endpoints below refuse while it is off, and the frontend hides the
-# page to match (VITE_MANUAL_ENTRY_ENABLED).
+# ADDING a typed or uploaded patient to the worklist is off by default. The
+# endpoints that add refuse while it is off, and the frontend hides the button
+# to match (VITE_MANUAL_ENTRY_ENABLED).
 #
-# Refusing server-side rather than only hiding the nav link is the point: a
-# hidden link is a suggestion, and these endpoints write to patient_worklist
-# and move the executive_summary counts. Editing an EXISTING patient is a
-# separate feature and is unaffected.
+# Refusing server-side rather than only hiding the button is the point: a
+# hidden button is a suggestion, and these endpoints write to patient_worklist
+# and move the executive_summary counts. CALCULATING a score for such a patient
+# writes nothing, so it is always on for the roles that score patients
+# (api/access.py "score_patients"). Editing an EXISTING patient is a separate
+# feature and is unaffected.
 #
-# Turning it back on is one variable on each side, no code change.
+# Turning adding back on is one variable on each side, no code change.
 MANUAL_ENTRY_ENABLED = os.environ.get(
     "MANUAL_ENTRY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 
@@ -1471,6 +1474,13 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
                   "how they have gone are a reason to escalate, not to wait.")
     first, latest = (scores[0], scores[-1]) if scores else (0.0, 0.0)
 
+    # Whether the patient is still inside the monitoring window (plus the days
+    # a last check-in is allowed to be late). The chart pulses its latest point
+    # only while this is true; afterwards the latest point is just the last one.
+    today = hospital_clock.today()
+    discharged = _discharge_date(docs)
+    elapsed = (today - discharged).days if discharged else None
+
     return {
         "patient_id": patient_id,
         "series_kind": "weekly",
@@ -1487,6 +1497,8 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
         "status_label": _TREND_STATUS_LABELS[status],
         "recommended_action": action,
         "contact": contact,
+        "live": {"as_of": today.isoformat(), "days_since_discharge": elapsed,
+                 "active": elapsed is not None and 0 <= elapsed <= MONITORING_DAYS + CONTACT_DUE_DAYS},
         "weeks_tracked": len(weeks),
         "first_score": first,
         "latest_score": latest,
@@ -1672,6 +1684,7 @@ def get_patient_trend(patient_id: str, request: Request):
         "patient_id": patient_id,
         "series_kind": "admissions",
         "simulated": False,
+        "live": {"active": False},
         "monitoring_status": monitoring_status,
         "status_label": _TREND_STATUS_LABELS[monitoring_status],
         "recommended_action": _TREND_STATUS_ACTIONS[monitoring_status],
@@ -2258,7 +2271,7 @@ def studio_score(request: Request, file: UploadFile = File(...), target: str = F
 # the previous decision-path driver walker cannot run on it at all. Feature
 # building, scoring, banding and SHAP-based driver extraction now live in
 # api/mimic_scoring.py; this module just exposes them over HTTP.
-from api import mimic_scoring
+from api import manual_patients, mimic_scoring, patient_rescore
 from api.roi_model import compute_roi, roi_case, suggested_actions
 
 
@@ -2350,6 +2363,29 @@ class WorklistSaveRequest(BaseModel):
     driver_2: str
     driver_3: str
     raw_inputs: Optional[dict] = None
+    # Not trusted for scoring (the server re-scores), but a patient cannot be
+    # filed without one of them.
+    primary_icd_code: Optional[str] = None
+    primary_diagnosis: Optional[str] = None
+
+
+class ManualPatientRecord(ManualPatientInput):
+    """One external patient typed into the form or read from a CSV row: the
+    model's inputs plus who they are, what they were treated for and their
+    discharge vitals (api/manual_patients.py)."""
+    external_ref: Optional[str] = None
+    admit_date: Optional[str] = None
+    primary_icd_code: Optional[str] = None
+    primary_diagnosis: Optional[str] = None
+    secondary_diagnoses: Optional[List[str]] = None
+    weight_kg: Optional[float] = None
+    spo2: Optional[float] = None
+    sbp: Optional[float] = None
+    heart_rate: Optional[float] = None
+
+
+class ManualRecordsRequest(BaseModel):
+    records: List[ManualPatientRecord] = Field(min_length=1, max_length=manual_patients.MAX_ROWS)
 
 
 def _split_driver(s: str) -> dict:
@@ -2385,6 +2421,91 @@ def get_manual_entry_schema():
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Schema unavailable: {exc}")
 
+def _scored_rows(rows: list) -> list:
+    """Each {row, record, errors}, plus its score when it has no errors.
+    Writes nothing. A model that cannot run is a 503 for the whole request."""
+    cats = manual_patients.categories()
+    out = []
+    for item in rows:
+        record, errors = item["record"], list(item["errors"])
+        errors += manual_patients.check(record, cats)
+        shown = {"row": item["row"], "record": record, "errors": errors}
+        if not errors:
+            try:
+                shown.update(manual_patients.score(record))
+            except manual_patients.ScoringUnavailable as exc:
+                raise HTTPException(status_code=503, detail=str(exc))
+        out.append(shown)
+    return out
+
+
+@app.get("/api/manual-entry/template")
+def manual_entry_template(request: Request):
+    """The columns of the upload file, with an example row. Always on."""
+    _require(request, "score_patients")
+    return manual_patients.template()
+
+
+@app.post("/api/manual-entry/score")
+def manual_entry_score(body: ManualRecordsRequest, request: Request):
+    """Risk score and drivers for typed records. Writes nothing."""
+    _require(request, "score_patients")
+    rows = [{"row": i, "record": r.model_dump(exclude_none=True), "errors": []}
+            for i, r in enumerate(body.records, start=1)]
+    return {"rows": _scored_rows(rows)}
+
+
+@app.post("/api/manual-entry/parse")
+async def manual_entry_parse(request: Request, file: UploadFile = File(...)):
+    """Read a CSV and score each valid row. Writes nothing."""
+    _require(request, "score_patients")
+    content = await file.read(manual_patients.MAX_BYTES + 1)
+    try:
+        parsed = manual_patients.parse_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    for item in parsed["rows"]:
+        try:
+            item["record"] = ManualPatientRecord(**item["record"]).model_dump(exclude_none=True)
+        except ValueError as exc:
+            item["errors"].append(f"could not be read: {exc}")
+    return {"rows": _scored_rows(parsed["rows"]), "unknown_columns": parsed["unknown_columns"]}
+
+
+def _add_manual_records(request: Request, records: list) -> list:
+    """File every record on the caller's hospital, or none: all are checked
+    before the first is written."""
+    hospital = access.hospital_of(request.state.user)
+    if not hospital:
+        raise HTTPException(status_code=400, detail="Pick a hospital first")
+    cats = manual_patients.categories()
+    bad = [{"row": i, "errors": manual_patients.add_errors(r) + manual_patients.check(r, cats)}
+           for i, r in enumerate(records, start=1)]
+    bad = [b for b in bad if b["errors"]]
+    if bad:
+        said = "; ".join(f"row {b['row']}: {', '.join(b['errors'])}" for b in bad[:5])
+        raise HTTPException(status_code=422, detail={
+            "message": f"Nothing was added. {said}" + (" ..." if len(bad) > 5 else ""), "rows": bad})
+    try:
+        scored = [manual_patients.score(r) for r in records]      # every score before any write
+    except manual_patients.ScoringUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    added = []
+    try:
+        for i, (record, result) in enumerate(zip(records, scored), start=1):
+            added.append({"row": i, **manual_patients.add(db, request.state.user, record, hospital, scored=result)})
+    finally:
+        _cache.clear()
+    return added
+
+
+@app.post("/api/manual-entry/add", dependencies=[Depends(require_manual_entry)])
+def manual_entry_add(body: ManualRecordsRequest, request: Request):
+    """Add typed or uploaded patients to the caller's hospital, scored here."""
+    _require(request, "add_patients")
+    return {"added": _add_manual_records(request, [r.model_dump(exclude_none=True) for r in body.records])}
+
+
 @app.post("/api/patients/predict", dependencies=[Depends(require_manual_entry)])
 def predict_patient(payload: ManualPatientInput, request: Request):
     _require(request, "add_patients")
@@ -2402,94 +2523,25 @@ def predict_patient(payload: ManualPatientInput, request: Request):
 @app.post("/api/patients/worklist-add", dependencies=[Depends(require_manual_entry)])
 def add_to_worklist(payload: WorklistSaveRequest, request: Request):
     """
-    Persist a manually scored patient into patient_worklist and update
-    executive_summary counts (total_patients + the relevant band count).
-
-    Handles the upsert case: if the patient already exists in this batch
-    (e.g. re-submitted), the old band count is decremented and the new one
-    incremented so totals stay accurate.
+    Add one patient to the caller's hospital. Kept for older callers: the score,
+    band and drivers in the body are ignored - the server scores the inputs
+    itself (api/manual_patients.add) - and so is the patient_id, which is
+    generated, so a browser can never overwrite someone else's patient.
     """
     _require(request, "add_patients")
-    # The id comes from the browser. If it already names a patient the caller
-    # cannot see - another hospital's, or an unowned legacy record - refuse
-    # with the same 404 as for any unseen patient rather than overwrite it.
-    known = (db["care_actions"].find_one(_patient_id_filter(payload.patient_id), {"_id": 1})
-             or db["patient_worklist"].find_one(_patient_id_filter(payload.patient_id), {"_id": 1}))
-    if known:
-        _require_patient(request, payload.patient_id)
-
-    batch_date = get_latest_batch_date(db, "patient_worklist")
-    if not batch_date:
-        batch_date = datetime.now().strftime("%Y-%m-%d")
-
-    # Map risk_band → executive_summary field name
-    _BAND_FIELD = {"High": "high_count", "Medium": "medium_count", "Low": "low_count"}
-    new_band_field = _BAND_FIELD.get(payload.risk_band)
-
-    # Check if this patient already exists in the worklist for this batch
-    existing = db["patient_worklist"].find_one(
-        {"patient_id": payload.patient_id, "batch_date": batch_date},
-        {"risk_band": 1},
-    )
-
-    doc = {
-        "patient_id":         payload.patient_id,
-        "batch_date":         batch_date,
-        "risk_score":         payload.risk_score,
-        "risk_band":          payload.risk_band,
-        "discharge_date":     payload.discharge_date,
-        "driver_1":           payload.driver_1,
-        "driver_2":           payload.driver_2,
-        "driver_3":           payload.driver_3,
-        "source":             "manual",
-        "raw_inputs":         payload.raw_inputs or {},
-    }
-
-    db["patient_worklist"].update_one(
-        {"patient_id": payload.patient_id, "batch_date": batch_date},
-        {"$set": doc},
-        upsert=True,
-    )
-
-    # Build the executive_summary $inc delta
-    summary_delta: dict = {}
-    if existing is None:
-        # Brand-new patient — increment total and band count
-        summary_delta["total_patients"] = 1
-        if new_band_field:
-            summary_delta[new_band_field] = 1
-    else:
-        old_band_field = _BAND_FIELD.get(existing.get("risk_band"))
-        if old_band_field != new_band_field:
-            # Band changed — swap counts (total unchanged)
-            if old_band_field:
-                summary_delta[old_band_field] = -1
-            if new_band_field:
-                summary_delta[new_band_field] = 1
-
-    if summary_delta:
-        db["executive_summary"].update_one(
-            {"batch_date": batch_date},
-            {"$inc": summary_delta},
-        )
-
-    # A new patient belongs to the hospital of whoever added it; without an
-    # ownership record nobody but the superadmin could see it (api/access.py).
-    db["care_actions"].update_one(
-        _patient_id_filter(payload.patient_id),
-        {"$setOnInsert": {"patient_id": payload.patient_id, "notes": [],
-                          "coordinator_name": None, "assigned_at": None,
-                          "assigned_nurse_ids": [],
-                          "hospital_id": access.hospital_of(request.state.user)}},
-        upsert=True,
-    )
-    access.forget_hospital_lists()
-
-    return {
-        "status":     "added",
-        "patient_id": payload.patient_id,
-        "batch_date": batch_date,
-    }
+    fields = set(ManualPatientInput.model_fields)
+    record = {k: v for k, v in (payload.raw_inputs or {}).items() if k in fields and v not in (None, "")}
+    record.update({"discharge_date": payload.discharge_date,
+                   "primary_icd_code": payload.primary_icd_code,
+                   "primary_diagnosis": payload.primary_diagnosis})
+    try:
+        record = ManualPatientRecord(**record).model_dump(exclude_none=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    added = _add_manual_records(request, [record])[0]
+    return {"status": "added", "patient_id": added["patient_id"],
+            "risk_score": added["risk_score"], "risk_band": added["risk_band"],
+            "batch_date": get_latest_batch_date(db, "patient_worklist")}
 
 
 # ---------------------------------------------------------------------------
@@ -2498,24 +2550,64 @@ def add_to_worklist(payload: WorklistSaveRequest, request: Request):
 # alert.
 # ---------------------------------------------------------------------------
 
-SCORE_JUMP_ALERT_THRESHOLD = 15.0
-_BAND_RANK = {"Low": 1, "Medium": 2, "High": 3}
+SCORE_JUMP_ALERT_THRESHOLD = patient_rescore.SCORE_JUMP_ALERT_THRESHOLD
 
 
 class UpdateCommitRequest(BaseModel):
-    risk_score: float
-    risk_band: str
-    driver_1: str
-    driver_2: str
-    driver_3: str
+    # Only raw_inputs is read: the server scores them itself, so a score,
+    # band or driver sent by the browser is ignored.
+    risk_score: Optional[float] = None
+    risk_band: Optional[str] = None
+    driver_1: Optional[str] = None
+    driver_2: Optional[str] = None
+    driver_3: Optional[str] = None
     raw_inputs: dict
     discharge_date: Optional[str] = None
 
 
+class RescoreRequest(BaseModel):
+    target: Literal["discharge", "weekly"]
+    commit: bool = False
+
+
+def _rescoring(call):
+    """Run a re-score, turning its refusals into the status codes the pages expect."""
+    try:
+        return call()
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=f"Scoring unavailable: {exc}")
+
+
+@app.get("/api/patients/{patient_id}/rescore")
+def get_rescore_options(patient_id: str, request: Request):
+    """What re-evaluating this patient would do: the inputs held, the model, and
+    whether the discharge score and the weekly trend can each be re-run."""
+    _require_detail(request, patient_id)
+    _require(request, "rescore_patients")
+    return _rescoring(lambda: patient_rescore.options(db, patient_id))
+
+
+@app.post("/api/patients/{patient_id}/rescore")
+def rescore_patient(patient_id: str, body: RescoreRequest, request: Request):
+    """Re-run the models on one patient. A preview unless `commit` is true; the
+    server scores from the inputs it holds and never from a number sent here."""
+    _require_patient(request, patient_id)
+    _require(request, "rescore_patients")
+    _require_detail(request, patient_id)
+    out = _rescoring(lambda: patient_rescore.run(db, request.state.user, patient_id, body.target, body.commit))
+    if body.commit:
+        _cache.clear()
+    return out
+
+
 @app.get("/api/patients/{patient_id}/edit")
 def get_patient_for_edit(patient_id: str, request: Request):
-    """Return a patient's stored raw_inputs (prefilled with defaults for any
-    missing field) plus their current risk_score/band, for the Update Patient form."""
+    """Return a patient's stored inputs (prefilled with defaults for any missing
+    field) plus their current risk_score/band, for the Update Patient form."""
     _require_detail(request, patient_id)
     batch_date = get_latest_batch_date(db, "patient_worklist")
     if not batch_date:
@@ -2523,12 +2615,13 @@ def get_patient_for_edit(patient_id: str, request: Request):
 
     row = db["patient_worklist"].find_one(
         {**_patient_id_filter(patient_id), "batch_date": batch_date},
-        {"_id": 0, "raw_inputs": 1, "risk_score": 1, "risk_band": 1, "discharge_date": 1},
+        {"_id": 0, "risk_score": 1, "risk_band": 1, "discharge_date": 1},
     )
     if not row:
         raise HTTPException(status_code=404, detail="Patient not found")
+    held = _rescoring(lambda: patient_rescore.edit_inputs(db, patient_id))
 
-    raw_inputs = {**ManualPatientInput().model_dump(), **(row.get("raw_inputs") or {})}
+    raw_inputs = {**ManualPatientInput().model_dump(), **(held["inputs"] or {})}
     raw_inputs["discharge_date"] = raw_inputs.get("discharge_date") or row.get("discharge_date") or ""
 
     return {
@@ -2537,16 +2630,20 @@ def get_patient_for_edit(patient_id: str, request: Request):
         "risk_band":      row.get("risk_band", "Low"),
         "discharge_date": row.get("discharge_date", ""),
         "raw_inputs":     raw_inputs,
+        "editable":       held["editable"],
+        "reason":         held["reason"],
     }
 
 
 @app.post("/api/patients/{patient_id}/predict-update")
 def predict_patient_update(patient_id: str, payload: ManualPatientInput, request: Request):
-    """Recompute risk_score/band/drivers for an edited patient. Preview only — does NOT persist."""
+    """Recompute risk_score/band/drivers for an edited patient, and the weeks
+    that follow. Preview only - does NOT persist."""
     _require_patient(request, patient_id)
     _require(request, "edit_patients")
     _require_detail(request, patient_id)
-    scored = _score_manual_input(payload)
+    scored = _rescoring(lambda: patient_rescore.preview_edit(
+        db, request.state.user, patient_id, payload.model_dump(exclude={"discharge_date"})))
     discharge_date = payload.discharge_date or datetime.now().strftime("%Y-%m-%d")
 
     return {
@@ -2559,81 +2656,24 @@ def predict_patient_update(patient_id: str, payload: ManualPatientInput, request
 @app.post("/api/patients/{patient_id}/update")
 def commit_patient_update(patient_id: str, payload: UpdateCommitRequest, request: Request):
     """
-    Persist a recalculated score for an existing patient, update executive_summary
-    band counts, and raise an alert if the new score represents a meaningful
-    increase over the previous one (15+ points, or a jump to a higher risk band).
+    Save edited inputs for an existing patient. The server scores them itself
+    (a score sent by the browser is ignored), carries the new score through the
+    weekly scores, refreshes the band counts and raises an alert if the new
+    score is a meaningful increase (15+ points, or a jump to a higher band).
     """
     _require_patient(request, patient_id)
     _require(request, "edit_patients")
     _require_detail(request, patient_id)
-    batch_date = get_latest_batch_date(db, "patient_worklist")
-    if not batch_date:
-        batch_date = datetime.now().strftime("%Y-%m-%d")
-
-    _BAND_FIELD = {"High": "high_count", "Medium": "medium_count", "Low": "low_count"}
-    new_band_field = _BAND_FIELD.get(payload.risk_band)
-
-    existing = db["patient_worklist"].find_one(
-        {**_patient_id_filter(patient_id), "batch_date": batch_date},
-        {"risk_band": 1, "risk_score": 1, "discharge_date": 1},
-    )
-    if not existing:
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    old_score = float(existing.get("risk_score", 0))
-    old_band = existing.get("risk_band", "Low")
-
-    doc = {
-        "patient_id":     patient_id,
-        "batch_date":     batch_date,
-        "risk_score":     payload.risk_score,
-        "risk_band":      payload.risk_band,
-        "discharge_date": payload.discharge_date or existing.get("discharge_date", ""),
-        "driver_1":       payload.driver_1,
-        "driver_2":       payload.driver_2,
-        "driver_3":       payload.driver_3,
-        "raw_inputs":     payload.raw_inputs,
-    }
-    db["patient_worklist"].update_one(
-        {**_patient_id_filter(patient_id), "batch_date": batch_date},
-        {"$set": doc},
-        upsert=True,
-    )
-
-    old_band_field = _BAND_FIELD.get(old_band)
-    if old_band_field != new_band_field:
-        summary_delta: dict = {}
-        if old_band_field:
-            summary_delta[old_band_field] = -1
-        if new_band_field:
-            summary_delta[new_band_field] = 1
-        if summary_delta:
-            db["executive_summary"].update_one({"batch_date": batch_date}, {"$inc": summary_delta})
-
-    score_delta = payload.risk_score - old_score
-    band_jumped_up = _BAND_RANK.get(payload.risk_band, 0) > _BAND_RANK.get(old_band, 0)
-    alert_created = False
-
-    if score_delta >= SCORE_JUMP_ALERT_THRESHOLD or band_jumped_up:
-        db["alerts"].insert_one({
-            "patient_id":    patient_id,
-            "old_score":     old_score,
-            "new_score":     payload.risk_score,
-            "old_band":      old_band,
-            "new_band":      payload.risk_band,
-            "delta":         round(score_delta, 1),
-            "triggered_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "acknowledged":  False,
-        })
-        alert_created = True
-
+    done = _rescoring(lambda: patient_rescore.commit_edit(
+        db, request.state.user, patient_id, payload.raw_inputs))
+    _cache.clear()
     return {
         "status":        "updated",
         "patient_id":    patient_id,
-        "batch_date":    batch_date,
-        "old_score":     old_score,
-        "new_score":     payload.risk_score,
-        "alert_created": alert_created,
+        "batch_date":    done["batch_date"],
+        "old_score":     done["old_score"],
+        "new_score":     done["new_score"],
+        "alert_created": done["alert_created"],
     }
 
 
