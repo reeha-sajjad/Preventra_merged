@@ -39,12 +39,20 @@ readmission rate. A 30-day outcome is known from:
 A readmission to another hospital is invisible unless someone records it, so
 the observed rate can only be too LOW. The page says so.
 
+WHO COMES BACK - every known outcome again, readmitted against not readmitted:
+by who the patient was (age, sex, insurance, earlier admissions, where they went),
+by condition (with and without each monitoring group), and by the warning signs
+at their last weekly reading before the readmission or day 30. Descriptive: a
+difference says two things went together, never that one caused the other. Any
+group of 1-10 patients is withheld on the server (MIN_GROUP).
+
 Scoped like everything else: counts over the caller's patients only (the
 ScopedDB view), and only for the roles that run a hospital's care
 (access.ACTIONS view_outcomes). No dollar figures, so a case manager sees it.
 """
 from __future__ import annotations
 
+import math
 import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -54,7 +62,8 @@ from fastapi import HTTPException
 from api import access, discharge_plan
 from api.db_utils import get_latest_batch_date
 from ingestion import scheduler
-from models.monitoring_rules import MONITORING_DAYS, _as_date, contact_gap
+from models.monitoring_rules import (
+    CONTACT_DUE_DAYS, MONITORING_DAYS, SIGNAL_RULES, _as_date, contact_gap, profile_for, red_flags)
 
 COLLECTION = "readmission_outcomes"
 PERIODS = (7, 30, 90)
@@ -265,12 +274,15 @@ def _contact(db, view, since: datetime, today) -> dict:
                 continue
             monitored += 1
             overdue += contact_gap(doc["weeks"], today)["overdue"]
-    sent = list(view["checkins"].find({"at": {"$gte": since}}, {"_id": 0, "patient_id": 1, "by_role": 1,
-                                                                "red_flags": 1}))
+    docs = list(view["checkins"].find({"at": {"$gte": since}}, {"_id": 0, "patient_id": 1, "by_role": 1,
+                                                                "red_flags": 1, "simulated": 1}))
+    # A record a script wrote for the demo (scripts/prepare_demo.py) is not a patient sending anything.
+    sent = [c for c in docs if not c.get("simulated")]
     return {"monitored_now": monitored, "overdue_now": overdue,
             "checkins": len(sent), "checkin_patients": len({c["patient_id"] for c in sent}),
             "by_caretaker": sum(1 for c in sent if c.get("by_role") == "caretaker"),
-            "with_red_flags": sum(1 for c in sent if c.get("red_flags"))}
+            "with_red_flags": sum(1 for c in sent if c.get("red_flags")),
+            "checkins_simulated": len(docs) - len(sent)}
 
 
 def _mental_health(view, since: datetime, rows: list) -> dict:
@@ -281,7 +293,8 @@ def _mental_health(view, since: datetime, rows: list) -> dict:
     weeks holds too few to compare."""
     from models.mood_screen import PHQ2_POSITIVE, PHQ8_MODERATE
     screens = [c for c in view["checkins"].find({"mood": {"$exists": True}},
-                                                {"_id": 0, "patient_id": 1, "discharge_date": 1, "at": 1, "mood": 1})
+                                                {"_id": 0, "patient_id": 1, "discharge_date": 1, "at": 1, "mood": 1,
+                                                 "simulated": 1})
                if (c.get("mood") or {}).get("phq2") is not None]
     cutoff = _stamp(since)
     recent = [c for c in screens if _stamp(c.get("at")) and _stamp(c["at"]) >= cutoff]
@@ -299,8 +312,14 @@ def _mental_health(view, since: datetime, rows: list) -> dict:
     for c in screens:
         key = (str(c["patient_id"]), str(c.get("discharge_date")))
         screen[key] = screen.get(key, False) or c["mood"]["phq2"] >= PHQ2_POSITIVE
+    # Demo answers (scripts/prepare_demo.py) still count here, but are said to be simulated.
+    def is_sim(c):
+        return bool(c.get("simulated") or c["mood"].get("simulated"))
+    sim_discharges = {(str(c["patient_id"]), str(c.get("discharge_date"))) for c in screens if is_sim(c)}
     return {
         "screened": len({str(c["patient_id"]) for c in recent}),
+        "simulated": len({str(c["patient_id"]) for c in recent if is_sim(c)}),
+        "simulated_compared": sum(1 for r in rows if (r[0], r[1]) in sim_discharges),
         "positive": len(positive), "moderate_or_worse": len(moderate), "referred": len(referred),
         "by_screen": {
             "positive": _observed_vs_expected([r for r in rows if screen.get((r[0], r[1])) is True])["overall"],
@@ -318,8 +337,10 @@ def _discharges(view, since_day: str, batch: Optional[str]) -> list:
 
 def _known_outcomes(db, view, batch: Optional[str], today) -> tuple:
     """Every discharge of the caller's patients with a known 30-day outcome:
-    [(patient_id, discharge_date, discharge score, band, readmitted, source)],
-    and how many discharges are past their 30 days at all."""
+    [(patient_id, discharge_date, discharge score, band, readmitted, source, extra)],
+    and how many discharges are past their 30 days at all. `extra` carries what
+    the who-comes-back panels need: the readmission date if known, the
+    hospital, and the earlier admissions."""
     known = {}
     closed_before = (today - timedelta(days=MONITORING_DAYS)).isoformat()
     scope = view.scope
@@ -331,7 +352,7 @@ def _known_outcomes(db, view, batch: Optional[str], today) -> tuple:
     if stays:
         for r in db["risk_registry"].find({"encounter_key": {"$in": [s["encounter_key"] for s in stays]}},
                                           {"_id": 0, "hospital_id": 1, "encounter_key": 1, "risk_score": 1,
-                                           "risk_band": 1, "scored_at": 1}).sort("scored_at", 1):
+                                           "risk_band": 1, "scored_at": 1, "n_prior_adm": 1}).sort("scored_at", 1):
             scores[(r.get("hospital_id"), r["encounter_key"])] = r            # the latest wins
     for s in stays:
         reg = scores.get((s.get("hospital_id"), s["encounter_key"]))
@@ -339,11 +360,15 @@ def _known_outcomes(db, view, batch: Optional[str], today) -> tuple:
         if not reg or when is None:
             continue
         known[(str(s["patient_id"]), when.isoformat())] = (
-            float(reg["risk_score"]), str(reg.get("risk_band") or "").title(), bool(s["readmitted_30d"]), "records")
+            float(reg["risk_score"]), str(reg.get("risk_band") or "").title(), bool(s["readmitted_30d"]), "records",
+            {"readmit_date": None, "hospital_id": s.get("hospital_id"), "n_prior_adm": reg.get("n_prior_adm")})
     # The care team's own record wins for the same discharge.
     for d in db[COLLECTION].find(access.scope_query(scope), {"_id": 0}):
-        known[(str(d["patient_id"]), d["discharge_date"])] = (
-            float(d.get("discharge_score") or 0), d.get("discharge_band") or "", bool(d["readmitted"]), "care_team")
+        key = (str(d["patient_id"]), d["discharge_date"])
+        earlier = known[key][-1]["n_prior_adm"] if key in known else None      # the records still know this
+        known[key] = (
+            float(d.get("discharge_score") or 0), d.get("discharge_band") or "", bool(d["readmitted"]), "care_team",
+            {"readmit_date": d.get("readmit_date"), "hospital_id": d.get("hospital_id"), "n_prior_adm": earlier})
     # Every discharge whose outcome could be known by now: the current ones on
     # the worklist past their 30 days, and any with a known outcome - a
     # readmission is known the day it happens, before the 30 days are up.
@@ -367,6 +392,385 @@ def _observed_vs_expected(rows: list) -> dict:
                           if n and sum(r[2] for r in items) else None)}
     return {"overall": block(rows),
             "bands": [{"band": b, **block([r for r in rows if r[3] == b])} for b in BANDS]}
+
+
+# ============================================================ who comes back
+MIN_GROUP = 11   # CMS-style small-cell rule: a count of 1-10 patients is never sent, so never shown
+BLOCK = ("known", "readmitted", "observed_rate", "expected_rate", "ratio")
+# The first band is "Under 45", not "18-44": a typed patient may be younger than 18
+# (manual_patients.RANGES allows 0-120), and MIMIC's censored 91 and the ingest cap of 90
+# both land in "85 and over".
+AGE_BANDS = ((44, "under_45", "Under 45"), (64, "45_64", "45-64"), (74, "65_74", "65-74"),
+             (84, "75_84", "75-84"), (None, "85_plus", "85 and over"))
+DIMENSIONS = (
+    ("age", "Age", [(k, label) for _, k, label in AGE_BANDS] + [("unknown", "Not recorded")]),
+    ("sex", "Sex", [("female", "Female"), ("male", "Male"), ("unknown", "Other or not recorded")]),
+    ("insurance", "Insurance", [("medicare", "Medicare"), ("medicaid", "Medicaid"), ("private", "Private"),
+                                ("other", "Other or self-pay"), ("unknown", "Not recorded")]),
+    ("prior", "Admissions before this one", [("0", "None"), ("1", "1"), ("2", "2"), ("3_plus", "3 or more"),
+                                             ("unknown", "Not recorded")]),
+    ("destination", "Discharged to", [("home", "Home"), ("facility", "Nursing or rehab facility"),
+                                      ("ama", "Left against medical advice"), ("other", "Somewhere else"),
+                                      ("unknown", "Not recorded")]),
+)
+# key, label, what counts - each an existing threshold (models/monitoring_rules.py, models/mood_screen.py)
+SIGNS = (
+    ("weight_gain", "Weight gain", "1 kg or more above the discharge weight (2 kg in cancer care)"),
+    ("missed_medicines", "Missed medicines", "under 80% of doses taken, or a refill not collected"),
+    ("low_oxygen", "Low oxygen", "under 92% (under 88% in chronic lung disease)"),
+    ("missed_followup", "Missed follow-up", "the booked review was not attended"),
+    ("no_contact", "No recent contact", f"no readings for over {CONTACT_DUE_DAYS} days"),
+    ("red_flag", "A red-flag answer", "a reading that needs assessing the same day"),
+    ("low_mood", "Low mood", "PHQ-2 of 3 or more, or PHQ-8 of 10 or more"),
+)
+
+
+def _number(value) -> Optional[float]:
+    """A stored value as a number, or None when it is blank or not one."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(number) else number
+
+
+def _first(*values):
+    """The first value that was actually recorded."""
+    return next((v for v in values if v is not None and v != "" and not (isinstance(v, float) and math.isnan(v))),
+                None)
+
+
+def _age_band(value) -> str:
+    age = _number(value)
+    if age is None or age < 0:
+        return "unknown"
+    return next(key for upper, key, _ in AGE_BANDS if upper is None or age <= upper)
+
+
+def _sex(value) -> str:
+    text = str(value or "").strip().upper()
+    return "female" if text in ("F", "FEMALE") else "male" if text in ("M", "MALE") else "unknown"
+
+
+def _insurance(value) -> str:
+    text = str(value or "").strip().upper().replace(" ", "_")
+    if text in ("MEDICARE", "MEDICAID", "PRIVATE"):
+        return text.lower()
+    return "other" if text in ("OTHER", "SELF_PAY", "NO_CHARGE") else "unknown"
+
+
+def _prior(value) -> str:
+    count = _number(value)
+    if count is None or count < 0 or math.isinf(count):
+        return "unknown"
+    return str(int(count)) if count < 3 else "3_plus"
+
+
+def _destination(disposition, flags: Optional[dict]) -> str:
+    """Where the patient went: the hospital's own word for it, else the three
+    yes/no inputs the model was given (home, nursing or rehab facility, left
+    against advice)."""
+    from ingestion.vocab import SNF_DISPOSITIONS
+    if disposition:
+        text = str(disposition).upper()
+        return ("home" if text in ("HOME", "HOME_WITH_SERVICES") else "facility" if text in SNF_DISPOSITIONS
+                else "ama" if text == "AMA" else "other")
+    ama, snf, home = (_number((flags or {}).get(k)) for k in ("disch_ama", "disch_snf", "disch_home"))
+    if ama is None and snf is None and home is None:
+        return "unknown"
+    return "ama" if ama else "facility" if snf else "home" if home else "other"
+
+
+def _signs_at(last: dict, quiet: bool) -> dict:
+    """Which warning signs a weekly reading showed: True, False, or None when
+    that sign was not reported - a blank is never counted as a no. Each uses
+    the threshold the monitoring rules and the mood screen already use."""
+    from models.mood_screen import LOW_ADHERENCE, PHQ2_POSITIVE, PHQ8_MODERATE
+    obs = last.get("monitoring") or {}
+    rules = profile_for(last.get("clinical_group") or "general")["rules"]
+    kg, spo2 = _number(obs.get("weight_change_kg")), _number(obs.get("spo2"))
+    adherence, refill = _number(obs.get("adherence_pct")), obs.get("refill_status")
+    followup = obs.get("followup_status")
+    mood = last.get("mood") or {}
+    phq2, phq8 = _number(mood.get("phq2")), _number(mood.get("phq8"))
+    weight_rule = rules.get("weight_change_kg", SIGNAL_RULES["weight_change_kg"][2])
+    oxygen_rule = rules.get("spo2", SIGNAL_RULES["spo2"][2])
+    return {
+        "weight_gain": None if kg is None else kg > 0 and weight_rule(kg)[0] > 0,
+        "missed_medicines": (None if adherence is None and refill is None
+                             else (adherence is not None and adherence < LOW_ADHERENCE) or refill == "missed"),
+        "low_oxygen": None if spo2 is None else oxygen_rule(spo2)[1] in ("low", "very_low"),
+        "missed_followup": None if followup is None else followup == "missed",
+        "no_contact": bool(quiet),
+        "red_flag": bool(last.get("red_flags")),
+        "low_mood": None if phq2 is None else phq2 >= PHQ2_POSITIVE or (phq8 or 0) >= PHQ8_MODERATE,
+    }
+
+
+def _last_reading(weeks: list, discharged, until, readmitted: bool) -> tuple:
+    """(the last reading that was taken, whether contact had gone quiet by `until`).
+    Readings after the discharge and before the day the patient came back, or up
+    to day 30 for a patient who did not; a week with nothing in it is not a reading."""
+    inside = []
+    for w in weeks or []:
+        day = _as_date(w.get("week_date"))
+        if day is None or int(w.get("week_number") or 0) <= 0 or day <= discharged:
+            continue
+        if day < until if readmitted else day <= until:
+            inside.append((day, int(w["week_number"]), w))
+    inside = [w for _, _, w in sorted(inside, key=lambda t: (t[0], t[1]))]
+    seen = [w for w in inside if w.get("observed") is not False]
+    if not seen:
+        return None, False
+    # The discharge itself counts as the first contact, so the calendar check has a start.
+    gap = contact_gap([{"week_number": 0, "week_date": discharged.isoformat(), "observed": True}] + inside, until)
+    return seen[-1], gap["weeks_without_contact"] > 0
+
+
+def _facts(db, view, rows: list, batch: Optional[str]) -> dict:
+    """What is known about each discharge in `rows`, by (patient, day): who the
+    patient was, their conditions, and the last reading before the readmission
+    or day 30. The only part of this module that reads more than the rows - at
+    most five reads, whatever the number of patients.
+
+    ingest_stays and ingest_weeks are not scoped by patient, so they are asked
+    only for the caller's patient ids AND the caller's hospital."""
+    from api import scoring_service
+    from features.weekly_rows import to_observations
+    from models.icd_groups import classify, classify_all
+
+    pids = sorted({str(r[0]) for r in rows})
+    ids = access.id_variants(pids)
+    own = access.hospital_of(view.user)
+    hospitals = [own] if own else sorted({r[6]["hospital_id"] for r in rows if r[6].get("hospital_id")}, key=str)
+    by_patient: dict = {}
+    for s in (db["ingest_stays"].find(
+            {"hospital_id": {"$in": hospitals}, "patient_id": {"$in": ids}},
+            {"_id": 0, "patient_id": 1, "hospital_id": 1, "encounter_key": 1, "encounter.admit_datetime": 1,
+             "encounter.discharge_datetime": 1, "encounter.age_years": 1, "encounter.payer_class": 1,
+             "encounter.discharge_disposition": 1, "patient.sex": 1, "diagnoses": 1, "discharge_vitals": 1})
+            if hospitals else []):
+        by_patient.setdefault(str(s["patient_id"]), []).append(s)
+    current = {str(w["patient_id"]): w for w in (view["patient_worklist"].find(
+        {"batch_date": batch, "patient_id": {"$in": ids}},
+        {"_id": 0, "patient_id": 1, "discharge_date": 1, "anchor_age": 1, "gender": 1, "n_prior_adm": 1,
+         "clinical_group": 1, "clinical_groups": 1, "raw_inputs": 1}) if batch else [])}
+    stored = {str(m["patient_id"]): m.get("features") or {} for m in view["model_inputs"].find(
+        {"patient_id": {"$in": ids}, "current": True},
+        {"_id": 0, "patient_id": 1, "features.insurance": 1, "features.disch_home": 1, "features.disch_snf": 1,
+         "features.disch_ama": 1, "features.anchor_age": 1, "features.gender": 1, "features.n_prior_adm": 1})}
+
+    facts, stays = {}, {}
+    for pid, day, _score, _band, readmitted, _source, extra in rows:
+        pid, start = str(pid), _as_date(day)
+        stay = next((s for s in by_patient.get(pid, [])
+                     if start and _as_date((s.get("encounter") or {}).get("discharge_datetime")) == start
+                     and (not extra.get("hospital_id") or s.get("hospital_id") == extra["hospital_id"])), None)
+        enc = (stay or {}).get("encounter") or {}
+        row = current.get(pid) if str((current.get(pid) or {}).get("discharge_date")) == day else None
+        typed = (row or {}).get("raw_inputs") or {}
+        model = stored.get(pid, {}) if row else {}
+        row = row or {}
+        if stay and stay.get("diagnoses"):
+            code, title, sec_titles, sec_codes, _ = scoring_service._diagnoses(stay)
+            groups = [m["group"] for m in classify_all(code, title, sec_titles, sec_codes)]
+            plan = classify(code, title, sec_titles, sec_codes)["group"]
+        elif row:
+            groups = [g for g in (row.get("clinical_groups") or [row.get("clinical_group")]) if g and g != "general"]
+            plan = row.get("clinical_group") or "general"
+        else:
+            groups, plan = None, "general"
+        # When a patient came back: the care team's date, else the hospital's next admission within 30 days.
+        back = _as_date(extra.get("readmit_date")) if readmitted else None
+        if readmitted and back is None and stay:
+            left = _stamp(enc.get("discharge_datetime"))
+            later = [_stamp((o.get("encounter") or {}).get("admit_datetime")) for o in by_patient[pid]
+                     if o is not stay and o.get("hospital_id") == stay.get("hospital_id")]
+            later = [a for a in later if a and left and a > left]
+            back = min(later).date() if later else None
+            if back and back > start + timedelta(days=MONITORING_DAYS):
+                back = None
+        until = back if readmitted else (start + timedelta(days=MONITORING_DAYS) if start else None)
+        flags = typed if any(typed.get(k) is not None for k in ("disch_home", "disch_snf", "disch_ama")) else model
+        facts[(pid, day)] = {
+            "age": _age_band(_first(enc.get("age_years"), row.get("anchor_age"), typed.get("anchor_age"),
+                                    model.get("anchor_age"))),
+            "sex": _sex(_first(((stay or {}).get("patient") or {}).get("sex"), row.get("gender"), typed.get("gender"),
+                               model.get("gender"))),
+            "insurance": _insurance(_first(enc.get("payer_class"), typed.get("insurance"), model.get("insurance"))),
+            "prior": _prior(_first(extra.get("n_prior_adm"), row.get("n_prior_adm"), typed.get("n_prior_adm"),
+                                   model.get("n_prior_adm"))),
+            "destination": _destination(enc.get("discharge_disposition"), flags),
+            "groups": groups, "plan": plan, "start": start, "until": until, "readmitted": bool(readmitted),
+            "last": None, "signs": None, "simulated": False}
+        stays[(pid, day)] = stay
+
+    # The weeks: an ingested discharge's come from ingest_weeks (scoring a readmission deletes its
+    # series from weekly_monitoring), everyone else's from weekly_monitoring.
+    dated = [k for k, f in facts.items() if f["start"] and f["until"]]
+    keys = sorted({stays[k]["encounter_key"] for k in dated if stays[k]})
+    ingested: dict = {}
+    for w in (db["ingest_weeks"].find(
+            {"hospital_id": {"$in": hospitals}, "encounter_key": {"$in": keys}},
+            {"_id": 0, "hospital_id": 1, "encounter_key": 1, "week_number": 1, "week_date": 1, "readings": 1,
+             "mood": 1}) if keys else []):
+        ingested.setdefault((w.get("hospital_id"), w["encounter_key"]), []).append(w)
+    plain = sorted({k[0] for k in dated if not stays[k]})
+    weekly: dict = {}
+    for w in (view["weekly_monitoring"].find(
+            {"patient_id": {"$in": access.id_variants(plain)}, "week_number": {"$gt": 0}},
+            {"_id": 0, "patient_id": 1, "week_number": 1, "week_date": 1, "observed": 1, "monitoring": 1,
+             "red_flags": 1, "mood": 1, "source": 1, "clinical_group": 1}) if plain else []):
+        weekly.setdefault(str(w["patient_id"]), []).append(w)
+
+    for key in dated:
+        f, stay = facts[key], stays[key]
+        if stay:
+            baseline = scoring_service._baseline(stay, f["plan"])
+            weeks = []
+            for w in ingested.get((stay.get("hospital_id"), stay["encounter_key"]), []):
+                obs = to_observations(w.get("readings") or {}, baseline)
+                weeks.append({"week_number": w["week_number"], "week_date": w.get("week_date"), "observed": True,
+                              "monitoring": obs, "red_flags": red_flags(obs), "mood": w.get("mood"),
+                              "source": "ingest", "clinical_group": f["plan"]})
+        else:
+            weeks = [{**w, "clinical_group": w.get("clinical_group") or f["plan"]} for w in weekly.get(key[0], [])]
+        last, quiet = _last_reading(weeks, f["start"], f["until"], f["readmitted"])
+        if last:
+            f["last"], f["signs"] = last, _signs_at(last, quiet)
+            f["simulated"] = last.get("source") == "simulated" or bool((last.get("mood") or {}).get("simulated"))
+    return facts
+
+
+def _cell(rows: list) -> dict:
+    """Observed against expected for one group, or nothing at all when the
+    group is 1-10 patients."""
+    block = _observed_vs_expected(rows)["overall"]
+    if 0 < block["known"] < MIN_GROUP:
+        return {**block, **{k: None for k in BLOCK}, "hidden": "small"}
+    return {**block, "hidden": None}
+
+
+def _blank(cell: dict, why: str) -> dict:
+    return {**cell, **{k: None for k in BLOCK}, "hidden": why}
+
+
+def _who_came_back(rows: list, facts: dict) -> list:
+    """Panel 1: the readmission rate for each group of each dimension. When exactly
+    one group is hidden, the smallest group left is hidden too: the totals are on
+    the page, so a single hidden group could be worked out from them."""
+    out = []
+    for key, label, groups in DIMENSIONS:
+        cells = [{"key": g, "label": name, **_cell([r for r in rows if facts[(r[0], r[1])][key] == g])}
+                 for g, name in groups]
+        shown = [c for c in cells if c["hidden"] is None and c["known"] > 0]
+        if sum(1 for c in cells if c["hidden"] == "small") == 1 and shown:
+            smallest = min(shown, key=lambda c: c["known"])
+            cells[cells.index(smallest)] = _blank(smallest, "complement")
+        out.append({"key": key, "label": label, "groups": cells})
+    return out
+
+
+def _disease_mix(rows: list, facts: dict) -> dict:
+    """Panel 2: the readmission rate with and without each monitoring group. A
+    patient with several conditions counts under each. If either side is 1-10
+    patients, both are hidden - the other could be worked out from the total.
+    The same goes for the discharges with no diagnoses on record: if they, or
+    the ones with, number 1-10, nothing is shown, because either could be
+    worked out from the other and the total."""
+    from models.icd_groups import GROUP_LABELS
+    known = [r for r in rows if facts[(r[0], r[1])]["groups"] is not None]
+    conditions = []
+    for group, label in GROUP_LABELS.items():
+        if group == "general":
+            continue
+        has = [group in facts[(r[0], r[1])]["groups"] for r in known]
+        if not any(has):
+            continue
+        with_ = _cell([r for r, yes in zip(known, has) if yes])
+        without = _cell([r for r, yes in zip(known, has) if not yes])
+        hidden = "small" if with_["hidden"] or without["hidden"] else None
+        if hidden:
+            with_, without = _blank(with_, hidden), _blank(without, hidden)
+        conditions.append({"key": group, "label": label, "with": with_, "without": without, "hidden": hidden})
+    if any(0 < n < MIN_GROUP for n in (len(known), len(rows) - len(known))):
+        conditions = [{**c, "with": _blank(c["with"], "small"), "without": _blank(c["without"], "small"),
+                       "hidden": "small"} for c in conditions]
+        return {"known": None, "unknown": None, "conditions": conditions}
+    conditions.sort(key=lambda c: (c["hidden"] is not None, -(c["with"]["known"] or 0)))
+    return {"known": len(known), "unknown": len(rows) - len(known), "conditions": conditions}
+
+
+def _readings_before(rows: list, facts: dict) -> dict:
+    """Panel 3: how often each warning sign showed at the last reading before the
+    readmission (or before day 30), readmitted against not. Each share is of the
+    patients whose reading reported that sign. A sign reported by 1-10 patients
+    in either group, or left unreported by 1-10, is hidden in both."""
+    sides, undated = {True: [], False: []}, 0
+    for r in rows:
+        f = facts[(r[0], r[1])]
+        if f["until"] is None:
+            undated += 1 if r[4] else 0         # a readmission nobody dated cannot be split into before and after
+            continue
+        sides[bool(r[4])].append(f)
+    read = {k: [f for f in side if f["last"]] for k, side in sides.items()}
+    none = {k: len(sides[k]) - len(read[k]) for k in sides}
+    # Every count here is a part of a total that is already on the page (the overall
+    # readmitted and not-readmitted), so a part of 1-10 would be worked out from the
+    # others. If any is, none of them is sent, and nor is the comparison.
+    withheld = any(0 < n < MIN_GROUP for n in (len(read[True]), len(read[False]), none[True], none[False], undated))
+
+    def sent(n):
+        return None if withheld else n
+    summary = {name: {"known": sent(len(sides[k])), "with_readings": sent(len(read[k])), "no_readings": sent(none[k])}
+               for k, name in ((True, "readmitted"), (False, "not_readmitted"))}
+    hidden = "small" if withheld or min(len(read[True]), len(read[False])) < MIN_GROUP else None
+    signs = []
+    for key, label, detail in ([] if hidden else SIGNS):
+        cells, small = {}, False
+        for k, name in ((True, "readmitted"), (False, "not_readmitted")):
+            values = [f["signs"][key] for f in read[k] if f["signs"][key] is not None]
+            cells[name] = {"reported": len(values), "with": sum(values),
+                           "share": round(100 * sum(values) / len(values), 1) if values else None}
+            # Those who did not report it are a group too: the readings less the reports.
+            small = small or 0 < len(values) < MIN_GROUP or 0 < len(read[k]) - len(values) < MIN_GROUP
+        # Those who had it, and those who did not, are each a group across both sides.
+        yes = cells["readmitted"]["with"] + cells["not_readmitted"]["with"]
+        no = (cells["readmitted"]["reported"] - cells["readmitted"]["with"]
+              + cells["not_readmitted"]["reported"] - cells["not_readmitted"]["with"])
+        small = small or 0 < yes < MIN_GROUP or 0 < no < MIN_GROUP
+        if small:
+            cells = {name: {"reported": None, "with": None, "share": None} for name in cells}
+        a, b = cells["readmitted"]["share"], cells["not_readmitted"]["share"]
+        signs.append({"key": key, "label": label, "detail": detail, **cells,
+                      "ratio": round(a / b, 2) if a is not None and b else None,
+                      "hidden": "small" if small else None})
+
+    def order(sign):
+        a, b = sign["readmitted"]["share"], sign["not_readmitted"]["share"]
+        if sign["hidden"] or a is None or b is None:
+            return (2, 0)
+        if b == 0:
+            return (0, -math.inf) if a > 0 else (1, 0)     # only among the readmitted comes first
+        return (1, -(a / b))
+    signs.sort(key=order)
+    fake = sum(1 for k in read for f in read[k] if f["simulated"])
+    real = len(read[True]) + len(read[False]) - fake
+    return {**summary, "undated": sent(undated),
+            "simulated": None if withheld or any(0 < n < MIN_GROUP for n in (fake, real)) else fake,
+            "hidden": hidden, "signs": signs}
+
+
+def _readmission_detail(db, view, rows: list, batch: Optional[str]) -> dict:
+    """The three who-comes-back panels. Below MIN_GROUP known outcomes nothing is
+    compared at all, and nothing more is read."""
+    if len(rows) < MIN_GROUP:
+        return {"min_group": MIN_GROUP, "known": len(rows), "enough": False}
+    facts = _facts(db, view, rows, batch)
+    return {"min_group": MIN_GROUP, "known": len(rows), "enough": True,
+            "overall": _observed_vs_expected(rows)["overall"],
+            "who": _who_came_back(rows, facts), "conditions": _disease_mix(rows, facts),
+            "last_readings": _readings_before(rows, facts)}
 
 
 def page(db, view, user: dict, days: int = 30, today=None) -> dict:
@@ -393,6 +797,7 @@ def page(db, view, user: dict, days: int = 30, today=None) -> dict:
         "contact": _contact(db, view, since, today),
         "discharge_planning": discharge_plan.summary(db, discharged),
         "mental_health": _mental_health(view, since, rows),
+        "readmission_detail": _readmission_detail(db, view, rows, batch),
         "readmissions": {
             **_observed_vs_expected(rows),
             "past_30_days": closed,

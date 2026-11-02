@@ -226,9 +226,9 @@ def prepare(db, hospital: str, today=None, write: bool = False, doctor: str = No
 
 
 def _add_mood(db, hospital: str, pid: str, target) -> None:
-    """Simulated mood answers on the weeks this patient has, with the check-in
-    records that Outcomes counts. No alert is raised: the demo's alerts come from
-    what the presenter does."""
+    """Simulated mood answers on the weeks this patient has, with check-in records
+    for Outcomes -> Mental health (labelled simulated, never counted as check-ins sent).
+    No alert is raised: the demo's alerts come from what the presenter does."""
     from models.mood_screen import assess
     history = []
     for doc in db[WEEKLY].find({"patient_id": {"$in": _variants(pid)}, "week_number": {"$in": list(DEMO_MOOD)},

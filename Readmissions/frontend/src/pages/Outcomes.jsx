@@ -10,13 +10,20 @@ import { getOutcomes } from '../api';
  * Outcomes (api/outcomes.py): did the care team act on what Preventra told
  * them, and did fewer patients come back? Acting on it - alerts, follow-ups,
  * staying in touch, discharge plans - over a chosen period; readmissions
- * observed against what the discharge scores expected. For hospital admins,
- * case managers and the superadmin. Counts over the caller's patients only.
+ * observed against what the discharge scores expected, and who came back - by
+ * patient, condition and last readings, every group of fewer than 11 withheld
+ * by the server. For hospital admins, case managers and the superadmin. Counts
+ * over the caller's patients only.
  */
 const hours = (h) => (h === null || h === undefined ? '—' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${h} h` : `${Math.round(h / 24)} days`);
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : '—');
 const rate = (r) => (r === null || r === undefined ? '—' : `${r}%`);
 const plural = (n, word) => `${(n ?? 0).toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+const shown = (n) => (n === null || n === undefined ? 'fewer than 11' : n.toLocaleString());
+const HIDDEN = {
+  small: 'Fewer than 11 patients - hidden',
+  complement: 'Hidden so the smaller group beside it cannot be worked out',
+};
 
 function Tile({ icon, label, value, sub, tone = 'gray', to }) {
   const Icon = icon;
@@ -150,7 +157,7 @@ function Body({ data }) {
           <Tile icon={PhoneOff} label="Gone quiet" value={c.overdue_now.toLocaleString()} tone={c.overdue_now ? 'red' : 'green'}
             sub="no readings for over 9 days after warning signs" to="/patients?trend=NeedsAttention" />
           <Tile icon={MessageSquareText} label="Check-ins sent" value={c.checkins.toLocaleString()}
-            sub={`${plural(c.checkin_patients, 'patient')} · ${c.by_caretaker} by a caretaker`} />
+            sub={`from ${plural(c.checkin_patients, 'patient')} · ${c.by_caretaker ? `${c.by_caretaker.toLocaleString()} sent by a caretaker` : 'none sent by a caretaker'}${c.checkins_simulated ? ` · ${c.checkins_simulated.toLocaleString()} simulated for the demo, not counted` : ''}`} />
           <Tile icon={Flag} label="Check-ins with a red flag" value={c.with_red_flags.toLocaleString()}
             tone={c.with_red_flags ? 'amber' : 'gray'} sub="each raised an alert at once" />
         </div>
@@ -181,6 +188,8 @@ function Body({ data }) {
       </Section>
 
       <Readmissions r={r} />
+
+      {data.readmission_detail && <ReadmissionDetail d={data.readmission_detail} />}
     </>
   );
 }
@@ -196,7 +205,7 @@ function MentalHealth({ m, days }) {
     <Section title="Mental health"
       sub={`Mood screens patients answered in their weekly check-ins in the last ${days} days. Screens, not diagnoses: they flag, they never change a risk score.`}>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Tile icon={Brain} label="Patients screened" value={m.screened.toLocaleString()} sub="answered the PHQ-2 at least once" />
+        <Tile icon={Brain} label="Patients screened" value={m.screened.toLocaleString()} sub={`answered the PHQ-2 at least once${m.simulated ? ` · ${m.simulated} with simulated demo answers` : ''}`} />
         <Tile icon={Flag} label="Screened positive" value={m.positive.toLocaleString()} tone={m.positive ? 'amber' : 'gray'}
           sub={`PHQ-2 of 3 or more · ${pct(m.positive, m.screened)} of those screened`} />
         <Tile icon={AlertCircle} label="Moderate or worse" value={m.moderate_or_worse.toLocaleString()}
@@ -226,6 +235,7 @@ function MentalHealth({ m, days }) {
           Every discharge with a known 30-day outcome whose patient answered the mood questions, whatever the period above.
           A difference says low mood and readmission went together in these patients, not that one caused the other. Small
           numbers move a lot: read fewer than about 30 known outcomes as a direction, not a result.
+          {m.simulated_compared > 0 && ` ${m.simulated_compared} of the discharges compared have simulated demo answers.`}
         </span>
       </p>
     </Section>
@@ -300,5 +310,193 @@ function Readmissions({ r }) {
         </span>
       </p>
     </Section>
+  );
+}
+
+/** One group in a "who was readmitted" card: its rate and bar, or why it is not shown. */
+function GroupRow({ label, cell }) {
+  if (cell.hidden) {
+    return (
+      <li className="flex justify-between gap-3 text-sm">
+        <span className="text-gray-700">{label}</span>
+        <span className="text-right text-xs text-gray-500">{HIDDEN[cell.hidden]}</span>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <div className="flex justify-between text-sm"><span className="text-gray-700">{label}</span>
+        <span className="font-semibold text-gray-900">{rate(cell.observed_rate)} <span className="font-normal text-gray-500">· {cell.readmitted.toLocaleString()} of {cell.known.toLocaleString()}</span></span></div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-ns-navy/70" style={{ width: `${Math.min(100, Math.round(cell.observed_rate || 0))}%` }} /></div>
+    </li>
+  );
+}
+
+/**
+ * Who came back (api/outcomes.py readmission_detail): readmitted patients against
+ * those who were not, by who they were, their conditions and their last readings.
+ * Descriptive - a difference says two things went together, never that one caused
+ * the other. The server withholds every group of fewer than 11 patients; this page
+ * only says so.
+ */
+function ReadmissionDetail({ d }) {
+  if (!d.enough) {
+    return (
+      <Section title="Who comes back" sub="Readmitted patients against those who were not: who they were, their conditions and their last readings.">
+        <p className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+          <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+          <span>
+            Not enough known outcomes yet: {d.known.toLocaleString()} of the {d.min_group} needed. These comparisons appear once
+            at least {d.min_group} discharges have a known 30-day outcome - from the hospital’s records or recorded on each
+            patient’s page.
+          </span>
+        </p>
+      </Section>
+    );
+  }
+  const mix = d.conditions;
+  const lr = d.last_readings;
+  const side = (word, s) => `${word}: ${shown(s.with_readings)} of ${shown(s.known)} had a reading ${word === 'Readmitted' ? 'before they came back' : 'in their 30 days'} (${shown(s.no_readings)} had none).`;
+  // The server sends no counts at all when any group in them is fewer than 11.
+  const withheld = lr.readmitted.known === null;
+  const share = (x) => (x.reported === 0 ? <span className="text-xs text-gray-500">not reported</span>
+    : <>{rate(x.share)} <span className="text-xs text-gray-500">· {x.with.toLocaleString()} of {x.reported.toLocaleString()}</span></>);
+  return (
+    <>
+      <Section title="Who was readmitted"
+        sub={`Readmission rate by group, against ${rate(d.overall.observed_rate)} for all ${d.overall.known.toLocaleString()} discharges with a known 30-day outcome, whatever the period above.`}>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {d.who.map((dim) => (
+            <section key={dim.key} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900">{dim.label}</h3>
+              <p className="text-xs text-gray-500">Readmitted · of the group with a known outcome</p>
+              <ul className="mt-3 space-y-2.5">
+                {dim.groups.filter((g) => g.hidden || g.known).map((g) => <GroupRow key={g.key} label={g.label} cell={g} />)}
+              </ul>
+            </section>
+          ))}
+        </div>
+        <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+          <span>
+            “Not recorded” is a group of its own, never dropped: insurance and where the patient went come from the hospital’s
+            records or the model’s stored inputs. A group of fewer than 11 patients is never shown; when one is hidden, the next
+            smallest is hidden too, so it cannot be worked out from the total. A difference says these things went together,
+            not that one caused the other.
+          </span>
+        </p>
+      </Section>
+
+      <Section title="Disease mix" sub="Readmission rate with and without each condition. A patient with several conditions counts under each.">
+        {mix.known === null ? (
+          <p className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+            <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+            <span>Hidden: fewer than 11 discharges have, or lack, diagnoses on record, so any comparison could be used to pick them out.</span>
+          </p>
+        ) : mix.conditions.length ? (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Condition</th>
+                  <th scope="col" className="px-4 py-3 text-right">With it</th>
+                  <th scope="col" className="px-4 py-3 text-right">Without it</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {mix.conditions.map((c) => (
+                  <tr key={c.key}>
+                    <th scope="row" className="px-4 py-2.5 text-left font-medium text-gray-900">{c.label}</th>
+                    {c.hidden ? (
+                      <td colSpan={2} className="px-4 py-2.5 text-right text-xs text-gray-500">Fewer than 11 patients with or without it - hidden</td>
+                    ) : [c.with, c.without].map((x, i) => (
+                      <td key={i} className="px-4 py-2.5 text-right text-gray-800">
+                        {rate(x.observed_rate)} <span className="text-xs text-gray-500">· {x.readmitted.toLocaleString()} of {x.known.toLocaleString()}</span>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-sm text-gray-600">No condition matched these patients’ diagnoses.</p>}
+        {mix.known !== null && mix.unknown !== 0 && (
+          <p className="text-sm text-gray-600">{shown(mix.unknown)} discharges with no diagnoses on record are left out.</p>
+        )}
+      </Section>
+
+      <Section title="Readings before readmission"
+        sub="Each warning sign at the patient’s last weekly reading: before the day they came back, or within their 30 days for those who did not.">
+        {!withheld && (
+          <p className="text-sm text-gray-700">
+            {side('Readmitted', lr.readmitted)} {side('Not readmitted', lr.not_readmitted)}
+          </p>
+        )}
+        {withheld ? (
+          <p className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+            <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+            <span>Hidden: fewer than 11 patients are in one of the groups (with or without a reading, or readmitted with no date), so showing the rest could be used to pick them out.</span>
+          </p>
+        ) : lr.hidden ? (
+          <p className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+            <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+            <span>Not enough patients with readings to compare yet: at least {d.min_group} are needed in each group.</span>
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-600">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Warning sign</th>
+                  <th scope="col" className="px-4 py-3 text-right">Readmitted</th>
+                  <th scope="col" className="px-4 py-3 text-right">Not readmitted</th>
+                  <th scope="col" className="px-4 py-3 text-right">Readmitted ÷ not</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {lr.signs.map((x) => (
+                  <tr key={x.key}>
+                    <th scope="row" className="px-4 py-2.5 text-left font-medium text-gray-900">
+                      {x.label}
+                      <div className="text-xs font-normal text-gray-500">{x.detail}</div>
+                    </th>
+                    {x.hidden ? (
+                      <td colSpan={3} className="px-4 py-2.5 text-right text-xs text-gray-500">A group of fewer than 11 - hidden</td>
+                    ) : (
+                      <>
+                        <td className="px-4 py-2.5 text-right text-gray-800">{share(x.readmitted)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-800">{share(x.not_readmitted)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-800">
+                          {x.ratio !== null ? `${x.ratio}×` : x.readmitted.share > 0 && x.not_readmitted.share === 0 ? 'only in readmitted' : '—'}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!withheld && lr.undated !== 0 && (
+          <p className="text-sm text-gray-600">{shown(lr.undated)} readmissions with no date are left out: their readings cannot be split into before and after.</p>
+        )}
+        {!withheld && lr.simulated !== 0 && (
+          <p className="text-sm text-gray-600">
+            {lr.simulated === null ? 'Some' : lr.simulated.toLocaleString()} of these last readings are simulated demo data, not readings from patients.
+          </p>
+        )}
+        {!withheld && !lr.hidden && (
+          <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+            <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+            <span>
+              Sorted by how much more common each sign was among readmitted patients. Each share is of the patients whose last
+              reading reported that sign - a blank is not counted as a no. A sign that was more common before readmission went
+              together with coming back in these patients; it does not show that it caused it. Small numbers move a lot: read
+              fewer than about 30 in a group as a direction, not a result.
+            </span>
+          </p>
+        )}
+      </Section>
+    </>
   );
 }
