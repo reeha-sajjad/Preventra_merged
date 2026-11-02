@@ -47,6 +47,11 @@ Rules:
   * After OVERDUE_DAYS an open request is flagged. A finished one leaves the
     list, and its outcome shows on the patient's page for SHOW_DONE_DAYS.
     Nothing is deleted: every change is in the request's `history`.
+  * A doctor or nurse may also give a REASON (FOLLOWUP_REASONS: a behavioural health
+    referral), on the request form or by choosing it as an alert-reply action. It
+    is for the care team (api/access.py `view_mood`): other roles get the request
+    without it (_without_reason). GLP-1's twin has no staff reason; the drift is
+    accepted.
   * The list shows what booking needs - patient number, risk, care team, who
     asked, how soon and their note - and none of the clinical layer
     (45 CFR 164.514(d), minimum necessary).
@@ -70,6 +75,8 @@ COLLECTION = "followups"
 URGENCY = {"urgent": "Urgent - within days", "routine": "Routine - within weeks"}
 OUTCOMES = {"booked": "Booked", "unreachable": "Couldn't reach patient", "not_needed": "Not needed"}
 REQUEST_ROLES = ("doctor", "nurse")
+# Why a doctor or nurse asks, optional. Readmissions only: GLP-1's twin has none.
+FOLLOWUP_REASONS = {"behavioural_health": "Behavioural health referral"}
 # What a pharmacy can report about a patient who fills there. Same list as GLP-1's.
 PHARMACY_PROBLEMS = {
     "missed_pickup":  "Missed a refill pickup",
@@ -103,7 +110,7 @@ MAX_NOTE = 500
 # "Increase monitoring frequency" is: more frequent check-ins have to be
 # arranged by someone, and that is coordination work.
 BOOKING_ACTIONS = ("contact_patient", "schedule_review", "arrange_labs", "home_visit",
-                   "increase_monitoring")
+                   "increase_monitoring", "behavioural_health")
 # Who can hand a request over by replying to an alert: the care team, and the
 # superadmin answering in a doctor's inbox, as that doctor. Never a case
 # manager - they would be asking themselves.
@@ -187,6 +194,7 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
         "note": doc.get("note", ""), "requested_by": doc["requested_by"], "requested_at": asked.isoformat(),
         "source": doc.get("source", "patient_page"), "alert_id": doc.get("alert_id"),
         "notes": [{**n, "at": _aware(n["at"]).isoformat()} for n in doc.get("notes", [])],
+        "reason": doc.get("reason"), "reason_label": FOLLOWUP_REASONS.get(doc.get("reason")),
         "taken_by": doc.get("taken_by"),
         "outcome": doc.get("outcome"), "outcome_label": OUTCOMES.get(doc.get("outcome")),
         "outcome_note": doc.get("outcome_note", ""), "done_by": doc.get("done_by"),
@@ -211,7 +219,8 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
 
 # ------------------------------------------------------------ care team side
 def _insert(db, user: dict, patient_id: str, urgency: str, note: str,
-            source: str = "patient_page", alert_id: Optional[str] = None) -> dict:
+            source: str = "patient_page", alert_id: Optional[str] = None,
+            reason: Optional[str] = None) -> dict:
     ensure_indexes(db)
     who, now = _who(user), _now()
     risk = _risk(db, [patient_id]).get(patient_id)
@@ -219,24 +228,27 @@ def _insert(db, user: dict, patient_id: str, urgency: str, note: str,
            "hospital_id": _hospital_of_patient(db, patient_id), "status": "open", "urgency": urgency,
            "note": note, "requested_by": who, "requested_at": now, "notes": [],
            "source": source, "alert_id": alert_id,
+           **({"reason": reason} if reason else {}),
            "risk_at_request": risk["score"] if risk else None,
            "history": [{"action": "requested", "by": who, "at": now, "urgency": urgency,
-                        "source": source}]}
+                        "source": source, **({"reason": reason} if reason else {})}]}
     doc["_id"] = _col(db).insert_one(doc).inserted_id
     return doc
 
 
 def request(db, user: dict, scope: Optional[list], patient_id: str,
-            urgency: str, note: Optional[str]) -> dict:
+            urgency: str, note: Optional[str], reason: Optional[str] = None) -> dict:
     if user["role"] not in REQUEST_ROLES:
         raise HTTPException(status_code=403, detail="Doctors and nurses request follow-ups")
     patient_id = str(patient_id)
     access.require_patient(scope, patient_id)
     if urgency not in URGENCY:
         raise HTTPException(status_code=422, detail="Choose urgent or routine")
+    if reason is not None and reason not in FOLLOWUP_REASONS:
+        raise HTTPException(status_code=422, detail="Not a follow-up reason")
     note = _clean_note(note)
     try:
-        return public(_insert(db, user, patient_id, urgency, note))
+        return public(_insert(db, user, patient_id, urgency, note, reason=reason))
     except DuplicateKeyError:
         existing = _col(db).find_one({"active_patient": patient_id})
         raise HTTPException(status_code=409, detail={
@@ -263,18 +275,22 @@ def from_alert(db, user: dict, alert: dict) -> Optional[dict]:
     labels = [l for a, l in zip(response.get("actions") or [], response.get("action_labels") or [])
               if a in BOOKING_ACTIONS]
     note = _clean_note(("; ".join(labels) + ". " + (response.get("recommendation") or ""))[:MAX_NOTE])
+    reason = "behavioural_health" if "behavioural_health" in wanted else None
     try:
         return public(_insert(db, user, patient_id, urgency, note,
-                              source="clinical_alert", alert_id=alert.get("alert_id")))
+                              source="clinical_alert", alert_id=alert.get("alert_id"), reason=reason))
     except DuplicateKeyError:
         existing = _col(db).find_one({"active_patient": patient_id})
         who, now = _who(user), _now()
+        # A reply that is more urgent than the open request makes it urgent, and a
+        # behavioural health referral gives it that reason.
+        changes = {**({"urgency": "urgent"} if urgency == "urgent" else {}),
+                   **({"reason": reason} if reason else {})}
         _col(db).update_one({"_id": existing["_id"]}, {
             "$push": {"notes": {"by": who, "at": now, "text": f"Alert reply: {note}"},
                       "history": {"action": "note", "by": who, "at": now,
                                   "alert_id": alert.get("alert_id")}},
-            # A reply that is more urgent than the open request makes it urgent.
-            **({"$set": {"urgency": "urgent"}} if urgency == "urgent" else {})})
+            **({"$set": changes} if changes else {})})
         return public(_col(db).find_one({"_id": existing["_id"]}))
 
 
@@ -299,10 +315,28 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
                 "recent": pharmacy_view(recent[0], user) if recent else None,
                 "can_request": False, "can_handle": False, "can_report": True,
                 "problems": [{"key": k, "label": v} for k, v in PHARMACY_PROBLEMS.items()]}
-    return {"active": public(active) if active else None,
-            "recent": public(recent[0]) if recent else None,
-            "can_request": user["role"] in REQUEST_ROLES and active is None,
-            "can_handle": user["role"] in HANDLE_ROLES}
+    out = {"active": public(active) if active else None,
+           "recent": public(recent[0]) if recent else None,
+           "can_request": user["role"] in REQUEST_ROLES and active is None,
+           "can_handle": user["role"] in HANDLE_ROLES,
+           "followup_reasons": [{"key": k, "label": v} for k, v in FOLLOWUP_REASONS.items()]}
+    if not access.sees_mood(user):
+        # An insurer: the request, but not why a behavioural health referral was made.
+        out.update({"active": _without_reason(out["active"]), "recent": _without_reason(out["recent"]),
+                    "followup_reasons": []})
+    return out
+
+
+def _without_reason(item: Optional[dict]) -> Optional[dict]:
+    """A request without its reason. A behavioural health referral's note and
+    notes can say why, so they go too."""
+    if not item:
+        return item
+    out = dict(item)
+    if out.get("reason") == "behavioural_health":
+        out["note"], out["notes"] = "", []
+    out["reason"] = out["reason_label"] = None
+    return out
 
 
 def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:

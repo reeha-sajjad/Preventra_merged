@@ -63,7 +63,7 @@ class ForecastContext:
     def __init__(self, db, patient_ids=None):
         week_query = {} if patient_ids is None else {"patient_id": {"$in": patient_ids}}
         self.weeks = {}
-        # Only the four fields a forecast reads. The stored week also carries
+        # Only the five fields a forecast reads. The stored week also carries
         # three driver sentences and a narrative, which together are most of the
         # document's bytes and none of its arithmetic - pulling all 20,000 in
         # full times the cursor out against Atlas.
@@ -74,7 +74,7 @@ class ForecastContext:
         cursor = db[WEEKLY_COLLECTION].find(
             week_query,
             {"_id": 0, "patient_id": 1, "week_number": 1, "risk_score": 1,
-             "monitoring": 1},
+             "monitoring": 1, "mood": 1},
         ).batch_size(2000)
         for doc in cursor:
             self.weeks.setdefault(str(doc.get("patient_id")), []).append(doc)

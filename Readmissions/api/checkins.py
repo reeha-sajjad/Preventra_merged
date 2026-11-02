@@ -45,6 +45,12 @@ with the question's wording at the time, and `remarks`) so a later feed for the
 same week, which writes `note`, never overwrites them. At least one of the usual
 questions must still be answered.
 
+The patient themself (not a caretaker) is also offered the mood questions
+(models/mood_screen.py): the PHQ-2, the rest of the PHQ-8 when it is positive, and
+the GAD-2. They are optional, never scored, and kept under their own name (`mood`)
+beside the readings; they raise alerts only through the forecast, and only the
+clinical care team ever reads them back (api/access.py `view_mood`).
+
 Every submission is kept in `checkins` (who, when, which week, what was asked),
 which is what the Outcomes page counts.
 """
@@ -62,6 +68,7 @@ from api.db_utils import get_latest_batch_date
 from features.weekly_rows import to_observations, week_number
 from ingestion import schema
 from ingestion import scheduler
+from models import mood_screen
 from models.monitoring_rules import (CARRY, MONITORING_DAYS, RED_FLAGS, red_flags, score_week,
                                      signals_for, variant_for)
 
@@ -237,14 +244,14 @@ def form(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None
     """Whether this week's check-in is open, and what it asks."""
     from api.followups import own_patient
     pid = own_patient(user, scope, patient_id)
-    return _state(db, pid, today or scheduler.today())
+    return _state(db, pid, today or scheduler.today(), user["role"])
 
 
-def _state(db, pid: str, today) -> dict:
+def _state(db, pid: str, today, reporter: Optional[str] = None) -> dict:
     docs, week0, group, groups, baseline, discharged = _plan(db, pid)
     base = {"patient_id": pid, "open": False, "closed_reason": None, "questions": [],
             "week_number": None, "done_this_week": False, "last": _last(db, pid),
-            "custom_questions": [], "remarks_max": MAX_REMARKS}
+            "custom_questions": [], "remarks_max": MAX_REMARKS, "mood": None}
     if not week0 or discharged is None:
         return {**base, "closed_reason": "not_started"}
     days = (today - discharged).days
@@ -262,7 +269,8 @@ def _state(db, pid: str, today) -> dict:
     return {**base, "open": not done, "week_number": n, "done_this_week": bool(done),
             "next_opens": next_opens.isoformat() if next_opens <= ends else None,
             "questions": [] if done else questions_for(group, baseline),
-            "custom_questions": [] if done else custom_questions_for(db, pid)}
+            "custom_questions": [] if done else custom_questions_for(db, pid),
+            "mood": mood_screen.form() if (reporter == "patient" and not done) else None}
 
 
 def _last(db, pid: str) -> Optional[dict]:
@@ -343,15 +351,48 @@ def _remarks(text) -> Optional[str]:
     return text
 
 
+def _mood(mood_answers: dict, asked: bool) -> dict:
+    """The patient's mood answers, checked. Blank is no answer. Only the patient is
+    asked: a caretaker answering for them would put someone else's words in a
+    screen, so it is refused rather than dropped."""
+    given = {k: v for k, v in (mood_answers or {}).items() if v is not None and v != ""}
+    if not given:
+        return {}
+    if not asked:
+        raise HTTPException(status_code=422, detail="Questions about mood are answered by the patient themselves")
+    try:
+        return mood_screen.clean(given)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+def _mood_history(db, pid: str, discharged: str, n: int) -> list:
+    """The mood screens this discharge already has, before week n, oldest first."""
+    return [c["mood"] for c in db[COLLECTION].find(
+        {"patient_id": pid, "discharge_date": discharged, "week_number": {"$lt": n},
+         "mood": {"$exists": True}}, {"_id": 0, "mood": 1}).sort("week_number", 1)]
+
+
+def _adherence(db, pid: str, n: int, readings: dict) -> Optional[float]:
+    """The week's doses taken: this check-in's answer, else what another feed
+    already put on the same week."""
+    if readings.get("adherence_pct") is not None:
+        return readings["adherence_pct"]
+    week = db[WEEKLY].find_one({"patient_id": {"$in": access.id_variants([pid])}, "week_number": n},
+                               {"monitoring.adherence_pct": 1})
+    return ((week or {}).get("monitoring") or {}).get("adherence_pct")
+
+
 def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Optional[str] = None,
-           today=None, custom_answers: Optional[dict] = None, remarks: Optional[str] = None) -> dict:
+           today=None, custom_answers: Optional[dict] = None, remarks: Optional[str] = None,
+           mood_answers: Optional[dict] = None) -> dict:
     """Send this week's check-in. 409 once this week's is in."""
     from api.followups import own_patient
     if user["role"] not in REPORTERS:
         raise HTTPException(status_code=403, detail="Check-ins are sent by patients and their caretakers")
     pid = own_patient(user, scope, patient_id)
     today = today or scheduler.today()
-    state = _state(db, pid, today)
+    state = _state(db, pid, today, user["role"])
     if state["done_this_week"]:
         raise HTTPException(status_code=409, detail="This week's check-in is already in")
     if not state["open"]:
@@ -362,9 +403,13 @@ def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Opt
     readings = _readings(answers or {}, state["questions"])
     extras = _custom(custom_answers or {}, state["custom_questions"])
     note = _remarks(remarks)
-    extra = {**({"remarks": note} if note else {}), **({"custom_answers": extras} if extras else {})}
-    ensure_indexes(db)
     n, discharged = state["week_number"], state["discharge_date"]
+    given = _mood(mood_answers or {}, state["mood"] is not None)
+    mood = (mood_screen.assess(given, _mood_history(db, pid, discharged, n), n,
+                               _adherence(db, pid, n, readings)) if given else None)
+    extra = {**({"remarks": note} if note else {}), **({"custom_answers": extras} if extras else {}),
+             **({"mood": mood} if mood else {})}
+    ensure_indexes(db)
     record = {"patient_id": pid, "discharge_date": discharged, "week_number": n,
               "week_date": today.isoformat(), "at": _now(), "by_role": user["role"],
               "by_user": str(user["_id"]), "answered": sorted(readings), **extra}
@@ -381,7 +426,7 @@ def submit(db, user: dict, scope: Optional[list], answers: dict, patient_id: Opt
         flags = _score_here(db, pid, n, today, readings, user["role"], extra)
     db[COLLECTION].update_one({"_id": record["_id"]}, {"$set": {"red_flags": flags,
                                                                 "hospital_id": _hospital(db, pid)}})
-    return {**_state(db, pid, today), "sent": True, "urgent": bool(flags),
+    return {**_state(db, pid, today), "sent": True, "urgent": bool(flags), "mood_sent": bool(mood),
             "message": URGENT if flags else "Thank you. Your care team will see this.",
             "red_flags": [RED_FLAGS[k][1] for k in flags if k in RED_FLAGS]}
 

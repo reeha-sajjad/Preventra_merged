@@ -48,7 +48,7 @@ from api import insurer as insurer_home_page
 from api.chatbot_service import answer_turn
 from api.chatbot_queries import _patient_id_filter
 from api.ai_insights import generate_roi_and_counterfactual, generate_week_narrative
-from models import early_warning
+from models import early_warning, mood_screen
 from api.forecasting import ForecastContext, mimic_scoring_bands  # noqa: E402
 from models.monitoring_rules import (CONTACT_DUE_DAYS, MONITORING_DAYS, _discharge_date,
                                      RED_FLAGS, CARRIED_FORWARD_SOURCE, CARRY, DISEASE_NEUTRAL,
@@ -1443,6 +1443,9 @@ def _weekly_trend_response(patient_id: str, docs: list) -> dict:
             "reported_by": doc.get("reported_by"),
             "remarks": doc.get("remarks"),
             "custom_answers": doc.get("custom_answers") or [],
+            # The patient's own mood screen, flag only (models/mood_screen.py);
+            # api/main._hide_mood takes it off again for every role but the care team.
+            "mood": mood_screen.card(doc.get("mood"), group["group"]),
         })
         if observed:
             last = (score, wk, days)
@@ -1582,8 +1585,8 @@ def get_patient_trend(patient_id: str, request: Request):
         .sort("week_number", 1)
     )
     if weekly_docs:
-        return _hide_costs(request, _hide_private_checkin(request, _with_week_alerts(
-            request, patient_id, _weekly_trend_response(patient_id, weekly_docs))))
+        return _hide_costs(request, _hide_mood(request, _hide_private_checkin(request, _with_week_alerts(
+            request, patient_id, _weekly_trend_response(patient_id, weekly_docs)))))
 
     registry_docs = list(
         db["risk_registry"]
@@ -1737,6 +1740,14 @@ def _hide_private_checkin(request: Request, body: dict) -> dict:
     return {**body, "weeks": [
         w if w.get("reported_by") == "caretaker" else {**w, "remarks": None, "custom_answers": []}
         for w in body.get("weeks") or []]}
+
+
+def _hide_mood(request: Request, body: dict) -> dict:
+    """The trend without the patient's mood screen, for every role but the clinical
+    care team (access.ACTIONS view_mood) - the patient is not shown it back."""
+    if access.sees_mood(request.state.user):
+        return body
+    return {**body, "weeks": [{**w, "mood": None} for w in body.get("weeks") or []]}
 
 
 def _hide_costs(request: Request, body: dict) -> dict:
@@ -2781,6 +2792,7 @@ def get_my_patients(request: Request):
 class FollowUpRequest(BaseModel):
     urgency: str = "routine"
     note: Optional[str] = None
+    reason: Optional[str] = None     # followups.FOLLOWUP_REASONS; staff only, optional
 
 
 class FollowUpNote(BaseModel):
@@ -2836,7 +2848,7 @@ def get_patient_followup(patient_id: str, request: Request):
 @app.post("/api/patients/{patient_id}/followup", status_code=201)
 def request_followup(patient_id: str, body: FollowUpRequest, request: Request):
     return followups.request(db, request.state.user, _scope(request), patient_id,
-                             body.urgency, body.note)
+                             body.urgency, body.note, reason=body.reason)
 
 
 @app.post("/api/followups/{followup_id}/note")
@@ -3049,6 +3061,7 @@ class CheckIn(BaseModel):
     answers: dict
     custom_answers: dict = Field(default_factory=dict)   # the care team's own questions, by id
     remarks: Optional[str] = Field(default=None, max_length=2000)
+    mood_answers: dict = Field(default_factory=dict)   # the patient's own mood answers (models/mood_screen.py)
     patient_id: Optional[str] = None           # a caretaker: which of their people
 
 
@@ -3062,7 +3075,8 @@ def my_checkin(request: Request, patient: Optional[str] = None):
 def send_checkin(body: CheckIn, request: Request):
     """This week's readings, scored at once like any other feed's."""
     return checkins.submit(db, request.state.user, _scope(request), body.answers, body.patient_id,
-                           custom_answers=body.custom_answers, remarks=body.remarks)
+                           custom_answers=body.custom_answers, remarks=body.remarks,
+                           mood_answers=body.mood_answers)
 
 
 @app.get("/api/patients/{patient_id}/medicines-given")
@@ -3503,6 +3517,8 @@ def get_patient_forecast(patient_id: str, request: Request):
             _patient_id_filter(patient_id)) > 0
         if not exists:
             raise HTTPException(status_code=404, detail="Patient not found")
+    if not access.sees_mood(request.state.user):
+        result = early_warning.without_mood(result)
     return {"patient_id": patient_id, "patient": meta, "forecast": result}
 
 
@@ -3627,8 +3643,10 @@ def get_unrouted_alerts(request: Request, limit: int = 50):
 @app.get("/api/patients/{patient_id}/clinical-alerts")
 def get_patient_clinical_alerts(patient_id: str, request: Request):
     _require_detail(request, patient_id)
-    return {"patient_id": patient_id,
-            "alerts": doctor_service.patient_alerts(_view(request), patient_id)}
+    alerts = doctor_service.patient_alerts(_view(request), patient_id)
+    if not access.sees_mood(request.state.user):
+        alerts = [a for a in map(doctor_service.without_mood, alerts) if a is not None]
+    return {"patient_id": patient_id, "alerts": alerts}
 
 
 def _responder(request: Request) -> dict:

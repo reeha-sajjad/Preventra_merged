@@ -16,6 +16,11 @@ around today, and changes nothing else:
     active    two patients with a month of readings to yesterday - on track
     outcome   a High patient, home 40 days - record whether they came back
 
+The first "active" patient and the "outcome" patient also get four weeks of
+simulated mood answers (marked simulated everywhere they show), so the week card,
+the forecast and Outcomes -> Mental health have something to show; the check-in
+patient answers the mood questions live.
+
 Their old alerts (from the series as it was) are set aside too, so the
 clinician inbox shows only what the demo raises. With --doctor, all six are
 assigned to that doctor (registered for alerts if they are not yet), so the
@@ -51,6 +56,15 @@ WEEKLY = "weekly_monitoring"
 # scene -> (days since discharge, the last week kept: None keeps them all)
 SCENES = {"checkin": (3, 0), "quiet": (18, 1), "never": (12, 0), "active": (29, None), "outcome": (40, None)}
 ORDER = ("checkin", "quiet", "never", "active", "active", "outcome")
+# Simulated mood answers (models/mood_screen.py) for the first patient of each of these
+# scenes: week -> answers. Week 4 is PHQ-8 13, up 6 from week 3 (7).
+DEMO_MOOD = {1: {"phq_interest": 1, "phq_down": 0, "gad_nervous": 1, "gad_worry": 0},
+             2: {"phq_interest": 1, "phq_down": 1, "gad_nervous": 1, "gad_worry": 1},
+             3: {"phq_interest": 2, "phq_down": 1, "phq_sleep": 1, "phq_tired": 1, "phq_appetite": 1,
+                 "phq_failure": 0, "phq_concentration": 1, "phq_movement": 0, "gad_nervous": 2, "gad_worry": 1},
+             4: {"phq_interest": 2, "phq_down": 2, "phq_sleep": 2, "phq_tired": 2, "phq_appetite": 1,
+                 "phq_failure": 2, "phq_concentration": 1, "phq_movement": 1, "gad_nervous": 2, "gad_worry": 2}}
+MOOD_SCENES = ("active", "outcome")   # the first of each
 # What a demo leaves on these patients, cleared when it is put back.
 LEFTOVERS = ("checkins", "discharge_plans", "readmission_outcomes", "risk_watch_seen")
 
@@ -171,7 +185,7 @@ def prepare(db, hospital: str, today=None, write: bool = False, doctor: str = No
     if write and db[STATE].count_documents({"hospital_id": hospital}):
         undo(db, hospital)
     doctor_id = _demo_doctor(db, hospital, doctor) if (write and doctor) else None
-    plan = []
+    plan, mooded = [], set()
     for scene, pid in choose(db, hospital):
         days, keep = SCENES[scene]
         row = db["patient_worklist"].find_one({"patient_id": {"$in": _variants(pid)}},
@@ -191,6 +205,9 @@ def prepare(db, hospital: str, today=None, write: bool = False, doctor: str = No
             if docs:
                 db[name].delete_many({"_id": {"$in": [d["_id"] for d in docs]}})
         _move(db, pid, shift)
+        if scene in MOOD_SCENES and scene not in mooded:
+            _add_mood(db, hospital, pid, target)
+            mooded.add(scene)
         before = (db["care_actions"].find_one({"patient_id": {"$in": _variants(pid)}},
                                               {"assigned_doctor_id": 1}) or {}).get("assigned_doctor_id")
         if doctor_id:
@@ -208,6 +225,26 @@ def prepare(db, hospital: str, today=None, write: bool = False, doctor: str = No
     return plan
 
 
+def _add_mood(db, hospital: str, pid: str, target) -> None:
+    """Simulated mood answers on the weeks this patient has, with the check-in
+    records that Outcomes counts. No alert is raised: the demo's alerts come from
+    what the presenter does."""
+    from models.mood_screen import assess
+    history = []
+    for doc in db[WEEKLY].find({"patient_id": {"$in": _variants(pid)}, "week_number": {"$in": list(DEMO_MOOD)},
+                                "observed": {"$ne": False}}).sort("week_number", 1):
+        n = int(doc["week_number"])
+        mood = assess(DEMO_MOOD[n], history, n, (doc.get("monitoring") or {}).get("adherence_pct"), simulated=True)
+        history.append(mood)
+        db[WEEKLY].update_one({"_id": doc["_id"]}, {"$set": {"mood": mood}})
+        day = _as_date(doc.get("week_date"))
+        db["checkins"].insert_one({
+            "patient_id": str(pid), "discharge_date": target.isoformat(), "week_number": n,
+            "week_date": day.isoformat(), "at": datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc),
+            "by_role": "patient", "by_user": "scripts/prepare_demo.py", "answered": [], "mood": mood,
+            "red_flags": [], "hospital_id": hospital, "simulated": True})
+
+
 def undo(db, hospital: str) -> list:
     """Put back every patient the last run moved, and clear what the demo left."""
     done = []
@@ -215,6 +252,7 @@ def undo(db, hospital: str) -> list:
         pid, ids = st["patient_id"], _variants(st["patient_id"])
         since, since_local = st["prepared_at"], st.get("prepared_local", "9999")
         db[WEEKLY].delete_many({"patient_id": {"$in": ids}, "reported_by": {"$exists": True}})
+        db[WEEKLY].update_many({"patient_id": {"$in": ids}, "mood.simulated": True}, {"$unset": {"mood": ""}})
         for name in LEFTOVERS:
             db[name].delete_many({"patient_id": {"$in": ids}})
         for name in ("clinical_alerts", "notifications"):
@@ -261,7 +299,8 @@ def _refresh(db, pids: list) -> None:
 
 # ------------------------------------------------------------ the cheat sheet
 SAY = {
-    "checkin": "Sign in as {login} -> do this week's check-in (try oxygen 88 for the red flag)",
+    "checkin": "Sign in as {login} -> do this week's check-in (try oxygen 88 for the red flag; "
+               "'More than half the days' to both mood questions opens the rest of the PHQ-8)",
     "quiet": "Patients -> Needs Attention: 'No readings for 11 days since week 1'",
     "never": "Patients -> Needs Attention: 'No readings for 12 days since discharge'",
     "active": "On track: readings every week to yesterday",
@@ -299,6 +338,16 @@ def cheat_sheet(db, plan: list, case_manager: str = None, doctor: str = None) ->
             if assigned:
                 lines.append(f"  {'':<8} {'':<16} {'':<16}   Their doctor, who gets the alert: "
                              f"{assigned.get('name', '')} - {assigned.get('email', '')}")
+        moods = list(db[WEEKLY].find({"patient_id": {"$in": _variants(pid)}, "mood.simulated": True},
+                                     {"week_number": 1, "mood": 1}).sort("week_number", 1))
+        if moods:
+            last = moods[-1]["mood"]
+            phq8 = (f" PHQ-8 {last['phq8']}, {last['phq8_band']}"
+                    f"{', up ' + str(last['change']) if (last.get('change') or 0) > 0 else ''}"
+                    if last.get("phq8") is not None else "")
+            lines.append(f"  {'':<8} {'':<16} {'':<16}   Mood answers (simulated) in weeks "
+                         f"{moods[0]['week_number']}-{moods[-1]['week_number']}: week {moods[-1]['week_number']}{phq8}"
+                         f" - week cards, the forecast, Outcomes -> Mental health")
     return "\n".join(lines)
 
 

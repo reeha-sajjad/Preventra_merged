@@ -69,6 +69,7 @@ RECOMMENDED_ACTIONS = {
     "increase_monitoring": "Increase monitoring frequency",
     "escalate_ed":         "Send to the emergency department",
     "refer_specialist":    "Refer to another specialty",
+    "behavioural_health":  "Behavioural health referral",
     "no_action":           "No action needed at this time",
 }
 
@@ -79,6 +80,24 @@ URGENCIES = ("routine", "urgent", "immediate")
 # for every patient drifting a few points a week is how an alerting system gets
 # switched off within a fortnight.
 ALERTABLE_SEVERITIES = ("high", "critical")
+
+
+def without_mood(alert: dict) -> Optional[dict]:
+    """
+    The alert as a role that may not see the patient's mood screen should read it
+    (api/access.py `view_mood`): mood triggers gone and severity as the forecast
+    gave it without them. None when mood alone raised it - that alert is the
+    care team's, and the others should not learn it exists.
+    """
+    forecast = alert.get("forecast")
+    if not isinstance(forecast, dict) or not any(
+            t.get("stream") == "mood" for t in forecast.get("triggers") or []):
+        return alert
+    from models import early_warning
+    f = early_warning.without_mood(forecast)
+    if f["severity"] not in ALERTABLE_SEVERITIES:
+        return None
+    return {**alert, "forecast": f, "severity": f["severity"]}
 
 _STATUS_OPEN = ("pending", "acknowledged")
 

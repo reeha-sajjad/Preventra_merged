@@ -18,6 +18,11 @@ ACTING ON IT - from records the app already keeps, over a chosen period
                       caretakers sent (api/checkins.py)
     discharge plans   checklists complete, follow-ups booked, social needs
                       found (api/discharge_plan.py)
+    mental health     patients who answered the weekly mood questions, how many
+                      screened positive, and how many were referred
+                      (models/mood_screen.py). Screens, not diagnoses; and where
+                      it is compared with readmission it is co-occurrence, not
+                      cause.
 
 READMISSIONS - observed against expected, by the band each patient left with.
 The expected rate is the mean discharge score: the model is calibrated
@@ -268,6 +273,35 @@ def _contact(db, view, since: datetime, today) -> dict:
             "with_red_flags": sum(1 for c in sent if c.get("red_flags"))}
 
 
+def _mental_health(view, since: datetime, rows: list) -> dict:
+    """The mood screens patients answered in their weekly check-ins (flag only:
+    nothing here changes a risk score). `by_screen` compares readmission for
+    discharges whose patient screened positive with those who screened and did
+    not - every known outcome, whatever the period, because a period of a few
+    weeks holds too few to compare."""
+    from models.mood_screen import PHQ2_POSITIVE, PHQ8_MODERATE
+    screens = [c for c in view["checkins"].find({"mood": {"$exists": True}},
+                                                {"_id": 0, "patient_id": 1, "discharge_date": 1, "at": 1, "mood": 1})
+               if (c.get("mood") or {}).get("phq2") is not None]
+    cutoff = _stamp(since)
+    recent = [c for c in screens if _stamp(c.get("at")) and _stamp(c["at"]) >= cutoff]
+    positive = {str(c["patient_id"]) for c in recent if c["mood"]["phq2"] >= PHQ2_POSITIVE}
+    moderate = {str(c["patient_id"]) for c in recent if (c["mood"].get("phq8") or 0) >= PHQ8_MODERATE}
+    referred = {str(f["patient_id"]) for f in view["followups"].find(
+        {"requested_at": {"$gte": since}, "reason": "behavioural_health"}, {"_id": 0, "patient_id": 1})}
+    screen = {}
+    for c in screens:
+        key = (str(c["patient_id"]), str(c.get("discharge_date")))
+        screen[key] = screen.get(key, False) or c["mood"]["phq2"] >= PHQ2_POSITIVE
+    return {
+        "screened": len({str(c["patient_id"]) for c in recent}),
+        "positive": len(positive), "moderate_or_worse": len(moderate), "referred": len(referred),
+        "by_screen": {
+            "positive": _observed_vs_expected([r for r in rows if screen.get((r[0], r[1])) is True])["overall"],
+            "negative": _observed_vs_expected([r for r in rows if screen.get((r[0], r[1])) is False])["overall"]},
+    }
+
+
 def _discharges(view, since_day: str, batch: Optional[str]) -> list:
     if not batch:
         return []
@@ -352,6 +386,7 @@ def page(db, view, user: dict, days: int = 30, today=None) -> dict:
         "followups": _followups(view, since),
         "contact": _contact(db, view, since, today),
         "discharge_planning": discharge_plan.summary(db, discharged),
+        "mental_health": _mental_health(view, since, rows),
         "readmissions": {
             **_observed_vs_expected(rows),
             "past_30_days": closed,

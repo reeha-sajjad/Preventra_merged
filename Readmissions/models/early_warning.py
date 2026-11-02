@@ -49,6 +49,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from models.mood_screen import STREAM as MOOD_STREAM, triggers as mood_triggers
+
 # Band edges. Mirrors docs/mimic/band_thresholds_mimic.json; passed in by the
 # caller in production so the two can never drift.
 DEFAULT_BANDS = {"high_score_threshold": 40.0, "low_score_threshold": 20.0}
@@ -596,6 +598,17 @@ def forecast(weeks: list, group: str = "general",
     if corroborated:
         severity = _escalate(severity)
 
+    # Mood (models/mood_screen) is added after the corroboration rule on purpose: a mood
+    # screen is not a second clinical stream that makes a vitals alert same-day, and it
+    # is never critical itself. severity_without_mood is what the forecast says without it,
+    # for the roles that may not see mood (without_mood below).
+    severity_without_mood = severity
+    mood = mood_triggers(current.get("mood"), group)
+    if mood:
+        triggers += mood
+        severity = _worst([severity] + [t["severity"] for t in mood])
+        streams.add(MOOD_STREAM)
+
     triggers.sort(key=lambda t: SEVERITY_ORDER.index(t["severity"]), reverse=True)
 
     return {
@@ -611,6 +624,7 @@ def forecast(weeks: list, group: str = "general",
         "projected_band": projected_band,
         "band_crossing": band_crossing,
         "severity": severity,
+        "severity_without_mood": severity_without_mood,
         "corroborated": corroborated,
         "streams": sorted(streams),
         "triggers": triggers,
@@ -620,6 +634,28 @@ def forecast(weeks: list, group: str = "general",
         "clinical_group": group,
         "basis": _BASIS,
     }
+
+
+def without_mood(result: Optional[dict]) -> Optional[dict]:
+    """
+    The same forecast as the roles that may not see the patient's mood screen
+    should read it: mood triggers gone, severity and review time as they were
+    without them. A copy; the input is untouched.
+    """
+    if not result:
+        return result
+    out = {k: v for k, v in result.items() if k != "severity_without_mood"}
+    if not any(t.get("stream") == MOOD_STREAM for t in result.get("triggers") or []):
+        return out
+    kept = [t for t in result["triggers"] if t.get("stream") != MOOD_STREAM]
+    severity = result.get("severity_without_mood") or _worst([t["severity"] for t in kept])
+    out.update({
+        "triggers": kept,
+        "severity": severity,
+        "recommended_review_by": REVIEW_BY[severity],
+        "streams": sorted({t["stream"] for t in kept}),
+    })
+    return out
 
 
 _BASIS = (

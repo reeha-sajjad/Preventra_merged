@@ -49,8 +49,11 @@ def flatten(docs: list) -> pd.DataFrame:
     groups = df.get("monitoring_groups", pd.Series([[]] * len(df))).apply(
         lambda v: ",".join(map(str, v)) if isinstance(v, list) else "")
 
+    # "mood" is the patient's own mood screen (models/mood_screen.py): flag-only, so it is
+    # kept out of every weekly model's rows and the training export until it is added
+    # deliberately as named columns.
     flat = df.drop(columns=["monitoring", "discharge_baseline", "red_flags", "monitoring_groups",
-                            *BOOKKEEPING], errors="ignore")
+                            "mood", *BOOKKEEPING], errors="ignore")
     flat = pd.concat([flat.reset_index(drop=True), signals, baseline], axis=1)
     flat["n_red_flags"] = flags.apply(len).values
     flat["red_flags"] = flags.apply(lambda v: "; ".join(map(str, v))).values

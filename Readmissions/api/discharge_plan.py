@@ -21,6 +21,7 @@ explained and explained back. The items depend on the patient:
     warning_signs       every patient, with what to watch for their condition
     checkin_explained   every patient: the weekly check-in (api/checkins.py) is
                         only as good as the patient knowing to send it
+    mental_health_followup  mental health plan group only; ticked by hand
     teach_back          Medium and High
     contact_named       High, or living alone. Ticks itself when a caretaker is
                         linked (api/caretakers.py)
@@ -124,6 +125,7 @@ LABELS = {
     "meds_reconciled": "Medicines reviewed and reconciled with the patient",
     "warning_signs": "Knows the warning signs and who to call",
     "checkin_explained": "Weekly check-in explained to the patient or their caretaker",
+    "mental_health_followup": "Mental health follow-up arranged",
     "teach_back": "Explained the plan back in their own words (teach-back)",
     "contact_named": "Caretaker or contact person named",
     "pharmacy_on_file": "Pharmacy on file",
@@ -188,6 +190,8 @@ def followup_days(group: str, band: str, social: dict) -> tuple:
 def items_for(group: str, band: str, social: dict) -> list:
     """Which checklist items this patient gets, in order."""
     keys = ["followup_booked", "meds_reconciled", "warning_signs", "checkin_explained"]
+    if group == "mental_health":
+        keys.append("mental_health_followup")
     if band in ("Medium", "High"):
         keys.append("teach_back")
     if band == "High" or (social or {}).get("lives_alone") == "yes":

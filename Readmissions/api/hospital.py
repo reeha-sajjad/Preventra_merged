@@ -414,6 +414,13 @@ def overview(db, view, user: dict, batch_dates: list) -> dict:
     insurer_mix = sorted(({"id": k, "name": names.get(k, k) if k else "No insurer on file",
                            "count": n} for k, n in mix.items()), key=lambda x: -x["count"])
 
+    # An alert raised by the patient's mood screen alone is the care team's
+    # (api/access.py view_mood): the insurer's count leaves it out. Old alerts
+    # without the field still count.
+    alert_q = {"status": {"$in": OPEN_ALERT_STATUSES}}
+    if not access.sees_mood(user):
+        alert_q["forecast.severity_without_mood"] = {"$nin": ["none", "moderate"]}
+
     hospital = access.hospital_of(user)
     staff = None
     if user["role"] != "insurer":
@@ -435,7 +442,7 @@ def overview(db, view, user: dict, batch_dates: list) -> dict:
         "discharged_30d": sum(1 for r in rows if cutoff and str(r.get("discharge_date") or "") >= cutoff),
         "admissions_on_record": view["risk_registry"].count_documents({}),
         "open_alerts": (view["alerts"].count_documents({"acknowledged": False})
-                        + view["clinical_alerts"].count_documents({"status": {"$in": OPEN_ALERT_STATUSES}})),
+                        + view["clinical_alerts"].count_documents(alert_q)),
         "no_doctor": no_doctor,
         "no_nurse": no_nurse,
         "insurer_mix": insurer_mix,

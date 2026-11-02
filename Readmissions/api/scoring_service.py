@@ -529,7 +529,10 @@ def scored_weeks(db, hospital_id: str, stay: dict, week0: dict) -> list:
                      # What the patient wrote and the care team's own questions
                      # (api/checkins.py) - theirs, not the hospital feed's `note`.
                      **({"remarks": wk["remarks"]} if wk.get("remarks") else {}),
-                     **({"custom_answers": wk["custom_answers"]} if wk.get("custom_answers") else {})})
+                     **({"custom_answers": wk["custom_answers"]} if wk.get("custom_answers") else {}),
+                     # The patient's own mood answers (models/mood_screen.py) are kept
+                     # with the week and never scored.
+                     **({"mood": wk["mood"]} if wk.get("mood") else {})})
         prev_adj, prev_score = adj, score
     return docs
 

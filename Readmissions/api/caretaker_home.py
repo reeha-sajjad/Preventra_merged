@@ -74,8 +74,10 @@ def _refill_problems(db, ids: list) -> dict:
 def _booked(db, ids: list) -> dict:
     since = _now() - timedelta(days=BOOKED_DAYS)
     out = {}
+    # Not a behavioural health referral: that is the patient's to share.
     for f in db[followups.COLLECTION].find({"patient_id": {"$in": access.id_variants(ids)}, "status": "done",
-                                            "outcome": "booked", "done_at": {"$gte": since}}).sort("done_at", ASCENDING):
+                                            "outcome": "booked", "reason": {"$ne": "behavioural_health"},
+                                            "done_at": {"$gte": since}}).sort("done_at", ASCENDING):
         out[str(f["patient_id"])] = {"at": _aware(f["done_at"])}
     return out
 
