@@ -287,8 +287,14 @@ def _mental_health(view, since: datetime, rows: list) -> dict:
     recent = [c for c in screens if _stamp(c.get("at")) and _stamp(c["at"]) >= cutoff]
     positive = {str(c["patient_id"]) for c in recent if c["mood"]["phq2"] >= PHQ2_POSITIVE}
     moderate = {str(c["patient_id"]) for c in recent if (c["mood"].get("phq8") or 0) >= PHQ8_MODERATE}
+    # Referred in the period: asked for then, or added to a request that was already
+    # open by a doctor's alert reply (a history entry carrying the reason).
+    def referred_since(f):
+        return any(_stamp(e.get("at")) and _stamp(e["at"]) >= cutoff for e in
+                   [{"at": f.get("requested_at")}] + [h for h in f.get("history") or [] if h.get("reason")])
     referred = {str(f["patient_id"]) for f in view["followups"].find(
-        {"requested_at": {"$gte": since}, "reason": "behavioural_health"}, {"_id": 0, "patient_id": 1})}
+        {"reason": "behavioural_health"}, {"_id": 0, "patient_id": 1, "requested_at": 1, "history": 1})
+        if referred_since(f)}
     screen = {}
     for c in screens:
         key = (str(c["patient_id"]), str(c.get("discharge_date")))

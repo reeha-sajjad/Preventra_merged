@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Target, AlertCircle, BellRing, Timer, CalendarClock, PhoneOff, ClipboardCheck, HeartHandshake, Users,
-  MessageSquareText, Flag, Info,
+  MessageSquareText, Flag, Info, Brain,
 } from 'lucide-react';
 import { getOutcomes } from '../api';
 
@@ -156,6 +156,8 @@ function Body({ data }) {
         </div>
       </Section>
 
+      {data.mental_health && <MentalHealth m={data.mental_health} days={data.days} />}
+
       <Section title="Discharge planning" sub={`Patients discharged in the last ${data.days} days.`}>
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="grid gap-4 sm:grid-cols-3 lg:col-span-2">
@@ -180,6 +182,53 @@ function Body({ data }) {
 
       <Readmissions r={r} />
     </>
+  );
+}
+
+/**
+ * The mood screens patients answered in their weekly check-ins (models/mood_screen.py).
+ * Flag only: nothing here changes a risk score, and a screen is not a diagnosis.
+ * The comparison is co-occurrence, not cause.
+ */
+function MentalHealth({ m, days }) {
+  const compare = m.by_screen.positive.known > 0 || m.by_screen.negative.known > 0;
+  return (
+    <Section title="Mental health"
+      sub={`Mood screens patients answered in their weekly check-ins in the last ${days} days. Screens, not diagnoses: they flag, they never change a risk score.`}>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Tile icon={Brain} label="Patients screened" value={m.screened.toLocaleString()} sub="answered the PHQ-2 at least once" />
+        <Tile icon={Flag} label="Screened positive" value={m.positive.toLocaleString()} tone={m.positive ? 'amber' : 'gray'}
+          sub={`PHQ-2 of 3 or more · ${pct(m.positive, m.screened)} of those screened`} />
+        <Tile icon={AlertCircle} label="Moderate or worse" value={m.moderate_or_worse.toLocaleString()}
+          tone={m.moderate_or_worse ? 'amber' : 'gray'} sub="PHQ-8 of 10 or more" />
+        <Tile icon={CalendarClock} label="Referred" value={m.referred.toLocaleString()}
+          sub="behavioural health follow-ups requested" to="/follow-ups" />
+      </div>
+
+      {compare && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[['positive', 'Screened positive'], ['negative', 'Screened negative']].map(([k, label]) => {
+            const b = m.by_screen[k];
+            return (
+              <div key={k} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                <div className="text-sm font-medium text-gray-700">{label}</div>
+                <div className="mt-1 text-2xl font-bold text-gray-900">{rate(b.observed_rate)}</div>
+                <div className="text-xs text-gray-600">readmitted · {b.known} with a known outcome · expected {rate(b.expected_rate)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+        <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+        <span>
+          Every discharge with a known 30-day outcome whose patient answered the mood questions, whatever the period above.
+          A difference says low mood and readmission went together in these patients, not that one caused the other. Small
+          numbers move a lot: read fewer than about 30 known outcomes as a direction, not a result.
+        </span>
+      </p>
+    </Section>
   );
 }
 

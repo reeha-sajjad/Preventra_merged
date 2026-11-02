@@ -288,8 +288,8 @@ def from_alert(db, user: dict, alert: dict) -> Optional[dict]:
                    **({"reason": reason} if reason else {})}
         _col(db).update_one({"_id": existing["_id"]}, {
             "$push": {"notes": {"by": who, "at": now, "text": f"Alert reply: {note}"},
-                      "history": {"action": "note", "by": who, "at": now,
-                                  "alert_id": alert.get("alert_id")}},
+                      "history": {"action": "note", "by": who, "at": now, "alert_id": alert.get("alert_id"),
+                                  **({"reason": reason} if reason else {})}},
             **({"$set": changes} if changes else {})})
         return public(_col(db).find_one({"_id": existing["_id"]}))
 
@@ -328,13 +328,14 @@ def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
 
 
 def _without_reason(item: Optional[dict]) -> Optional[dict]:
-    """A request without its reason. A behavioural health referral's note and
-    notes can say why, so they go too."""
+    """A request without its reason. A behavioural health referral's note, notes
+    and outcome note can say why, and a request that came from an alert reply points
+    at an alert this role may not be shown, so they go too."""
     if not item:
         return item
     out = dict(item)
     if out.get("reason") == "behavioural_health":
-        out["note"], out["notes"] = "", []
+        out.update({"note": "", "notes": [], "outcome_note": "", "alert_id": None, "source": None})
     out["reason"] = out["reason_label"] = None
     return out
 

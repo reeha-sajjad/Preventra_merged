@@ -40,6 +40,18 @@ def test_the_caretaker_bell(main, world):
     assert carer.get("/api/followups/bell").json()["items"] == []
 
 
+def test_a_booked_behavioural_health_referral_is_not_announced_to_the_caretaker(main, world):
+    carer = as_user(main, world, "carer@home.test")
+    now = datetime.now(timezone.utc)
+    done = {"patient_id": A4, "status": "done", "outcome": "booked", "urgency": "routine", "hospital_id": "hosp-a",
+            "requested_by": {"id": "r", "name": "Dr A", "role": "doctor"}, "requested_at": now, "done_at": now}
+    world["db"][followups.COLLECTION].insert_one({**done, "reason": "behavioural_health"})
+    assert carer.get("/api/my-people").json()["people"][0]["alerts"] == []
+    assert [i["kind"] for i in carer.get("/api/followups/bell").json()["items"]] == []
+    world["db"][followups.COLLECTION].insert_one(done)                       # an ordinary booking still is
+    assert [a["kind"] for a in carer.get("/api/my-people").json()["people"][0]["alerts"]] == ["booked"]
+
+
 def test_the_case_manager_hears_when_medicines_stop_being_logged(main, world):
     cm = as_user(main, world, "cm@a.test")
     tick(world, 1)

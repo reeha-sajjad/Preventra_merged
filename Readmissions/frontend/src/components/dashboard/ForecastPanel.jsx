@@ -30,6 +30,7 @@ const STREAM_LABEL = {
   vitals: 'Vitals',
   symptoms: 'Symptoms',
   engagement: 'Engagement',
+  mood: 'Mood',
 };
 
 const CONFIDENCE_TEXT = {

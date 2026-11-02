@@ -14,12 +14,18 @@ const formatDay = (iso) => (iso
  * sees a score - a red flag gets the safety advice instead. After the usual
  * questions come any the care team added for this patient, then a free-text
  * remark; neither is scored, and at least one usual question must be answered.
+ * The patient themself (not a caretaker) is also offered the mood questions
+ * (models/mood_screen.py): optional, flag only, never scored. The rest of the
+ * PHQ-8 shows only once both PHQ-2 answers add up to the form's `followup_from`,
+ * and the 988 line is always on the section. What they answer is never shown
+ * back to them - only the care team reads it.
  */
 export default function CheckInCard({ patientId = null, caretaker = false, patientName = null }) {
   const [data, setData] = useState(null);
   const [answers, setAnswers] = useState({});
   const [customAnswers, setCustomAnswers] = useState({});
   const [remarks, setRemarks] = useState('');
+  const [mood, setMood] = useState({});
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -40,8 +46,21 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
   const answered = Object.values(answers).filter(filled).length;
   const custom = data.custom_questions || [];
   const customSet = (key, value) => setCustomAnswers((a) => ({ ...a, [key]: value }));
-  const extras = remarks.trim() !== '' || Object.values(customAnswers).some((v) => filled(v) && String(v).trim() !== '');
-  const reset = () => { setAnswers({}); setCustomAnswers({}); setRemarks(''); };
+  const moodForm = data.mood;
+  // Both PHQ-2 answers in, and they add up to a positive screen: ask the rest.
+  const showMore = (m) => {
+    if (!moodForm || !moodForm.phq2.every((q) => filled(m[q.key]))) return false;
+    return moodForm.phq2.reduce((sum, q) => sum + Number(m[q.key]), 0) >= moodForm.followup_from;
+  };
+  const moodSet = (key, value) => setMood((m) => {
+    const next = { ...m, [key]: value };
+    if (!showMore(next)) moodForm.phq8_more.forEach((q) => { delete next[q.key]; });
+    return next;
+  });
+  const moodSent = () => Object.fromEntries(Object.entries(mood).filter(([, v]) => filled(v)));
+  const extras = remarks.trim() !== '' || Object.values(customAnswers).some((v) => filled(v) && String(v).trim() !== '')
+    || Object.keys(moodSent()).length > 0;
+  const reset = () => { setAnswers({}); setCustomAnswers({}); setRemarks(''); setMood({}); };
   const main = data.questions.filter((q) => !q.monitor);
   const monitor = data.questions.filter((q) => q.monitor);
 
@@ -51,7 +70,7 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
     try {
       const asked = new Set(custom.map((q) => q.key));
       const sendCustom = Object.fromEntries(Object.entries(customAnswers).filter(([k]) => asked.has(k)));
-      const out = await sendCheckIn(answers, patientId, sendCustom, remarks.trim() || null);
+      const out = await sendCheckIn(answers, patientId, sendCustom, remarks.trim() || null, moodSent());
       setResult(out); setData(out); setStarted(false); reset();
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
@@ -131,6 +150,19 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
               <h3 className="text-sm font-semibold text-gray-900">From your care team</h3>
               {custom.map((q) => (
                 <Question key={q.key} q={q} value={customAnswers[q.key]} onChange={(v) => customSet(q.key, v)} />
+              ))}
+            </div>
+          )}
+          {moodForm && (
+            <div className="space-y-5">
+              <h3 className="text-sm font-semibold text-gray-900">{moodForm.title} (optional)</h3>
+              <div role="note" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                {moodForm.crisis}
+              </div>
+              <p className="text-xs text-gray-600">{moodForm.stem}</p>
+              {[...moodForm.phq2, ...(showMore(mood) ? moodForm.phq8_more : []), ...moodForm.gad2].map((q) => (
+                <Question key={q.key} q={{ key: q.key, label: q.label, kind: 'choice', options: moodForm.options }}
+                  value={mood[q.key]} onChange={(v) => moodSet(q.key, v)} />
               ))}
             </div>
           )}

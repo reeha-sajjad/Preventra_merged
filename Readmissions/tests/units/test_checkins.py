@@ -140,6 +140,33 @@ def test_the_trend_page_attributes_the_week_to_the_patient_app(main, world, a4):
     assert [s["feed"] for s in week2["sources"]] == ["Preventra patient app"]
 
 
+def test_a_caretaker_is_not_asked_about_the_patients_mood(main, world, a4):
+    carer = as_user(main, world, "carer@home.test")
+    assert carer.get(f"/api/my-home/checkin?patient={A4}").json()["mood"] is None
+    r = carer.post("/api/my-home/checkin", json={"answers": {"ankle_swelling": "mild"}, "patient_id": A4,
+                                                 "mood_answers": {"phq_interest": 3, "phq_down": 3}})
+    assert r.status_code == 422 and "patient themselves" in r.json()["detail"]
+    assert a4[checkins.COLLECTION].count_documents({}) == 0
+    assert a4["weekly_monitoring"].count_documents({"patient_id": A4, "week_number": 2}) == 0
+    # Blank mood answers are no answers, so a caretaker's ordinary check-in is unaffected.
+    r = carer.post("/api/my-home/checkin", json={"answers": {"ankle_swelling": "mild"}, "patient_id": A4,
+                                                 "mood_answers": {"phq_interest": ""}})
+    assert r.status_code == 201
+
+
+def test_a_caretaker_does_not_read_the_patients_mood(main, world, a4):
+    from models import mood_screen
+    a4["weekly_monitoring"].insert_one({
+        "patient_id": A4, "week_number": 1, "days_after_discharge": 7, "week_date": "2026-10-08",
+        "risk_score": 30.0, "risk_band": "Medium", "observed": True, "red_flags": [], "reported_by": "patient",
+        "mood": mood_screen.assess({"phq_interest": 3, "phq_down": 2}, [], 1)})
+    weeks = as_user(main, world, "carer@home.test").get(f"/api/patients/{A4}/trend").json()["weeks"]
+    assert all(w["mood"] is None for w in weeks)
+    a4["care_actions"].update_one({"patient_id": A4}, {"$set": {"assigned_doctor_id": "DR-A"}})
+    seen = as_user(main, world, "doc.a@a.test").get(f"/api/patients/{A4}/trend").json()["weeks"]
+    assert next(w for w in seen if w["week_number"] == 1)["mood"]["lines"][0]["key"] == "phq2"
+
+
 # ------------------------------------------------------------ an ingested patient
 def test_an_ingested_patients_check_in_joins_the_ingested_week(main, world, token, monkeypatch):
     from tests.units.test_ingest_scoring import send

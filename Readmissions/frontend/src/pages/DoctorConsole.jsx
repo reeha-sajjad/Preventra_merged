@@ -23,7 +23,7 @@ const SCAN_POLL_MS = 3000;
 // Reply actions a case manager arranges (api/followups.py BOOKING_ACTIONS),
 // and who hands them over by replying (ALERT_REPLY_ROLES there).
 const BOOKING_ACTIONS = ['contact_patient', 'schedule_review', 'arrange_labs', 'home_visit',
-  'increase_monitoring'];
+  'increase_monitoring', 'behavioural_health'];
 const ALERT_REPLY_ROLES = [...FOLLOWUP_REQUEST_ROLES, 'superadmin'];
 
 const SEVERITY_STYLE = {

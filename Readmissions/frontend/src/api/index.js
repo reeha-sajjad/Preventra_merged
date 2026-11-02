@@ -172,8 +172,9 @@ const RealAPI = {
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
   // The weekly check-in a patient or caretaker sends (api/checkins.py).
   getCheckIn: (patient) => apiFetch(`/api/my-home/checkin${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
-  sendCheckIn: (answers, patient, customAnswers = {}, remarks = null) =>
-    apiFetch('/api/my-home/checkin', json({ answers, patient_id: patient || null, custom_answers: customAnswers, remarks })),
+  sendCheckIn: (answers, patient, customAnswers = {}, remarks = null, moodAnswers = {}) =>
+    apiFetch('/api/my-home/checkin', json({ answers, patient_id: patient || null, custom_answers: customAnswers, remarks,
+      mood_answers: moodAnswers })),
   // The discharge plan: checklist and social needs (api/discharge_plan.py).
   getDischargePlan: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/discharge-plan`),
   tickDischargeChecklist: (id, item, done) =>

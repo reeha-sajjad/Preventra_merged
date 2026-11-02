@@ -103,6 +103,24 @@ def test_prepared_patients_show_every_feature(db):
     assert db["patient_worklist"].find_one({"patient_id": "MIMIC-9"})["discharge_date"] == "2014-01-01"
 
 
+def test_prepared_patients_carry_simulated_mood_answers_that_are_never_scored(db):
+    plan = prepare_demo.prepare(db, HID, TODAY, write=True)
+    week4 = next(w for w in series(db, "MIMIC-4") if w["week_number"] == 4)
+    assert week4["mood"]["phq8"] == 13 and week4["mood"]["simulated"]
+    assert {"phq8_moderate", "phq8_rise"} <= set(week4["mood"]["flags"])
+    assert week4["risk_score"] == 45.0 and "mood" not in week4.get("monitoring", {})
+    assert [w["mood"]["phq8"] for w in series(db, "MIMIC-4") if w.get("mood") and w["mood"]["phq8"]] == [7, 13]
+    assert any(w.get("mood") for w in series(db, "MIMIC-7"))
+    assert not any(w.get("mood") for pid in ("MIMIC-5", "MIMIC-1", "MIMIC-2", "MIMIC-3") for w in series(db, pid))
+    assert db["checkins"].count_documents({"simulated": True}) == 8
+    assert db["clinical_alerts"].count_documents({}) == 0                  # the demo raises these itself
+    sheet = prepare_demo.cheat_sheet(db, plan)
+    assert "Mood answers (simulated) in weeks 1-4: week 4 PHQ-8 13, moderate, up 6" in sheet
+    prepare_demo.undo(db, HID)
+    assert db["weekly_monitoring"].count_documents({"mood": {"$exists": True}}) == 0
+    assert db["checkins"].count_documents({}) == 0
+
+
 def test_running_again_resets_the_demo_rather_than_moving_twice(db):
     prepare_demo.prepare(db, HID, TODAY, write=True)
     # The demo happens: a check-in, an alert, a checklist tick.
@@ -116,7 +134,8 @@ def test_running_again_resets_the_demo_rather_than_moving_twice(db):
     prepare_demo.prepare(db, HID, TODAY, write=True)
     assert [w["week_number"] for w in series(db, "MIMIC-1")] == [0]
     assert series(db, "MIMIC-1")[0]["week_date"] == "2026-10-24"
-    assert db["checkins"].count_documents({}) == 0 and db["discharge_plans"].count_documents({}) == 0
+    assert db["checkins"].count_documents({"simulated": {"$ne": True}}) == 0
+    assert db["discharge_plans"].count_documents({}) == 0
     assert db["clinical_alerts"].count_documents({}) == 0       # OLD is set aside while the demo runs
     prepare_demo.undo(db, HID)
     assert {a["alert_id"] for a in db["clinical_alerts"].find()} == {"OLD"}

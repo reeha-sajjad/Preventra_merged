@@ -238,6 +238,8 @@ def _add_mood(db, hospital: str, pid: str, target) -> None:
         history.append(mood)
         db[WEEKLY].update_one({"_id": doc["_id"]}, {"$set": {"mood": mood}})
         day = _as_date(doc.get("week_date"))
+        if day is None:
+            continue
         db["checkins"].insert_one({
             "patient_id": str(pid), "discharge_date": target.isoformat(), "week_number": n,
             "week_date": day.isoformat(), "at": datetime(day.year, day.month, day.day, 12, tzinfo=timezone.utc),

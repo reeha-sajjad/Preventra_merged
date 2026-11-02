@@ -17,6 +17,11 @@ import { ago } from './format';
  *
  * Only one request is open per patient; the server enforces it
  * (api/followups.py). A doctor's reply to a clinical alert can open one too.
+ *
+ * Drift from the GLP-1 twin, accepted: a doctor or nurse here may also tick a
+ * reason (data.followup_reasons - "Behavioural health referral"), shown as a pill
+ * on the request. The server sends the reasons only to the care team, so the
+ * checkbox and the pill never appear for anyone else; GLP-1 has no such reason.
  */
 export default function FollowUpCard({ patientId }) {
   const asks = can(FOLLOWUP_REQUEST_ROLES);
@@ -25,7 +30,7 @@ export default function FollowUpCard({ patientId }) {
   const isCaseManager = me?.role === 'case_manager';
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState(null);          // { urgency, note } while asking
+  const [form, setForm] = useState(null);          // { urgency, note, reason } while asking
   const [noteText, setNoteText] = useState('');
   const [busy, setBusy] = useState(false);
   const [doneFor, setDoneFor] = useState(null);
@@ -44,7 +49,8 @@ export default function FollowUpCard({ patientId }) {
   const send = (e) => {
     e.preventDefault();
     run(async () => {
-      await requestFollowUp(patientId, { urgency: form.urgency, note: form.note.trim() || undefined });
+      await requestFollowUp(patientId, {
+        urgency: form.urgency, note: form.note.trim() || undefined, reason: form.reason || undefined });
       setForm(null);
     });
   };
@@ -85,6 +91,9 @@ export default function FollowUpCard({ patientId }) {
           <div className="flex flex-wrap items-center gap-2">
             <UrgencyPill urgency={active.urgency} />
             <StatusPill f={active} />
+            {active.reason_label && (
+              <span className="rounded bg-ns-navy/10 px-1.5 py-0.5 text-[11px] font-semibold text-ns-navy">{active.reason_label}</span>
+            )}
             {active.overdue && <span className="text-[11px] font-semibold text-risk-high">Open {active.days_open} days</span>}
           </div>
           <p className="mt-2 text-sm text-gray-700">
@@ -150,7 +159,7 @@ export default function FollowUpCard({ patientId }) {
 
       {/* Asking for one */}
       {data && !active && asks && !form && (
-        <button type="button" onClick={() => setForm({ urgency: 'routine', note: '' })}
+        <button type="button" onClick={() => setForm({ urgency: 'routine', note: '', reason: '' })}
           className="inline-flex items-center gap-2 rounded-md bg-ns-navy px-4 py-2 text-sm font-semibold text-white hover:bg-ns-navy/90">
           <CalendarClock size={15} /> Request follow-up
         </button>
@@ -176,6 +185,14 @@ export default function FollowUpCard({ patientId }) {
               placeholder="e.g. check fluid status, review within a week of discharge"
               className="mt-1.5 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-1 focus:ring-ns-navy" />
           </label>
+          {(data?.followup_reasons || []).map((r) => (
+            <label key={r.key} className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={form.reason === r.key}
+                onChange={(e) => setForm({ ...form, reason: e.target.checked ? r.key : '' })}
+                className="h-4 w-4 rounded border-gray-300 text-ns-navy focus:ring-ns-navy" />
+              {r.label}
+            </label>
+          ))}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[11px] text-gray-500">Goes to your hospital&rsquo;s case managers.</span>
             <div className="flex gap-2">

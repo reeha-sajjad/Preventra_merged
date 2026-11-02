@@ -161,6 +161,42 @@ function monitoringCaption(liveInfo, live) {
     : ` Monitoring is live (day ${day} of 30).`;
 }
 
+/**
+ * The patient's own mood and anxiety screen for the week (models/mood_screen.py),
+ * for the clinical care team only - the server leaves it null for everyone else.
+ * Flag only: it never moves the risk score, and it is not sent to the narrative.
+ * A positive line is bold and a flag is boxed, so it never rests on colour alone.
+ */
+function MoodLines({ mood }) {
+  return (
+    <div className="mt-3 pt-2 border-t border-gray-100">
+      <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
+        Mood and anxiety · the patient’s own answers{mood.simulated ? ' (simulated)' : ''}
+      </div>
+      <dl className="space-y-1 text-xs">
+        {mood.lines.map((l) => (
+          <div key={l.key}>
+            <dt className="text-gray-600">{l.label}</dt>
+            <dd className={l.positive ? 'font-semibold text-amber-900' : 'font-medium text-gray-800'}>{l.text}</dd>
+          </div>
+        ))}
+      </dl>
+      {mood.flags?.length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {mood.flags.map((f) => (
+            <li key={f.code} className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs text-amber-900">
+              <span className="font-semibold">{f.title}.</span> {f.rationale}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-[11px] text-gray-500">
+        Screening answers, not a diagnosis. They do not change the risk score.
+      </p>
+    </div>
+  );
+}
+
 function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus, newest = false, live = false }) {
   const explains = aiOn(useAiStatus(), 'insights');
   const [narrative, setNarrative] = useState(null);
@@ -307,6 +343,8 @@ function WeekCard({ week, patientId, weekly, seriesDiagnosis, group, groupFocus,
           ))}
         </div>
       )}
+
+      {weekly && week.mood && <MoodLines mood={week.mood} />}
 
       {/* What the patient or caretaker sent with the check-in: the care team's
           own questions and a free-text remark. Shown as text only, never scored,

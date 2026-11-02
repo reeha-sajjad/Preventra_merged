@@ -135,6 +135,11 @@ export default function FollowUps() {
                       </td>
                       <td className="whitespace-nowrap px-5 py-3 align-top">
                         <UrgencyPill urgency={f.urgency} />
+                        {f.reason_label && (
+                          <div className="mt-1">
+                            <span className="rounded bg-ns-navy/10 px-1.5 py-0.5 text-[11px] font-semibold text-ns-navy">{f.reason_label}</span>
+                          </div>
+                        )}
                         <div className="mt-1 text-gray-700">{f.requested_by.pharmacy || f.requested_by.name}</div>
                         {/* Reported by a pharmacy: what it saw at the counter. */}
                         {f.pharmacy_reports?.length > 0 && (

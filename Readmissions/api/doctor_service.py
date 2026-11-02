@@ -88,16 +88,29 @@ def without_mood(alert: dict) -> Optional[dict]:
     (api/access.py `view_mood`): mood triggers gone and severity as the forecast
     gave it without them. None when mood alone raised it - that alert is the
     care team's, and the others should not learn it exists.
+
+    A doctor's reply that chose the behavioural health referral loses that action,
+    its label and the free-text recommendation (which may say why) - whether or not
+    the forecast has a mood trigger, since the referral can be picked on any alert.
     """
-    forecast = alert.get("forecast")
-    if not isinstance(forecast, dict) or not any(
-            t.get("stream") == "mood" for t in forecast.get("triggers") or []):
-        return alert
-    from models import early_warning
-    f = early_warning.without_mood(forecast)
-    if f["severity"] not in ALERTABLE_SEVERITIES:
-        return None
-    return {**alert, "forecast": f, "severity": f["severity"]}
+    out = alert
+    response = alert.get("response")
+    if isinstance(response, dict) and "behavioural_health" in (response.get("actions") or []):
+        label = RECOMMENDED_ACTIONS["behavioural_health"]
+        out = {**out, "response": {
+            **response, "recommendation": "",
+            "actions": [a for a in response["actions"] if a != "behavioural_health"],
+            "action_labels": [x for x in response.get("action_labels") or [] if x != label]}}
+    forecast = out.get("forecast")
+    if isinstance(forecast, dict) and (
+            "severity_without_mood" in forecast
+            or any(t.get("stream") == "mood" for t in forecast.get("triggers") or [])):
+        from models import early_warning
+        f = early_warning.without_mood(forecast)
+        if f["severity"] not in ALERTABLE_SEVERITIES:
+            return None
+        out = {**out, "forecast": f, "severity": f["severity"]}
+    return out
 
 _STATUS_OPEN = ("pending", "acknowledged")
 
