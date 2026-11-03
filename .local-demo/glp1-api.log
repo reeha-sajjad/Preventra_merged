@@ -692,3 +692,7 @@ INFO:     127.0.0.1:58285 - "GET /api/notifications?limit=20 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:58284 - "GET /api/consequence/downstream-cost HTTP/1.1" 200 OK
 INFO:     127.0.0.1:58310 - "GET /api/consequence/rebound-risk HTTP/1.1" 200 OK
 INFO:     127.0.0.1:58287 - "GET /api/patients?page=0&page_size=10000&sort_by=dropout_prob&sort_dir=desc HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [43472]

@@ -15,3 +15,7 @@ INFO:     127.0.0.1:57647 - "POST /auth/login HTTP/1.1" 200 OK
 INFO:     127.0.0.1:57863 - "OPTIONS /auth/login HTTP/1.1" 200 OK
 INFO:     127.0.0.1:57863 - "POST /auth/login HTTP/1.1" 200 OK
 INFO:     127.0.0.1:58066 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [43471]
