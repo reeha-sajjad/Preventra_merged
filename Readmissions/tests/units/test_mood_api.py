@@ -43,12 +43,12 @@ def mood_alert(db, pid=A4, week=2):
 
 
 # ------------------------------------------------------------ the form
-def test_the_patient_is_offered_the_questions_with_the_crisis_line(main, world, a4):
+def test_the_patient_is_offered_the_questions_with_the_safety_line(main, world, a4):
     form = as_user(main, world, "me@patient.test").get("/api/my-home/checkin").json()
     mood = form["mood"]
-    assert mood["crisis"] == mood_screen.CRISIS and "988" in mood["crisis"]
+    assert mood["safety"] == mood_screen.SAFETY and set(mood) == set(mood_screen.form())
     keys = [q["key"] for part in ("phq2", "phq8_more", "gad2") for q in mood[part]]
-    assert keys and not any(w in k for k in keys for w in ("self", "harm", "dead"))
+    assert keys == list(mood_screen.ITEMS)
     assert [o["value"] for o in mood["options"]] == [0, 1, 2, 3] and mood["followup_from"] == 3
 
 
@@ -106,7 +106,7 @@ def test_the_rest_of_the_phq8_is_dropped_when_the_phq2_is_under_three(main, worl
 
 @pytest.mark.parametrize("mood", [
     {"phq_interest": 4}, {"phq_interest": "often"}, {"phq_interest": True}, {"phq_interest": 1.5},
-    {"phq_self_harm": 3}, {"made_up": 1}, {"phq_interest": 1, "gad_worry": 9},
+    {"phq_extra": 3}, {"made_up": 1}, {"phq_interest": 1, "gad_worry": 9},
 ])
 def test_bad_mood_answers_are_refused_and_nothing_is_written(main, world, a4, mood):
     assert send(main, world, mood).status_code == 422

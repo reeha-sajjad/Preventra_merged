@@ -34,7 +34,9 @@ readmission rate. A 30-day outcome is known from:
                              30 days pass without one (scoring_service.link_outcomes)
     the care team            a "Readmitted" / "Not readmitted" recorded on the
                              patient's page (this module), which wins for the same
-                             discharge - they may know about another hospital
+                             discharge - they may know about another hospital.
+                             Marked `demo` when scripts/prepare_demo.py --count
+                             simulated it; the page says how many
 
 A readmission to another hospital is invisible unless someone records it, so
 the observed rate can only be too LOW. The page says so.
@@ -170,7 +172,9 @@ def record(db, user: dict, scope: Optional[list], patient_id: str, readmitted: b
         {"$set": {"readmitted": bool(readmitted), "readmit_date": readmit_date, "note": note,
                   "discharge_score": float(row.get("risk_score") or 0),
                   "discharge_band": str(row.get("risk_band") or "").title() or None,
-                  "hospital_id": own.get("hospital_id"), "recorded_by": _who(user), "recorded_at": _now()}},
+                  "hospital_id": own.get("hospital_id"), "recorded_by": _who(user), "recorded_at": _now()},
+         # The care team's word replaces a demo script's simulated one.
+         "$unset": {"demo": "", "outcome_simulated": ""}},
         upsert=True)
     return patient_outcome(db, user, patient_id, today)
 
@@ -361,14 +365,16 @@ def _known_outcomes(db, view, batch: Optional[str], today) -> tuple:
             continue
         known[(str(s["patient_id"]), when.isoformat())] = (
             float(reg["risk_score"]), str(reg.get("risk_band") or "").title(), bool(s["readmitted_30d"]), "records",
-            {"readmit_date": None, "hospital_id": s.get("hospital_id"), "n_prior_adm": reg.get("n_prior_adm")})
+            {"readmit_date": None, "hospital_id": s.get("hospital_id"), "n_prior_adm": reg.get("n_prior_adm"),
+             "demo": False})
     # The care team's own record wins for the same discharge.
     for d in db[COLLECTION].find(access.scope_query(scope), {"_id": 0}):
         key = (str(d["patient_id"]), d["discharge_date"])
         earlier = known[key][-1]["n_prior_adm"] if key in known else None      # the records still know this
         known[key] = (
             float(d.get("discharge_score") or 0), d.get("discharge_band") or "", bool(d["readmitted"]), "care_team",
-            {"readmit_date": d.get("readmit_date"), "hospital_id": d.get("hospital_id"), "n_prior_adm": earlier})
+            {"readmit_date": d.get("readmit_date"), "hospital_id": d.get("hospital_id"), "n_prior_adm": earlier,
+             "demo": bool(d.get("demo"))})
     # Every discharge whose outcome could be known by now: the current ones on
     # the worklist past their 30 days, and any with a known outcome - a
     # readmission is known the day it happens, before the 30 days are up.
@@ -769,6 +775,7 @@ def _readmission_detail(db, view, rows: list, batch: Optional[str]) -> dict:
     facts = _facts(db, view, rows, batch)
     return {"min_group": MIN_GROUP, "known": len(rows), "enough": True,
             "overall": _observed_vs_expected(rows)["overall"],
+            "demo": sum(1 for r in rows if r[6].get("demo")),
             "who": _who_came_back(rows, facts), "conditions": _disease_mix(rows, facts),
             "last_readings": _readings_before(rows, facts)}
 
@@ -803,6 +810,7 @@ def page(db, view, user: dict, days: int = 30, today=None) -> dict:
             "past_30_days": closed,
             "by_checklist": by_checklist,
             "sources": {"records": sum(1 for r in rows if r[5] == "records"),
-                        "care_team": sum(1 for r in rows if r[5] == "care_team")},
+                        "care_team": sum(1 for r in rows if r[5] == "care_team" and not r[6].get("demo"))},
+            "demo": sum(1 for r in rows if r[6].get("demo")),
         },
     }

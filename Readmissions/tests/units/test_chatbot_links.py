@@ -69,7 +69,7 @@ class _DB:
 
 def test_doctor_names_resolve_to_registry_ids():
     db = _DB([{"name": "Dr. Sarah Whitfield", "doctor_id": "DR-1"},
-              {"name": "Dr. Amir Haddad", "doctor_id": "DR-2"}])
+              {"name": "Dr. James Wilson", "doctor_id": "DR-2"}])
     result = {"workload": [{"doctor": "Dr. Sarah Whitfield", "open_alerts": 3},
                            {"doctor": "unrouted", "open_alerts": 1}]}
     assert _by_kind(extract_entities(result, db), "doctor") == {"Dr. Sarah Whitfield": "DR-1"}

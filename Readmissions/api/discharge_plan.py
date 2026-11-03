@@ -89,7 +89,7 @@ WARNING_SIGNS = {
     "sepsis_infection": "Call with a temperature, new confusion, or if the antibiotics can't be finished.",
     "renal": "Call if passing much less urine, with new swelling, or if weight goes up quickly.",
     "diabetes": "Call with repeated high or low sugar readings, or if unable to eat or drink.",
-    "mental_health": "Knows the crisis line and who to call if things get worse; keeps the follow-up.",
+    "mental_health": "Knows who to call if things get worse; keeps the follow-up.",
     "oncology": "Call at once with a temperature of 38 °C or more during treatment.",
     "cardiac_other": "Call with chest pain, palpitations, fainting, or new breathlessness.",
     "neuro_stroke": "Call 911 at once for new weakness, facial droop, or trouble speaking.",

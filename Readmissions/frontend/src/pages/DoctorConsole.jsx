@@ -634,7 +634,7 @@ function RegisterForm({ specialties, groups, onDone, onCancel }) {
           <input
             required value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="Dr. Jane Okafor"
+            placeholder="Dr. Jane Cooper"
             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
           />
         </Field>

@@ -248,6 +248,16 @@ function Readmissions({ r }) {
   return (
     <Section title="Readmissions: observed against expected"
       sub="Expected is the average discharge score - the model is calibrated, so a band’s scores are its expected rate. Every discharge with a known 30-day outcome, whatever the period above.">
+      {r.demo > 0 && (
+        <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+          <span>
+            Demo data: {r.demo.toLocaleString()} of these outcomes were simulated by the demo script, each drawn from the
+            patient’s own discharge risk score - so observed close to expected is by design. They show how this page reads,
+            not a result.
+          </span>
+        </p>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Tile icon={Flag} label="Outcome known" value={o.known.toLocaleString()}
           sub={`of ${r.past_30_days.toLocaleString()} discharges past their 30 days or already back`} />
@@ -303,7 +313,7 @@ function Readmissions({ r }) {
       <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
         <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
         <span>
-          Outcomes come from the hospital’s own records ({r.sources.records}) and from the care team ({r.sources.care_team}),
+          Outcomes come from the hospital’s own records ({r.sources.records}) and from the care team ({r.sources.care_team}){r.demo > 0 && `, and ${r.demo.toLocaleString()} simulated by the demo script`},
           recorded on each patient’s page. A readmission to another hospital only counts when someone records it, so the
           observed rate can be too low but not too high. Small numbers move a lot: read a band with fewer than about 30 known
           outcomes as a direction, not a result.
@@ -363,6 +373,16 @@ function ReadmissionDetail({ d }) {
     : <>{rate(x.share)} <span className="text-xs text-gray-500">· {x.with.toLocaleString()} of {x.reported.toLocaleString()}</span></>);
   return (
     <>
+      {d.demo > 0 && (
+        <p className="flex gap-2 rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <Info size={16} className="mt-0.5 shrink-0 text-gray-500" />
+          <span>
+            {d.demo.toLocaleString()} of these outcomes are simulated demo data, and so are their weekly readings. Both come
+            from the same risk scores, so differences between readmitted and not readmitted are built into the data, not
+            found in it.
+          </span>
+        </p>
+      )}
       <Section title="Who was readmitted"
         sub={`Readmission rate by group, against ${rate(d.overall.observed_rate)} for all ${d.overall.known.toLocaleString()} discharges with a known 30-day outcome, whatever the period above.`}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

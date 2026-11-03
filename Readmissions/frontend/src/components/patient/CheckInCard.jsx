@@ -17,8 +17,9 @@ const formatDay = (iso) => (iso
  * The patient themself (not a caretaker) is also offered the mood questions
  * (models/mood_screen.py): optional, flag only, never scored. The rest of the
  * PHQ-8 shows only once both PHQ-2 answers add up to the form's `followup_from`,
- * and the 988 line is always on the section. What they answer is never shown
- * back to them - only the care team reads it.
+ * and a plain safety line (who to contact if they feel unwell) is always on the
+ * section. What they answer is never shown back to them - only the care team
+ * reads it.
  */
 export default function CheckInCard({ patientId = null, caretaker = false, patientName = null }) {
   const [data, setData] = useState(null);
@@ -156,9 +157,11 @@ export default function CheckInCard({ patientId = null, caretaker = false, patie
           {moodForm && (
             <div className="space-y-5">
               <h3 className="text-sm font-semibold text-gray-900">{moodForm.title} (optional)</h3>
-              <div role="note" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-                {moodForm.crisis}
-              </div>
+              {moodForm.safety && (
+                <div role="note" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  {moodForm.safety}
+                </div>
+              )}
               <p className="text-xs text-gray-600">{moodForm.stem}</p>
               {[...moodForm.phq2, ...(showMore(mood) ? moodForm.phq8_more : []), ...moodForm.gad2].map((q) => (
                 <Question key={q.key} q={{ key: q.key, label: q.label, kind: 'choice', options: moodForm.options }}

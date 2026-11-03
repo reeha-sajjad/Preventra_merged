@@ -27,7 +27,7 @@ def phq8(total_of_extras: int, base=None) -> dict:
 
 # ------------------------------------------------------------ clean
 @pytest.mark.parametrize("answers", [
-    {"phq_self_harm": 1},                       # never asked
+    {"phq_extra": 1},                           # not on the form
     {"phq_interest": True},                     # a bool is not an answer
     {"phq_interest": "4"},
     {"phq_interest": 4},
@@ -58,13 +58,16 @@ def test_the_rest_of_the_phq8_is_only_kept_when_the_phq2_is_positive():
     assert clean({"gad_nervous": 1, **extras}) == {"gad_nervous": 1}
 
 
-def test_the_form_never_asks_about_self_harm():
+def test_the_form_is_the_phq8_and_gad2_with_a_safety_line():
     form = mood_screen.form()
+    assert set(form) == {"title", "stem", "safety", "options", "phq2", "phq8_more", "gad2", "followup_from"}
     keys = [q["key"] for part in ("phq2", "phq8_more", "gad2") for q in form[part]]
     assert keys == list(PHQ2) + list(PHQ8_MORE) + list(GAD2)
-    text = " ".join(q["label"] for part in ("phq2", "phq8_more", "gad2") for q in form[part]).lower()
-    assert "dead" not in text and "hurting yourself" not in text
-    assert form["crisis"] == mood_screen.CRISIS and "988" in form["crisis"]
+    assert len(PHQ2) + len(PHQ8_MORE) == 8 and len(GAD2) == 2        # the PHQ-8, never a ninth item
+    labels = [q["label"] for part in ("phq2", "phq8_more", "gad2") for q in form[part]]
+    assert labels == list(mood_screen.ITEMS.values())
+    assert form["safety"] == mood_screen.SAFETY == (
+        "If you feel unwell or unsafe, contact your care team, or call 911 in an emergency.")
     assert [o["value"] for o in form["options"]] == [0, 1, 2, 3] and form["followup_from"] == 3
 
 

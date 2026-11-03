@@ -14,9 +14,9 @@ never critical itself), and `card` is what the week card shows. A screen is not
 a diagnosis, and a flag here says low mood and missed doses went together, not
 that one caused the other.
 
-PHQ-9 item 9 (thoughts of self-harm) is never asked: a form that asks it has to
-be read the same hour, and a weekly form cannot promise that. The form carries
-the 988 line instead, always visible.
+The screen is the PHQ-8, the eight-question form suited to self-report at home.
+The section always carries a plain safety line (`SAFETY`): contact the care
+team if they feel unwell or unsafe, or call 911 in an emergency.
 
 A skipped item is nothing, never a 0, and a total exists only when every item in
 it was answered. The PHQ's two-week recall overlaps from one week to the next, so
@@ -31,8 +31,7 @@ from typing import Optional
 STREAM = "mood"
 
 STEM = "Over the last 2 weeks, how often have you been bothered by any of the following problems?"
-CRISIS = ("Thinking about harming yourself? Call or text 988 now (Suicide & Crisis Lifeline). "
-          "In an emergency call 911.")
+SAFETY = "If you feel unwell or unsafe, contact your care team, or call 911 in an emergency."
 
 OPTIONS = ((0, "Not at all"), (1, "Several days"),
            (2, "More than half the days"), (3, "Nearly every day"))
@@ -61,7 +60,7 @@ LOW_ADHERENCE = 80     # percent of doses taken this week
 # PHQ-8 total -> band, as the upper edge of each.
 BANDS = ((4, "minimal"), (9, "mild"), (14, "moderate"), (19, "moderately severe"), (24, "severe"))
 
-# Never "critical": acute risk is the crisis line's job, not a forecast's. The
+# Never "critical": a mood screen is a reason to ask, not an emergency. The
 # anxiety screen is shown but does not page anyone on its own.
 SEVERITY = {"phq8_moderate": "high", "phq8_rise": "high", "low_mood_adherence": "high",
             "gad2_positive": "moderate"}
@@ -85,7 +84,7 @@ def form() -> dict:
     return {
         "title": "How you have been feeling",
         "stem": STEM,
-        "crisis": CRISIS,
+        "safety": SAFETY,
         "options": [{"value": v, "label": label} for v, label in OPTIONS],
         "phq2": rows(PHQ2),
         "phq8_more": rows(PHQ8_MORE),

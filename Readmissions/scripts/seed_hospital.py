@@ -66,13 +66,13 @@ PHARMACIES = ["Main Street Pharmacy", "CityCare Pharmacy", "Riverside Drugs",
 # take (anything unmatched goes to internal medicine); `glp1` says who shares
 # the GLP-1 patients.
 DOCTORS = [
-    {"key": "cardiology", "name": "Dr Amina Rahman", "specialty": "Cardiology",
+    {"key": "cardiology", "name": "Dr Emily Carter", "specialty": "Cardiology",
      "groups": ["heart_failure", "cardiac_other"], "glp1": False},
-    {"key": "pulmonology", "name": "Dr Omar Siddiqui", "specialty": "Pulmonology",
+    {"key": "pulmonology", "name": "Dr James Wilson", "specialty": "Pulmonology",
      "groups": ["respiratory"], "glp1": False},
-    {"key": "endocrinology", "name": "Dr Sara Malik", "specialty": "Endocrinology",
+    {"key": "endocrinology", "name": "Dr Laura Bennett", "specialty": "Endocrinology",
      "groups": ["diabetes"], "glp1": True},
-    {"key": "medicine", "name": "Dr Bilal Ahmed", "specialty": "Internal Medicine",
+    {"key": "medicine", "name": "Dr Michael Turner", "specialty": "Internal Medicine",
      "groups": ["general"], "glp1": True},
 ]
 
@@ -193,11 +193,11 @@ def main() -> None:
         users = auth.users(readm)
         domain = f"{hospital_id}.test"
         staff["admin"] = ensure_account(users, f"admin@{domain}", "hospital_admin", password,
-                                        "Hospital Admin", hospital_id, dry=dry)
+                                        "Daniel Hughes", hospital_id, dry=dry)
         staff["case_manager"] = ensure_account(users, f"casemanager@{domain}", "case_manager",
-                                               password, "Case Manager", hospital_id, dry=dry)
+                                               password, "Sarah Mitchell", hospital_id, dry=dry)
         staff["nurses"] = [ensure_account(users, f"nurse{i}@{domain}", "nurse", password,
-                                          f"Nurse {i}", hospital_id, dry=dry) for i in (1, 2)]
+                                          ("Olivia Brown", "Grace Taylor")[i - 1], hospital_id, dry=dry) for i in (1, 2)]
         staff["doctors"] = {}
         for d in DOCTORS:
             email = f"{d['key']}@{domain}"
