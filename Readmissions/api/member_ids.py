@@ -98,7 +98,9 @@ def insurance(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
             "member_id": doc.get("insurer_member_id"),
             "format": (ins or {}).get("format"),
             # Billing staff add it once, when none is on file yet.
-            "can_edit": user["role"] in EDIT_ROLES and ins is not None and not doc.get("insurer_member_id")}
+            "can_edit": user["role"] in EDIT_ROLES and ins is not None and not doc.get("insurer_member_id"),
+            # Who pays can be set or changed by the same staff (api/patient_insurer.py).
+            "can_set_insurer": user["role"] in EDIT_ROLES}
 
 
 def set_member_id(db, user: dict, scope: Optional[list], patient_id: str, raw: Optional[str]) -> dict:

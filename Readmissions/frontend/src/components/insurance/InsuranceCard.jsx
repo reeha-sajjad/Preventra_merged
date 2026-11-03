@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CreditCard, Pencil, Loader2 } from 'lucide-react';
-import { getInsurance, setMemberId } from '../../api';
+import { getInsurance, setMemberId, setPatientInsurer, getInsurerHistory } from '../../api';
 import { PatientFlags } from './InsurerFlags';
+import InsurerPicker from './InsurerPicker';
 
 /**
  * A patient's insurer and member ID (api/member_ids.py) - the ID on their
@@ -16,11 +17,56 @@ export default function InsuranceCard({ patientId, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
+  // Setting or changing who pays (api/patient_insurer.py) - billing staff only.
+  const [changing, setChanging] = useState(false);
+  const [payer, setPayer] = useState({ insurer: '', member_id: '' });
+  const [lastChange, setLastChange] = useState(null);
+
   const load = useCallback(() => {
     getInsurance(patientId).then(setData).catch(() => setData(null));
   }, [patientId]);
   useEffect(() => { load(); }, [load]);
+  const canSet = !!data?.can_set_insurer;
+  useEffect(() => {
+    if (!canSet) return;
+    getInsurerHistory(patientId).then((r) => setLastChange((r.history || [])[0] || null)).catch(() => {});
+  }, [patientId, canSet, data?.insurer?.id]);
   if (!data) return null;
+
+  const savePayer = async (e) => {
+    e.preventDefault();
+    if (!payer.insurer) { setError('Choose an insurer'); return; }
+    setBusy(true); setError(null);
+    try {
+      setData(await setPatientInsurer(patientId, payer.insurer, payer.member_id));
+      setChanging(false);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const startChange = () => { setPayer({ insurer: '', member_id: '' }); setError(null); setChanging(true); };
+
+  const payerForm = (
+    <form onSubmit={savePayer} className="space-y-3">
+      <InsurerPicker value={payer} onChange={setPayer} idPrefix={`payer-${patientId}`}
+        exclude={data.insurer?.id || null} />
+      {data.insurer && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {data.insurer.name} will no longer see this patient
+          {data.member_id ? `, and member ID ${data.member_id} will be taken off` : ''}. The change is recorded.
+        </p>
+      )}
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy || !payer.insurer}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-ns-navy px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
+          {busy && <Loader2 size={13} className="animate-spin" />} Save
+        </button>
+        <button type="button" onClick={() => { setChanging(false); setError(null); }}
+          className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">Cancel</button>
+      </div>
+    </form>
+  );
 
   const save = async (e) => {
     e.preventDefault();
@@ -30,8 +76,16 @@ export default function InsuranceCard({ patientId, compact = false }) {
     finally { setBusy(false); }
   };
 
-  const body = !data.insurer ? (
-    <p className="text-sm text-gray-400">No insurer on file.</p>
+  const body = changing ? payerForm : !data.insurer ? (
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <p className="text-sm text-gray-400">No insurer on file.</p>
+      {canSet && (
+        <button type="button" onClick={startChange}
+          className="inline-flex items-center gap-1 text-xs font-medium text-ns-navy">
+          <Pencil size={11} /> Set insurer
+        </button>
+      )}
+    </div>
   ) : editing ? (
     <form onSubmit={save} className="space-y-2">
       <label className="block text-sm text-gray-700">{data.insurer.name} member ID
@@ -61,6 +115,19 @@ export default function InsuranceCard({ patientId, compact = false }) {
           className="inline-flex items-center gap-1 text-xs font-medium text-ns-navy">
           <Pencil size={11} /> Add member ID
         </button>
+      )}
+      {canSet && (
+        <button type="button" onClick={startChange}
+          className="inline-flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-ns-navy">
+          Change insurer
+        </button>
+      )}
+      {canSet && lastChange && (
+        <p className="w-full text-xs text-gray-400">
+          {lastChange.from ? `Changed from ${lastChange.from}` : 'Set'}
+          {lastChange.by ? ` by ${lastChange.by}` : ''}
+          {lastChange.at ? ` on ${new Date(lastChange.at).toLocaleDateString()}` : ''}
+        </p>
       )}
     </div>
   );

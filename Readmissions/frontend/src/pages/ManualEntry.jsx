@@ -6,6 +6,7 @@ import {
 } from '../api';
 import { can, ADD_PATIENT_ROLES } from '../roles';
 import RiskBadge from '../components/shared/RiskBadge';
+import InsurerPicker from '../components/insurance/InsurerPicker';
 import DriverCard from '../components/shared/DriverCard';
 import {
   MimicPatientForm, IdentityFields, emptyForm, emptyIdentity, identityPayload, filledFieldCount,
@@ -83,7 +84,13 @@ function TypedPatient({ categoricals, canAdd }) {
   const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
   const setId = (key) => (val) => setIdentity((f) => ({ ...f, [key]: val }));
 
-  const record = () => ({ ...supplied(form), ...identityPayload(identity) });
+  // Who pays (api/patient_insurer.py): only sent when the patient can be added.
+  const [payer, setPayer] = useState({ insurer: '', member_id: '' });
+  const payerPayload = () => (canAdd && payer.insurer
+    ? { insurer: payer.insurer, ...(payer.member_id.trim() ? { insurer_member_id: payer.member_id.trim() } : {}) }
+    : {});
+
+  const record = () => ({ ...supplied(form), ...identityPayload(identity), ...payerPayload() });
 
   const calculate = async (e) => {
     e.preventDefault();
@@ -121,6 +128,7 @@ function TypedPatient({ categoricals, canAdd }) {
   const reset = () => {
     setForm(() => { const f = emptyForm(); delete f.discharge_date; return f; });
     setIdentity(emptyIdentity());
+    setPayer({ insurer: '', member_id: '' });
     setResult(null);
     setError(null);
     setAdded(null);
@@ -133,6 +141,16 @@ function TypedPatient({ categoricals, canAdd }) {
     <>
       <form onSubmit={calculate} className="space-y-5">
         <IdentityFields identity={identity} set={setId} />
+        {canAdd && (
+          <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-1 text-base font-semibold text-ns-navy">Insurance</h3>
+            <p className="mb-3 text-xs text-gray-500">
+              Who pays for this patient. Their insurer sees them once they’re added. This isn’t the
+              “Insurance” type further down, which only feeds the risk score.
+            </p>
+            <InsurerPicker value={payer} onChange={setPayer} idPrefix="add-payer" />
+          </section>
+        )}
         <MimicPatientForm form={form} set={set} categoricals={categoricals} showDischargeDate={false} />
 
         {error && <ErrorBox title="Could not calculate">{error}</ErrorBox>}

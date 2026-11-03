@@ -37,6 +37,8 @@ SOURCE = "manual"
 # measured against). charlson_score is never accepted - it is derived.
 IDENTITY_FIELDS = [
     ("external_ref", "text", "Your own reference for this patient (kept, never used as the id)"),
+    ("insurer", "text", "Who pays: the insurer's name as it appears in User Management (optional)"),
+    ("insurer_member_id", "text", "The member ID on their insurance card (optional; needs an insurer)"),
     ("admit_date", "date", "Admission date, YYYY-MM-DD"),
     ("discharge_date", "date", "Discharge date, YYYY-MM-DD (needed to add the patient)"),
     ("primary_icd_code", "text", "Principal diagnosis ICD code, e.g. I50.9"),

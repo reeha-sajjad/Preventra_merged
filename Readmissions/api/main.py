@@ -39,6 +39,7 @@ from api import patient_home
 from api import caretakers
 from api import medicines_given
 from api import member_ids
+from api import patient_insurer
 from api import insurer_alerts
 from api import caretaker_home
 from api import checkins
@@ -2385,6 +2386,8 @@ class ManualPatientRecord(ManualPatientInput):
     model's inputs plus who they are, what they were treated for and their
     discharge vitals (api/manual_patients.py)."""
     external_ref: Optional[str] = None
+    insurer: Optional[str] = None               # who pays (api/patient_insurer.py), id or name
+    insurer_member_id: Optional[str] = None
     admit_date: Optional[str] = None
     primary_icd_code: Optional[str] = None
     primary_diagnosis: Optional[str] = None
@@ -2490,7 +2493,8 @@ def _add_manual_records(request: Request, records: list) -> list:
     if not hospital:
         raise HTTPException(status_code=400, detail="Pick a hospital first")
     cats = manual_patients.categories()
-    bad = [{"row": i, "errors": manual_patients.add_errors(r) + manual_patients.check(r, cats)}
+    payer = patient_insurer.check_new(db, records)
+    bad = [{"row": i, "errors": manual_patients.add_errors(r) + manual_patients.check(r, cats) + payer.get(i, [])}
            for i, r in enumerate(records, start=1)]
     bad = [b for b in bad if b["errors"]]
     if bad:
@@ -2504,7 +2508,9 @@ def _add_manual_records(request: Request, records: list) -> list:
     added = []
     try:
         for i, (record, result) in enumerate(zip(records, scored), start=1):
-            added.append({"row": i, **manual_patients.add(db, request.state.user, record, hospital, scored=result)})
+            filed = manual_patients.add(db, request.state.user, record, hospital, scored=result)
+            patient_insurer.file_new(db, request.state.user, filed["patient_id"], record)
+            added.append({"row": i, **filed})
     finally:
         _cache.clear()
     return added
@@ -2911,6 +2917,30 @@ def get_insurance(patient_id: str, request: Request):
 @app.post("/api/patients/{patient_id}/insurance")
 def set_insurance(patient_id: str, body: MemberIdRequest, request: Request):
     return member_ids.set_member_id(db, request.state.user, _scope(request), patient_id, body.member_id)
+
+
+# Who pays for a patient (api/patient_insurer.py)
+class PatientInsurerRequest(BaseModel):
+    insurer: str                                # insurer id or name
+    member_id: Optional[str] = None             # from the new card, if known
+
+
+@app.get("/api/insurers")
+def list_insurers_for_picker(request: Request):
+    """The insurers billing staff can choose from."""
+    return {"insurers": patient_insurer.insurers_for_picker(db, request.state.user)}
+
+
+@app.put("/api/patients/{patient_id}/insurer")
+def set_patient_insurer(patient_id: str, body: PatientInsurerRequest, request: Request):
+    """Set or change who pays for this patient. The old insurer loses access at once."""
+    return patient_insurer.set_insurer(db, request.state.user, _scope(request), patient_id,
+                                       body.insurer, body.member_id)
+
+
+@app.get("/api/patients/{patient_id}/insurer-history")
+def patient_insurer_history(patient_id: str, request: Request):
+    return {"history": patient_insurer.history(db, request.state.user, _scope(request), patient_id)}
 
 
 @app.get("/api/insurer/home")
