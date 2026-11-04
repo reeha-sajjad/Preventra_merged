@@ -11,6 +11,7 @@ import ClinicalGate from '../components/shared/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
+import MedicinesCard from '../components/patient/MedicinesCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
@@ -290,6 +291,8 @@ export default function PatientDetail() {
           {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
 
           <InsuranceCard patientId={patient.id} />
+
+          <MedicinesCard patientId={patient.id} />
 
           <MedicinesGivenCard patientId={patient.id} mode="staff" />
 

@@ -62,6 +62,7 @@ class MedicationChange(BaseModel):
     reason: str
     note: Optional[str] = None
     effective_date: Optional[str] = None
+    dose: Optional[str] = None            # one of core/medications.DOSES, e.g. "0.5 mg"
 
 
 @router.get("/patients/{patient_idx}/medications")
@@ -76,4 +77,4 @@ async def record_medication_change(patient_idx: int, body: MedicationChange,
                                    user: dict = Depends(actor),
                                    scope: Optional[list] = Depends(scope_of)):
     return await medications.record(user, scope, patient_idx, body.to_drug, body.reason,
-                                    body.note, body.effective_date)
+                                    body.note, body.effective_date, body.dose)

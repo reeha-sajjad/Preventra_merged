@@ -37,6 +37,7 @@ DRUGS = {
     "STOPPED":     "Stopped GLP-1 therapy",
 }
 REASONS = {
+    "dose_change":   "Dose change (stepping up or down)",
     "side_effects":  "Side effects",
     "not_effective": "Not working well enough",
     "cost":          "Cost or insurance coverage",
@@ -45,6 +46,24 @@ REASONS = {
     "other":         "Other",
 }
 RECORD_ROLES = ("doctor",)
+# The doses each drug comes in, from its label, and how often it is taken. A
+# doctor picks one when recording a switch or a dose change; until then the
+# dose is "not recorded" - the dataset never had one, and none is assumed.
+DOSES = {
+    "SEMAGLUTIDE": {"every": "weekly", "options": ["0.25 mg", "0.5 mg", "1 mg", "1.7 mg", "2 mg", "2.4 mg"]},
+    "TIRZEPATIDE": {"every": "weekly", "options": ["2.5 mg", "5 mg", "7.5 mg", "10 mg", "12.5 mg", "15 mg"]},
+    "DULAGLUTIDE": {"every": "weekly", "options": ["0.75 mg", "1.5 mg", "3 mg", "4.5 mg"]},
+    "LIRAGLUTIDE": {"every": "daily", "options": ["0.6 mg", "1.2 mg", "1.8 mg", "2.4 mg", "3 mg"]},
+}
+EVERY = {"weekly": "once a week", "daily": "once a day"}
+
+
+def dose_label(drug: Optional[str], dose: Optional[str]) -> Optional[str]:
+    """"0.5 mg once a week" - or None when no dose is recorded."""
+    spec = DOSES.get(str(drug or "").upper())
+    if not dose or not spec:
+        return None
+    return f"{dose} {EVERY[spec['every']]}"
 MAX_NOTE = 500
 
 SCORE_NOTE = ("The risk score comes from the model and was calculated while the patient was on "
@@ -67,6 +86,7 @@ def _public(doc: dict) -> dict:
             "to_drug": doc["to_drug"], "to_label": _label(doc["to_drug"]),
             "reason": doc["reason"], "reason_label": REASONS[doc["reason"]], "note": doc.get("note", ""),
             "effective_date": doc["effective_date"], "recorded_by": doc["recorded_by"],
+            "dose": doc.get("dose"), "dose_label": dose_label(doc["to_drug"], doc.get("dose")),
             "recorded_at": at.isoformat()}
 
 
@@ -84,8 +104,21 @@ async def history(user: dict, patient_idx: int) -> dict:
     docs = await _col().find({"patient_idx": idx}).sort([("recorded_at", -1)]).to_list(length=200)
     changes = [_public(d) for d in docs]
     current = changes[0]["to_drug"] if changes else original
+    # The dose of the drug the patient is on now: the latest change to that
+    # drug that gave one. A switch to another drug starts with no dose.
+    dose = None
+    for c in changes:
+        if c["to_drug"] != current:
+            break
+        if c.get("dose"):
+            dose = c["dose"]
+            break
+    spec = DOSES.get(str(current or "").upper())
     return {"patient_idx": idx, "original_drug": original, "original_label": _label(original),
             "current_drug": current, "current_label": _label(current),
+            "current_dose": dose, "current_dose_label": dose_label(current, dose),
+            "current_every": spec["every"] if spec else None,
+            "dose_options": {k: v["options"] for k, v in DOSES.items()},
             "changes": changes, "can_record": user["role"] in RECORD_ROLES,
             "drugs": [{"key": k, "label": v} for k, v in DRUGS.items()],
             "reasons": [{"key": k, "label": v} for k, v in REASONS.items()],
@@ -93,7 +126,8 @@ async def history(user: dict, patient_idx: int) -> dict:
 
 
 async def record(user: dict, scope: Optional[list], patient_idx: int, to_drug: str,
-                 reason: str, note: Optional[str], effective_date: Optional[str]) -> dict:
+                 reason: str, note: Optional[str], effective_date: Optional[str],
+                 dose: Optional[str] = None) -> dict:
     if user["role"] not in RECORD_ROLES:
         raise HTTPException(status_code=403, detail="Only doctors record medication changes")
     idx = int(patient_idx)
@@ -115,9 +149,18 @@ async def record(user: dict, scope: Optional[list], patient_idx: int, to_drug: s
     if when > date.today():
         raise HTTPException(status_code=422, detail="Record a change once it has happened, not in advance")
 
-    current = (await history(user, idx))["current_drug"]
+    dose = (dose or "").strip() or None
+    if dose and dose not in DOSES.get(to_drug, {}).get("options", []):
+        raise HTTPException(status_code=422, detail=f"Choose a {_label(to_drug)} dose from the list")
+    now_on = await history(user, idx)
+    current = now_on["current_drug"]
     if current and to_drug == current:
-        raise HTTPException(status_code=409, detail=f"The patient is already on {_label(to_drug)}")
+        # The same drug again is a dose change, and needs a new dose.
+        if not dose or dose == now_on["current_dose"]:
+            raise HTTPException(status_code=409, detail=f"The patient is already on {_label(to_drug)}"
+                                + (f" {dose}" if dose else "") + " - choose a different drug or dose")
+    elif reason == "dose_change":
+        raise HTTPException(status_code=422, detail="A dose change keeps the same drug")
 
     account = None
     try:
@@ -125,7 +168,7 @@ async def record(user: dict, scope: Optional[list], patient_idx: int, to_drug: s
     except (InvalidId, TypeError):
         pass
     doc = {"patient_idx": idx, "hospital_id": await patient_hospital(idx),
-           "from_drug": current, "to_drug": to_drug, "reason": reason, "note": note,
+           "from_drug": current, "to_drug": to_drug, "reason": reason, "note": note, "dose": dose,
            "effective_date": when.isoformat(),
            "recorded_by": {"id": user["id"], "email": user.get("email", ""),
                            "name": (account or {}).get("name") or user.get("email", ""), "role": user["role"]},

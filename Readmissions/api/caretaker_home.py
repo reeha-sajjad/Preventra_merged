@@ -118,7 +118,8 @@ def people(db, user: dict, scope: Optional[list]) -> dict:
                     "status": status_of(band)["title"], "reason": _tidy(r.get("primary_diagnosis")),
                     "discharged": r.get("discharge_date") or None,
                     "last_given": {"at": tick["at"].isoformat(), "by": tick["by"]} if tick else None,
-                    "logged_today": logged_today, "alerts": alerts})
+                    "logged_today": logged_today, "alerts": alerts,
+                    "next_appointment": followups.next_appointment(db, pid)})
     out.sort(key=lambda p: (-len(p["alerts"]), -p["risk_score"]))
     return {"people": out}
 

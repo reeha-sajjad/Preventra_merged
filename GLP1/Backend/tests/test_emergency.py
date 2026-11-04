@@ -189,3 +189,27 @@ def test_an_emergency_patient_stays_off_my_list_and_my_bell(world):
     # Once the grant closes, the strip is empty too.
     grants(world).update_many({}, {"$set": {"expires_at": datetime.now(timezone.utc) - timedelta(minutes=1)}})
     assert doc.get("/api/patients").json()["emergency"] == []
+
+# ------------------------------------------------- doses
+def test_a_dose_is_recorded_with_a_switch_and_changed_on_its_own(world):
+    original = world["db"].patients.find_one({"patient_idx": 0})["assigned_molecule"].upper()
+    h = client(world, "doc@a.test").get("/api/patients/0/medications").json()
+    assert h["current_dose"] is None                       # the data never had one; none is assumed
+    to = "SEMAGLUTIDE" if original != "SEMAGLUTIDE" else "TIRZEPATIDE"
+    first = "0.25 mg" if to == "SEMAGLUTIDE" else "2.5 mg"
+    second = "0.5 mg" if to == "SEMAGLUTIDE" else "5 mg"
+    assert change(world, to=to, dose=first).status_code == 201
+    # The same drug again is a dose change, with a new dose.
+    assert change(world, to=to, reason="dose_change").status_code == 409
+    assert change(world, to=to, reason="dose_change", dose=first).status_code == 409
+    r = change(world, to=to, reason="dose_change", dose=second)
+    assert r.status_code == 201 and r.json()["dose_label"] == f"{second} once a week"
+    h = client(world, "nurse@a.test").get("/api/patients/0/medications").json()
+    assert h["current_drug"] == to and h["current_dose_label"] == f"{second} once a week"
+
+
+def test_doses_must_come_from_the_drugs_label(world):
+    original = world["db"].patients.find_one({"patient_idx": 0})["assigned_molecule"].upper()
+    to = "LIRAGLUTIDE" if original != "LIRAGLUTIDE" else "DULAGLUTIDE"
+    assert change(world, to=to, dose="500 mg").status_code == 422
+    assert change(world, to=to, reason="dose_change", dose="1.2 mg").status_code == 422   # a switch isn't a dose change

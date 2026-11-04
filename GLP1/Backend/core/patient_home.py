@@ -255,6 +255,8 @@ async def home(user: dict, scope: Optional[list], patient_idx: Optional[int] = N
         "linked": True, "name": name, "patient_idx": idx,
         "status": status_of(prob),
         "medicine": {"drug": current, "label": meds["current_label"], "stopped": current == "STOPPED",
+                     # A dose only once a doctor recorded one (core/medications.py).
+                     "dose": meds["current_dose_label"],
                      "schedule": SCHEDULE.get(str(current or "").upper()),
                      "changed_on": last_change["effective_date"] if last_change else None,
                      "change_reason": last_change["reason_label"] if last_change else None},

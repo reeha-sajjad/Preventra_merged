@@ -59,7 +59,8 @@ CARE_TEAM_HISTORY = "care_team_history"
 def _team(row: Optional[dict]) -> dict:
     row = row or {}
     return {"doctor_id": row.get("assigned_doctor_id") or None,
-            "nurse_ids": [str(n) for n in (row.get("assigned_nurse_ids") or [])]}
+            "nurse_ids": [str(n) for n in (row.get("assigned_nurse_ids") or [])],
+            "case_manager_id": row.get("assigned_case_manager_id") or None}
 
 
 def archive_care_team_changes(db, changes: list, user: dict, via: str) -> int:
@@ -84,6 +85,7 @@ def care_team_history(db, patient_id: str, limit: int = 100) -> list:
         .sort([("changed_at", -1), ("_id", -1)]).limit(limit))
     doctor_ids = {t["doctor_id"] for r in rows for t in (r["before"], r["after"]) if t.get("doctor_id")}
     nurse_ids = {n for r in rows for t in (r["before"], r["after"]) for n in t.get("nurse_ids", [])}
+    nurse_ids |= {t["case_manager_id"] for r in rows for t in (r["before"], r["after"]) if t.get("case_manager_id")}
     doctors = {d["doctor_id"]: d.get("name", d["doctor_id"])
                for d in db["doctors"].find({"doctor_id": {"$in": list(doctor_ids)}},
                                            {"doctor_id": 1, "name": 1})}
@@ -93,7 +95,8 @@ def care_team_history(db, patient_id: str, limit: int = 100) -> list:
 
     def named(team: dict) -> dict:
         return {**team, "doctor": doctors.get(team.get("doctor_id"), team.get("doctor_id")),
-                "nurses": [nurses.get(n, n) for n in team.get("nurse_ids", [])]}
+                "nurses": [nurses.get(n, n) for n in team.get("nurse_ids", [])],
+                "case_manager": nurses.get(team.get("case_manager_id"), team.get("case_manager_id"))}
 
     return [{**r, "before": named(r["before"]), "after": named(r["after"])} for r in rows]
 
@@ -104,7 +107,7 @@ def owners(db, patient_ids) -> dict:
     rows = db["care_actions"].find(
         {"patient_id": {"$in": access.id_variants(list(patient_ids))}},
         {"_id": 0, "patient_id": 1, "hospital_id": 1, "insurer_id": 1,
-         "assigned_doctor_id": 1, "assigned_nurse_ids": 1})
+         "assigned_doctor_id": 1, "assigned_nurse_ids": 1, "assigned_case_manager_id": 1})
     return {str(r["patient_id"]): r for r in rows}
 
 
@@ -129,7 +132,7 @@ def for_insurer(db, teams: dict) -> dict:
         o = own.get(str(pid), {})
         out[pid] = {"viewer": "insurer", "hospital_id": t.get("hospital_id"),
                     "hospital": names.get(t.get("hospital_id"), t.get("hospital_id")),
-                    "coordinator": o.get("coordinator_name"),
+                    "coordinator": o.get("coordinator_name") or (t.get("case_manager") or {}).get("name"),
                     "case_managers": sorted(case_managers.get(t.get("hospital_id"), []),
                                             key=lambda p: p["name"])[:3],
                     "insurer": t.get("insurer"), "member_id": o.get("insurer_member_id")}
@@ -144,6 +147,7 @@ def care_teams(db, patient_ids) -> dict:
     own = owners(db, patient_ids)
     doctor_ids = {o["assigned_doctor_id"] for o in own.values() if o.get("assigned_doctor_id")}
     nurse_ids = {n for o in own.values() for n in (o.get("assigned_nurse_ids") or [])}
+    cm_ids = {str(o["assigned_case_manager_id"]) for o in own.values() if o.get("assigned_case_manager_id")}
     insurer_ids = {o["insurer_id"] for o in own.values() if o.get("insurer_id")}
 
     doctors = {d["doctor_id"]: {"id": d["doctor_id"], "name": d.get("name", d["doctor_id"]),
@@ -151,7 +155,7 @@ def care_teams(db, patient_ids) -> dict:
                for d in db["doctors"].find({"doctor_id": {"$in": list(doctor_ids)}},
                                            {"_id": 0, "doctor_id": 1, "name": 1, "specialty": 1})}
     nurses = {str(u["_id"]): _person(u)
-              for u in auth.users(db).find({"_id": {"$in": _object_ids(nurse_ids)}},
+              for u in auth.users(db).find({"_id": {"$in": _object_ids(nurse_ids | cm_ids)}},
                                            {"email": 1, "name": 1})}
     insurers = {i["_id"]: {"id": i["_id"], "name": i.get("name", i["_id"])}
                 for i in _identity(db)["insurers"].find({"_id": {"$in": list(insurer_ids)}})}
@@ -163,6 +167,8 @@ def care_teams(db, patient_ids) -> dict:
             "hospital_id": o.get("hospital_id"),
             "doctor": doctors.get(o.get("assigned_doctor_id")) if o.get("assigned_doctor_id") else None,
             "nurses": [nurses[n] for n in (o.get("assigned_nurse_ids") or []) if n in nurses],
+            # The case manager this patient is assigned to (assign), if any.
+            "case_manager": nurses.get(str(o.get("assigned_case_manager_id"))) if o.get("assigned_case_manager_id") else None,
             "insurer": insurers.get(o.get("insurer_id")) if o.get("insurer_id") else None,
         }
     return out
@@ -191,14 +197,18 @@ def care_filter(db, scope: Optional[list], doctor: Optional[str] = None,
 
 def assign(db, user: dict, scope: Optional[list], patient_ids: list,
            doctor_id: Optional[str] = None, nurse_ids: Optional[list] = None,
-           add_nurse_ids: Optional[list] = None) -> dict:
-    """Set the doctor and nurses of one or more patients.
+           add_nurse_ids: Optional[list] = None, case_manager_id: Optional[str] = None) -> dict:
+    """Set the doctor, nurses and case manager of one or more patients.
 
     doctor_id      None leaves it, "" clears it, anything else must be an active
                    registry doctor of each patient's hospital
     nurse_ids      replaces the nurses; each must be an active nurse account of
                    each patient's hospital
     add_nurse_ids  adds nurses, keeping the ones already there
+    case_manager_id  None leaves it, "" clears it, anything else must be an
+                   active case manager account of each patient's hospital. Who
+                   the patient and their caretaker are told to ask; it changes
+                   nobody's access (a case manager sees the whole hospital).
 
     All or nothing: every patient and every person is checked before anything
     is written, so a batch with one bad row changes nobody.
@@ -208,7 +218,7 @@ def assign(db, user: dict, scope: Optional[list], patient_ids: list,
         raise HTTPException(status_code=422, detail="Choose at least one patient")
     if len(patient_ids) > MAX_BATCH_ASSIGN:
         raise HTTPException(status_code=422, detail=f"At most {MAX_BATCH_ASSIGN} patients at a time")
-    if doctor_id is None and nurse_ids is None and not add_nurse_ids:
+    if doctor_id is None and nurse_ids is None and not add_nurse_ids and case_manager_id is None:
         raise HTTPException(status_code=422, detail="Nothing to change")
     for pid in patient_ids:
         access.require_patient(scope, pid)
@@ -242,7 +252,15 @@ def assign(db, user: dict, scope: Optional[list], patient_ids: list,
         if missing:
             raise HTTPException(status_code=404, detail="Nurse not found in this hospital")
 
+    case_manager_id = case_manager_id.strip() if isinstance(case_manager_id, str) else case_manager_id
+    if case_manager_id:
+        if not auth.users(db).find_one({"_id": {"$in": _object_ids([case_manager_id])}, "role": "case_manager",
+                                        "status": "active", "hospital_id": hospital}, {"_id": 1}):
+            raise HTTPException(status_code=404, detail="Case manager not found in this hospital")
+
     update: dict = {}
+    if case_manager_id is not None:
+        update.setdefault("$set", {})["assigned_case_manager_id"] = case_manager_id or None
     if doctor_id is not None:
         update.setdefault("$set", {})["assigned_doctor_id"] = doctor_id or None
     if nurse_ids is not None:
@@ -266,6 +284,8 @@ def assign(db, user: dict, scope: Optional[list], patient_ids: list,
             after["nurse_ids"] = [str(n) for n in dict.fromkeys(nurse_ids)]
         elif add_nurse_ids:
             after["nurse_ids"] = list(dict.fromkeys(before["nurse_ids"] + [str(n) for n in add_nurse_ids]))
+        if case_manager_id is not None:
+            after["case_manager_id"] = case_manager_id or None
         changes.append((pid, hospital, before, after))
     archive_care_team_changes(db, changes, user, via="care_team")
     # Open alerts go to the doctor now responsible for the patient.
@@ -463,15 +483,18 @@ def staff(db, view, user: dict, batch_dates: list) -> dict:
         high = {str(r["patient_id"]) for r in _latest_rows(view, batch_dates[-1]) if _band(r) == HIGH}
 
     own = list(view["care_actions"].find({}, {"_id": 0, "patient_id": 1, "assigned_doctor_id": 1,
-                                             "assigned_nurse_ids": 1}))
+                                             "assigned_nurse_ids": 1, "assigned_case_manager_id": 1}))
     by_doctor: dict = {}
     by_nurse: dict = {}
+    by_case_manager: dict = {}
     for o in own:
         pid = str(o["patient_id"])
         if o.get("assigned_doctor_id"):
             by_doctor.setdefault(o["assigned_doctor_id"], set()).add(pid)
         for n in o.get("assigned_nurse_ids") or []:
             by_nurse.setdefault(str(n), set()).add(pid)
+        if o.get("assigned_case_manager_id"):
+            by_case_manager.setdefault(str(o["assigned_case_manager_id"]), set()).add(pid)
 
     alerts: dict = {}
     for a in view["clinical_alerts"].find({"status": {"$in": OPEN_ALERT_STATUSES}},
@@ -511,6 +534,10 @@ def staff(db, view, user: dict, batch_dates: list) -> dict:
         nurses.append({**_person(acc), "hospital_id": acc.get("hospital_id"),
                        **counts(by_nurse.get(str(acc["_id"]), set()))})
 
+    case_managers = [{**_person(acc), "hospital_id": acc.get("hospital_id"),
+                      **counts(by_case_manager.get(str(acc["_id"]), set()))}
+                     for acc in auth.users(db).find({**people_q, "role": "case_manager"}).sort("email", 1)]
+
     assigned_doctor = {pid for pids in by_doctor.values() for pid in pids}
     assigned_nurse = {pid for pids in by_nurse.values() for pid in pids}
     all_pids = {str(o["patient_id"]) for o in own}
@@ -518,6 +545,7 @@ def staff(db, view, user: dict, batch_dates: list) -> dict:
         "hospital": _hospital_name(db, hospital),
         "doctors": doctors,
         "nurses": nurses,
+        "case_managers": case_managers,
         "no_doctor": len(all_pids - assigned_doctor),
         "no_nurse": len(all_pids - assigned_nurse),
         "specialties": sorted(set(doctor_service.SPECIALTY_FOR_GROUP.values())),

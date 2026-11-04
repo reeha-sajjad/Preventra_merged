@@ -4,7 +4,7 @@ import { CalendarClock, Loader2, Send, MessageSquarePlus, ArrowRight, Bell } fro
 import { addFollowUpNote, getPatientFollowUp, requestFollowUp, takeFollowUp } from '../../api';
 import { readClaims } from '../../api/auth';
 import { can, FOLLOWUP_HANDLE_ROLES, FOLLOWUP_REQUEST_ROLES } from '../../roles';
-import { DoneDialog, StatusPill, UrgencyPill } from './shared';
+import { DoneDialog, StatusPill, UrgencyPill, appointmentText } from './shared';
 import { ago } from './format';
 
 /**
@@ -153,6 +153,11 @@ export default function FollowUpCard({ patientId }) {
         <div className="mb-3 rounded-lg border border-gray-100 px-4 py-3 text-sm text-gray-600">
           <div className="flex flex-wrap items-center gap-2"><StatusPill f={recent} />
             <span className="text-xs text-gray-400">by {recent.done_by?.name} · {ago(recent.done_at)}</span></div>
+          {recent.appointment && (
+            <p className="mt-1.5 flex items-center gap-1.5 font-medium text-gray-800">
+              <CalendarClock size={14} className="text-ns-navy" /> {appointmentText(recent.appointment)}
+            </p>
+          )}
           {recent.outcome_note && <p className="mt-1.5">&ldquo;{recent.outcome_note}&rdquo;</p>}
         </div>
       )}

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Gauge, Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard } from 'lucide-react';
+import { ArrowLeft, Gauge, Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard, MapPin, Clock, Info } from 'lucide-react';
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
@@ -77,6 +77,9 @@ export default function PatientHome() {
 
   const tone = TONE[data.status.key] || TONE.watch;
   const { stay, recovery, care_team: team, followup } = data;
+  // A caretaker reads about the patient by name; the patient reads "you".
+  const them = caretaker ? (data.caring_for?.short_name || data.caring_for?.patient_name || 'them') : null;
+  const say = (forPatient, forCarer) => (caretaker ? forCarer : forPatient);
   const current = followup.active || followup.recent;
 
   return (
@@ -86,7 +89,7 @@ export default function PatientHome() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4">
           <p className="text-sm text-gray-700">
             {greeting()}{first ? `, ${first}` : ''}. You’re looking at <span className="font-semibold">{data.caring_for.patient_name}</span>’s
-            summary as their caretaker. It’s written to them.
+            summary as their caretaker.
           </p>
           <div className="flex items-center gap-4">
             <Link to={`/patients/${encodeURIComponent(data.patient_id)}`} className="text-sm font-semibold text-ns-navy">
@@ -119,12 +122,43 @@ export default function PatientHome() {
         <p className="mt-3 max-w-[62ch] text-[15px] leading-relaxed text-gray-700">{data.status.text}</p>
       </section>
 
+      {/* What someone comes to this page for, first: what to take, and when to go. */}
+      <div className="grid items-start gap-5 lg:grid-cols-3">
+        <MedicineList className="lg:col-span-2" meds={data.medicines} say={say} them={them} />
+        <div className="space-y-5">
+          <NextAppointment appt={data.next_appointment} say={say} them={them}
+            onAsk={followup.can_ask ? () => setAsking(true) : null} />
+            <Card title={say('Your care team', `${them}’s care team`)} id="team">
+              <ul className="mt-4 space-y-3 text-sm">
+                <TeamRow icon={Building2} role="Hospital" names={team.hospital ? [team.hospital] : []} />
+                <TeamRow icon={Stethoscope} role="Doctor" person
+                         names={team.doctor ? [team.doctor.name] : []} detail={team.doctor?.specialty} />
+                <TeamRow icon={UserRound} role={team.nurses.length > 1 ? 'Nurses' : 'Nurse'} person names={team.nurses.map((n) => n.name)} />
+                <TeamRow icon={PhoneCall} role={(team.case_managers || []).length === 1 ? 'Case manager' : 'Case managers'} person
+                         names={team.case_managers || []} empty={say('Your hospital’s case managers', 'The hospital’s case managers')}
+                         muted={false} />
+                <TeamRow icon={Store} role="Pharmacy" names={team.pharmacy ? [team.pharmacy] : []} />
+                {!caretaker && (
+                  // The patient's own insurance and member ID, as on their card.
+                  <li className="flex gap-3">
+                    <CreditCard size={16} className="mt-0.5 shrink-0 text-gray-400" />
+                    <div className="min-w-0">
+                      <div className="text-xs text-gray-500">Insurance</div>
+                      <InsuranceCard patientId={data.patient_id} compact />
+                    </div>
+                  </li>
+                )}
+              </ul>
+            </Card>
+        </div>
+      </div>
+
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <CheckInCard key={`checkin-${data.patient_id}`} patientId={caretaker ? data.patient_id : null}
             caretaker={caretaker} patientName={data.caring_for?.patient_name} />
 
-          <Card icon={Hospital} title="Your hospital stay" id="stay">
+          <Card icon={Hospital} title={say('Your hospital stay', `${them}’s hospital stay`)} id="stay">
             {(stay.admitted || stay.discharged) && (
               <dl className="mt-4 grid gap-3 sm:grid-cols-2">
                 {stay.admitted && <Fact label="Admitted" value={formatDate(stay.admitted)} />}
@@ -132,30 +166,34 @@ export default function PatientHome() {
               </dl>
             )}
             {stay.reason && (
-              <p className="mt-4 text-sm text-gray-700"><span className="text-gray-500">Main reason for your stay: </span>{stay.reason}</p>
+              <p className="mt-4 text-sm text-gray-700"><span className="text-gray-500">{say('Main reason for your stay: ', 'Main reason for the stay: ')}</span>{stay.reason}</p>
             )}
             {stay.conditions.length > 0 && (
-              <p className="mt-2 text-sm text-gray-700"><span className="text-gray-500">Conditions on your record: </span>{stay.conditions.join(', ')}</p>
+              <p className="mt-2 text-sm text-gray-700"><span className="text-gray-500">{say('Conditions on your record: ', 'Conditions on their record: ')}</span>{stay.conditions.join(', ')}</p>
             )}
-            <p className="mt-3 text-xs text-gray-500">As your hospital recorded it. Your doctor can explain what it means for you.</p>
+            <p className="mt-3 text-xs text-gray-500">{say('As your hospital recorded it. Your doctor can explain what it means for you.',
+              'As the hospital recorded it. Their doctor can explain what it means.')}</p>
           </Card>
 
           <MedicinesGivenCard key={data.patient_id} patientId={caretaker ? data.patient_id : null} />
 
-          <Card icon={CalendarCheck} title="Since you went home" id="recovery">
+          <Card icon={CalendarCheck} title={say('Since you went home', `Since ${them} went home`)} id="recovery">
             <ul className="mt-4 space-y-3 text-sm text-gray-700">
               <li className="flex gap-3">
                 <CalendarCheck size={16} className="mt-0.5 shrink-0 text-gray-400" />
                 {recovery.weeks > 0
-                  ? `Your care team has followed your recovery for ${recovery.weeks} week${recovery.weeks === 1 ? '' : 's'}.`
-                  : 'Your care team will follow how you’re doing in the weeks after you went home.'}
+                  ? say(`Your care team has followed your recovery for ${recovery.weeks} week${recovery.weeks === 1 ? '' : 's'}.`,
+                        `The care team has followed ${them}’s recovery for ${recovery.weeks} week${recovery.weeks === 1 ? '' : 's'}.`)
+                  : say('Your care team will follow how you’re doing in the weeks after you went home.',
+                        `The care team will follow how ${them} is doing in the weeks after they went home.`)}
               </li>
               {recovery.refill && (
                 <li className="flex gap-3"><Pill size={16} className="mt-0.5 shrink-0 text-gray-400" />{recovery.refill}</li>
               )}
             </ul>
             <p className="mt-3 text-xs text-gray-500">
-              Keep taking your medicines as prescribed, and go to your follow-up appointments.
+              {say('Keep taking your medicines as prescribed, and go to your follow-up appointments.',
+                   `Help ${them} keep taking their medicines as prescribed and get to their follow-up appointments.`)}
             </p>
           </Card>
         </div>
@@ -176,7 +214,8 @@ export default function PatientHome() {
               </p>
             ) : (
               <p className="mt-3 text-sm text-gray-600">
-                A case manager can help with how you’re feeling, your medicines, appointments or help at home.
+                {say('A case manager can help with how you’re feeling, your medicines, appointments or help at home.',
+                     `A case manager can help with how ${them} is doing, their medicines, appointments or help at home.`)}
               </p>
             )}
             {current?.status === 'done' && !sent && (
@@ -190,30 +229,10 @@ export default function PatientHome() {
                 Ask a case manager to get in touch
               </button>
             ) : (
-              <p className="mt-3 text-xs text-gray-500">Your record isn’t with a hospital yet, so there’s no case manager to ask.</p>
+              <p className="mt-3 text-xs text-gray-500">{say('Your record isn’t with a hospital yet', 'Their record isn’t with a hospital yet')}, so there’s no case manager to ask.</p>
             )}
           </Card>
 
-          <Card title="Your care team" id="team">
-            <ul className="mt-4 space-y-3 text-sm">
-              <TeamRow icon={Building2} role="Hospital" names={team.hospital ? [team.hospital] : []} />
-              <TeamRow icon={Stethoscope} role="Doctor"
-                       names={team.doctor ? [team.doctor.specialty ? `${team.doctor.name} (${team.doctor.specialty})` : team.doctor.name] : []} />
-              <TeamRow icon={UserRound} role={team.nurses.length > 1 ? 'Nurses' : 'Nurse'} names={team.nurses.map((n) => n.name)} />
-              <TeamRow icon={PhoneCall} role="Case managers" names={[]} empty="Your hospital’s case managers" muted={false} />
-              <TeamRow icon={Store} role="Pharmacy" names={team.pharmacy ? [team.pharmacy] : []} />
-              {!caretaker && (
-                // The patient's own insurance and member ID, as on their card.
-                <li className="flex gap-3">
-                  <CreditCard size={16} className="mt-0.5 shrink-0 text-gray-400" />
-                  <div className="min-w-0">
-                    <div className="text-xs text-gray-500">Insurance</div>
-                    <InsuranceCard patientId={data.patient_id} compact />
-                  </div>
-                </li>
-              )}
-            </ul>
-          </Card>
 
           {!caretaker && <CaretakersCard />}
 
@@ -253,14 +272,119 @@ function Fact({ label, value }) {
   );
 }
 
-function TeamRow({ icon: Icon, role, names, empty = 'Not assigned yet', muted = true }) {
+const AVATAR = ['bg-sky-100 text-sky-800', 'bg-emerald-100 text-emerald-800', 'bg-violet-100 text-violet-800',
+                'bg-amber-100 text-amber-800', 'bg-rose-100 text-rose-800'];
+const initials = (name) => name.replace(/^Dr\.? /, '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+function TeamRow({ icon: Icon, role, names, empty = 'Not assigned yet', muted = true, person = false, detail = null }) {
+  const first = names[0];
   return (
-    <li className="flex gap-3">
-      <Icon size={16} className="mt-0.5 shrink-0 text-gray-400" />
+    <li className="flex items-center gap-3">
+      {person && first ? (
+        <span aria-hidden="true" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
+          AVATAR[first.length % AVATAR.length]}`}>{initials(first)}</span>
+      ) : (
+        <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100">
+          <Icon size={16} className="text-gray-500" />
+        </span>
+      )}
       <div className="min-w-0">
         <div className="text-xs text-gray-500">{role}</div>
-        <div className={names.length || !muted ? 'text-gray-800' : 'text-gray-400'}>{names.length ? names.join(', ') : empty}</div>
+        <div className={`font-medium ${names.length || !muted ? 'text-gray-900' : 'text-gray-400'}`}>
+          {names.length ? names.join(', ') : empty}
+          {detail && <span className="font-normal text-gray-500"> · {detail}</span>}
+        </div>
       </div>
     </li>
+  );
+}
+
+/** What to take: each medicine with its dose (api/patient_medicines.for_home). */
+function MedicineList({ meds, say, them, className = '' }) {
+  const list = meds?.medicines || [];
+  return (
+    <section className={`rounded-xl border border-gray-200 bg-white p-6 shadow-sm ${className}`} aria-labelledby="meds-title">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="meds-title" className="flex items-center gap-2 text-base font-semibold text-gray-900">
+          <Pill size={17} className="text-gray-400" /> {say('Your medicines', `${them}’s medicines`)}
+        </h2>
+        {list.length > 0 && <span className="text-xs text-gray-500">{list.length} medicine{list.length === 1 ? '' : 's'}</span>}
+      </div>
+      {meds?.has_demo && (
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <Info size={14} className="mt-0.5 shrink-0" /> Demo medicines - made up for this demo, not from a real record.
+        </p>
+      )}
+      {list.length === 0 ? (
+        <p className="mt-4 text-sm text-gray-500">
+          {say('Your care team hasn’t added your medicines here yet. Follow your discharge letter.',
+               `The care team hasn’t added ${them}’s medicines here yet. Follow the discharge letter.`)}
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-gray-100">
+          {list.map((m) => (
+            <li key={m.id} className="flex items-center gap-3 py-3">
+              <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ns-navy/5">
+                <Pill size={16} className="text-ns-navy" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-gray-900">{m.drug}</div>
+                <div className="text-xs text-gray-500">
+                  {m.route}{m.instructions ? ` · ${m.instructions}` : ''}
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-base font-semibold text-ns-navy">{m.dose}</div>
+                <div className="text-xs text-gray-600">{m.how_often}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-4 text-xs text-gray-500">
+        {say('Questions about a medicine or a dose? Ask your doctor or pharmacist - don’t change a dose on your own.',
+             `Questions about a medicine or a dose? Ask ${them}’s doctor or pharmacist - don’t change a dose on your own.`)}
+      </p>
+    </section>
+  );
+}
+
+/** The next booked appointment (api/followups.next_appointment). */
+function NextAppointment({ appt, say, them, onAsk }) {
+  const day = appt?.date ? new Date(`${appt.date}T00:00:00`) : null;
+  return (
+    <section className="flex flex-col rounded-xl border border-gray-200 bg-white p-6 shadow-sm" aria-labelledby="appt-title">
+      <h2 id="appt-title" className="flex items-center gap-2 text-base font-semibold text-gray-900">
+        <CalendarCheck size={17} className="text-gray-400" /> Next appointment
+      </h2>
+      {day ? (
+        <div className="mt-4 flex gap-4">
+          <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-ns-navy text-white">
+            <span className="text-[11px] font-semibold uppercase tracking-wide opacity-80">
+              {day.toLocaleDateString(undefined, { month: 'short' })}
+            </span>
+            <span className="text-2xl font-semibold leading-none">{day.getDate()}</span>
+          </div>
+          <div className="min-w-0 space-y-1 text-sm text-gray-700">
+            <div className="font-semibold text-gray-900">{day.toLocaleDateString(undefined, { weekday: 'long' })}</div>
+            {appt.time && <div className="flex items-center gap-1.5"><Clock size={14} className="text-gray-400" /> {appt.time}</div>}
+            {appt.place && <div className="flex items-center gap-1.5"><MapPin size={14} className="text-gray-400" /> {appt.place}</div>}
+            {appt.with && <div className="flex items-center gap-1.5"><Stethoscope size={14} className="text-gray-400" /> {appt.with}</div>}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-4 flex-1 text-sm text-gray-500">
+          {say('Nothing booked yet. If you need one, a case manager can arrange it.',
+               `Nothing booked for ${them} yet. If they need one, a case manager can arrange it.`)}
+        </p>
+      )}
+      {appt?.booked_by && <p className="mt-3 text-xs text-gray-400">Booked by {appt.booked_by}</p>}
+      {!day && onAsk && (
+        <button type="button" onClick={onAsk}
+          className="mt-4 rounded-lg border border-ns-navy/30 px-3 py-2 text-sm font-semibold text-ns-navy hover:bg-ns-navy/5">
+          Ask for an appointment
+        </button>
+      )}
+    </section>
   );
 }

@@ -6,7 +6,8 @@ import { api } from '../../data/api';
  * Medication on the patient's page - Backend/core/medications.py.
  *
  * Shows the drug the risk score was calculated on and the drug the patient is
- * on now, with every recorded change. A doctor can record a switch or a stop.
+ * on now and its dose, with every recorded change. A doctor can record a switch,
+ * a dose change or a stop.
  * The risk score is the model's and is never changed by hand; the card says so.
  */
 export default function MedicationCard({ patientIdx }) {
@@ -31,7 +32,7 @@ export default function MedicationCard({ patientIdx }) {
     try {
       await api.recordMedicationChange(patientIdx, {
         to_drug: form.to_drug, reason: form.reason, note: form.note.trim() || undefined,
-        effective_date: form.effective_date,
+        effective_date: form.effective_date, dose: form.dose || undefined,
       });
       setForm(null); load();
     } catch (err) { setError(err.message); }
@@ -53,7 +54,7 @@ export default function MedicationCard({ patientIdx }) {
           </div>
         </div>
         {data?.can_record && !form && (
-          <button type="button" onClick={() => setForm({ to_drug: '', reason: '', note: '', effective_date: today })}
+          <button type="button" onClick={() => setForm({ to_drug: '', dose: '', reason: '', note: '', effective_date: today })}
             className="text-sm font-semibold px-4 py-2 rounded-lg text-white" style={{ background: 'var(--color-primary)' }}>
             Record a change
           </button>
@@ -68,6 +69,12 @@ export default function MedicationCard({ patientIdx }) {
             <div className="rounded-xl border border-gray-100 p-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Now on</div>
               <div className="text-lg font-semibold text-gray-800 mt-0.5">{data.current_label}</div>
+              {data.current_drug !== 'STOPPED' && (
+                <div className={`text-sm mt-0.5 ${data.current_dose_label ? 'font-semibold' : 'text-gray-400'}`}
+                     style={data.current_dose_label ? { color: 'var(--color-primary)' } : undefined}>
+                  {data.current_dose_label || 'Dose not recorded yet'}
+                </div>
+              )}
               {changed && data.changes[0] && (
                 <div className="text-[11px] text-gray-400 mt-0.5">since {data.changes[0].effective_date}</div>
               )}
@@ -94,7 +101,7 @@ export default function MedicationCard({ patientIdx }) {
                   <li key={c.id} className="py-2.5 text-sm">
                     <div className="flex flex-wrap items-center gap-2 text-gray-800">
                       <span>{c.from_label}</span><ArrowRight size={13} className="text-gray-400" />
-                      <b>{c.to_label}</b>
+                      <b>{c.to_label}{c.dose_label ? ` ${c.dose_label}` : ''}</b>
                       <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: '#F1F5F9', color: '#475569' }}>
                         {c.reason_label}
                       </span>
@@ -116,14 +123,30 @@ export default function MedicationCard({ patientIdx }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Change to</span>
-              <select value={form.to_drug} onChange={(e) => setForm({ ...form, to_drug: e.target.value })}
+              <select value={form.to_drug}
+                onChange={(e) => setForm({ ...form, to_drug: e.target.value, dose: '',
+                                           reason: e.target.value === data.current_drug ? 'dose_change' : form.reason === 'dose_change' ? '' : form.reason })}
                 className="mt-1.5 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
                 <option value="">Choose…</option>
-                {data.drugs.filter((d) => d.key !== data.current_drug).map((d) => (
-                  <option key={d.key} value={d.key}>{d.label}</option>
+                {data.drugs.map((d) => (
+                  <option key={d.key} value={d.key}>{d.key === data.current_drug ? `${d.label} (new dose)` : d.label}</option>
                 ))}
               </select>
             </label>
+            {form.to_drug && data.dose_options?.[form.to_drug] && (
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Dose {form.to_drug === data.current_drug ? '(required)' : '(if known)'}
+                </span>
+                <select value={form.dose} onChange={(e) => setForm({ ...form, dose: e.target.value })}
+                  className="mt-1.5 w-full text-sm rounded-lg border border-gray-200 px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+                  <option value="">{form.to_drug === data.current_drug ? 'Choose…' : 'Not known yet'}</option>
+                  {data.dose_options[form.to_drug].map((d) => (
+                    <option key={d} value={d} disabled={form.to_drug === data.current_drug && d === data.current_dose}>{d}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="block">
               <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">From</span>
               <input type="date" value={form.effective_date} max={today}

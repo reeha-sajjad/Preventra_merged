@@ -617,7 +617,8 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
           hospitalId={selectionHospital}
           current={assigning.length === 1 ? (() => {
             const row = paginatedData.find((r) => r.id === assigning[0]);
-            return { doctorId: row?.doctor?.id || '', nurseIds: (row?.nurses || []).map((n) => n.id) };
+            return { doctorId: row?.doctor?.id || '', nurseIds: (row?.nurses || []).map((n) => n.id),
+                     caseManagerId: row?.case_manager?.id || '' };
           })() : undefined}
           onClose={() => setAssigning(null)}
           onSaved={() => { setAssigning(null); setReloadKey((k) => k + 1); }}

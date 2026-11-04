@@ -7,7 +7,7 @@ import time
 import shutil
 import threading
 from datetime import datetime, timedelta
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 import certifi
 from dotenv import load_dotenv
@@ -40,6 +40,7 @@ from api import caretakers
 from api import medicines_given
 from api import member_ids
 from api import patient_insurer
+from api import patient_medicines
 from api import insurer_alerts
 from api import caretaker_home
 from api import checkins
@@ -923,6 +924,7 @@ def get_patients(request: Request,
         for r in data:
             team = teams.get(r["id"], {})
             r.update({"doctor": team.get("doctor"), "nurses": team.get("nurses", []),
+                      "case_manager": team.get("case_manager"),
                       "insurer": team.get("insurer"), "hospital_id": team.get("hospital_id")})
     if redacted:
         data = [access.redact(r) for r in data]
@@ -2808,6 +2810,7 @@ class FollowUpNote(BaseModel):
 class FollowUpDone(BaseModel):
     outcome: str
     note: Optional[str] = None
+    appointment: Optional[Dict[str, Optional[str]]] = None   # booked: {date, time, place, with}
 
 
 @app.get("/api/followups")
@@ -2870,7 +2873,7 @@ def take_followup(followup_id: str, request: Request):
 @app.post("/api/followups/{followup_id}/done")
 def finish_followup(followup_id: str, body: FollowUpDone, request: Request):
     return followups.complete(db, request.state.user, _scope(request), followup_id,
-                              body.outcome, body.note)
+                              body.outcome, body.note, body.appointment)
 
 
 # ---------------------------------------------------------------------------
@@ -3116,6 +3119,45 @@ def patient_medicines_given(patient_id: str, request: Request):
     return medicines_given.log(db, patient_id)
 
 
+# A patient's medicines at home, with doses (api/patient_medicines.py)
+class MedicineItem(BaseModel):
+    drug: Optional[str] = None
+    dose: Optional[str] = None
+    route: Optional[str] = None
+    how_often: Optional[str] = None
+    instructions: Optional[str] = None
+
+
+class StopMedicine(BaseModel):
+    reason: Optional[str] = None
+
+
+@app.get("/api/patients/{patient_id}/medicines")
+def patient_medicine_list(patient_id: str, request: Request):
+    """The patient's medicines and doses - the clinical layer."""
+    _require_detail(request, patient_id)
+    return {**patient_medicines.view(db, patient_id, request.state.user),
+            "history": patient_medicines.history(db, patient_id)}
+
+
+@app.post("/api/patients/{patient_id}/medicines", status_code=201)
+def add_patient_medicine(patient_id: str, body: MedicineItem, request: Request):
+    _require_detail(request, patient_id)
+    return patient_medicines.add(db, request.state.user, patient_id, body.model_dump())
+
+
+@app.put("/api/patients/{patient_id}/medicines/{item_id}")
+def change_patient_medicine(patient_id: str, item_id: str, body: MedicineItem, request: Request):
+    _require_detail(request, patient_id)
+    return patient_medicines.change(db, request.state.user, patient_id, item_id, body.model_dump())
+
+
+@app.post("/api/patients/{patient_id}/medicines/{item_id}/stop")
+def stop_patient_medicine(patient_id: str, item_id: str, body: StopMedicine, request: Request):
+    _require_detail(request, patient_id)
+    return patient_medicines.stop(db, request.state.user, patient_id, item_id, body.reason)
+
+
 # ---------------------------------------------------------------------------
 # Emergency access - "break the glass" (api/emergency.py; the same as GLP-1's)
 # ---------------------------------------------------------------------------
@@ -3166,6 +3208,7 @@ class CareTeamRequest(BaseModel):
     doctor_id: Optional[str] = None
     nurse_ids: Optional[List[str]] = None
     add_nurse_ids: Optional[List[str]] = None
+    case_manager_id: Optional[str] = None       # "" clears it (api/hospital.assign)
 
 
 @app.post("/api/care-team")
@@ -3175,7 +3218,7 @@ def set_care_team(payload: CareTeamRequest, request: Request):
     _require(request, "assign")
     return hospital.assign(db, request.state.user, _scope(request), payload.patient_ids,
                            doctor_id=payload.doctor_id, nurse_ids=payload.nurse_ids,
-                           add_nurse_ids=payload.add_nurse_ids)
+                           add_nurse_ids=payload.add_nurse_ids, case_manager_id=payload.case_manager_id)
 
 
 @app.get("/api/patients/{patient_id}/care-team/history")

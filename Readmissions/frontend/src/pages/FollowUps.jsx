@@ -4,7 +4,7 @@ import { CalendarClock, Inbox, Hourglass, AlertTriangle, Bell } from 'lucide-rea
 import { getFollowUps, takeFollowUp, markFollowUpReportsSeen } from '../api';
 import { readClaims } from '../api/auth';
 import RiskBadge from '../components/shared/RiskBadge';
-import { DoneDialog, StatusPill, UrgencyPill } from '../components/followups/shared';
+import { DoneDialog, StatusPill, UrgencyPill, appointmentText } from '../components/followups/shared';
 import { ago } from '../components/followups/format';
 
 /**
@@ -165,6 +165,7 @@ export default function FollowUps() {
                         {f.notes.length > 0 && (
                           <div className="mt-0.5 text-[11px] text-gray-400">+ {f.notes.length} more note{f.notes.length === 1 ? '' : 's'}</div>
                         )}
+                        {tab === 'done' && f.appointment && <div className="mt-0.5 text-[11px] font-medium text-gray-700">Appointment: {appointmentText(f.appointment)}</div>}
                         {tab === 'done' && f.outcome_note && <div className="mt-0.5 text-[11px] text-gray-500">Outcome: {f.outcome_note}</div>}
                       </td>
                       <td className="px-5 py-3 align-top">

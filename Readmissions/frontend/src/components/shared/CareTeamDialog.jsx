@@ -3,11 +3,11 @@ import { X, Loader2 } from 'lucide-react';
 import { getStaff, setCareTeam } from '../../api';
 
 /**
- * Assign a doctor and nurses to one patient, or to several at once.
+ * Assign a doctor, nurses and a case manager to one patient, or to several at once.
  *
  * One patient: the doctor and the nurse list are set as shown.
- * Several: the doctor changes only if one is picked, and ticked nurses are
- * added to whoever each patient already has.
+ * Several: the doctor and case manager change only if one is picked, and
+ * ticked nurses are added to whoever each patient already has.
  *
  * Only doctors registered for alert routing can be assigned - the Staff page
  * registers the rest. Everyone offered belongs to the patients' hospital; the
@@ -20,6 +20,7 @@ export default function CareTeamDialog({ patientIds, hospitalId, current, onClos
   const [busy, setBusy] = useState(false);
   const [doctorId, setDoctorId] = useState(single ? (current?.doctorId ?? '') : '__keep__');
   const [nurseIds, setNurseIds] = useState(single ? (current?.nurseIds ?? []) : []);
+  const [caseManagerId, setCaseManagerId] = useState(single ? (current?.caseManagerId ?? '') : '__keep__');
 
   useEffect(() => {
     let live = true;
@@ -39,6 +40,7 @@ export default function CareTeamDialog({ patientIds, hospitalId, current, onClos
   const doctors = (staff?.doctors || []).filter((d) => d.doctor_id && d.registered && sameHospital(d));
   const unregistered = (staff?.doctors || []).filter((d) => !d.registered && sameHospital(d)).length;
   const nurses = (staff?.nurses || []).filter(sameHospital);
+  const caseManagers = (staff?.case_managers || []).filter(sameHospital);
 
   const toggleNurse = (id) =>
     setNurseIds((ids) => (ids.includes(id) ? ids.filter((n) => n !== id) : [...ids, id]));
@@ -49,12 +51,14 @@ export default function CareTeamDialog({ patientIds, hospitalId, current, onClos
     if (single) {
       body.doctor_id = doctorId;
       body.nurse_ids = nurseIds;
+      body.case_manager_id = caseManagerId;
     } else {
       if (doctorId !== '__keep__') body.doctor_id = doctorId;
       if (nurseIds.length) body.add_nurse_ids = nurseIds;
+      if (caseManagerId !== '__keep__') body.case_manager_id = caseManagerId;
     }
-    if (!single && body.doctor_id === undefined && !body.add_nurse_ids) {
-      setError('Pick a doctor or at least one nurse.');
+    if (!single && body.doctor_id === undefined && !body.add_nurse_ids && body.case_manager_id === undefined) {
+      setError('Pick a doctor, a case manager or at least one nurse.');
       return;
     }
     setBusy(true);
@@ -101,6 +105,20 @@ export default function CareTeamDialog({ patientIds, hospitalId, current, onClos
                   and can&apos;t be assigned - register them on the Staff page.
                 </span>
               )}
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700">Case manager</span>
+              <select value={caseManagerId} onChange={(e) => setCaseManagerId(e.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-2 focus:ring-ns-navy/30">
+                {!single && <option value="__keep__">Leave as it is</option>}
+                <option value="">No case manager</option>
+                {caseManagers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.patients} patients)</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-gray-500">
+                Who the patient and their caretaker are told to ask. Every case manager still sees the whole hospital.
+              </span>
             </label>
             <fieldset>
               <legend className="text-sm font-medium text-gray-700">

@@ -146,7 +146,10 @@ export default function PatientHome() {
               </p>
             ) : (
               <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-2">
-                <div className="text-2xl text-gray-900" style={{ fontFamily: 'DM Serif Display, serif' }}>{medicine.label}</div>
+                <div className="text-2xl text-gray-900" style={{ fontFamily: 'DM Serif Display, serif' }}>
+                  {medicine.label}
+                  {medicine.dose && <span className="ml-2 text-lg font-semibold" style={{ color: 'var(--color-primary)', fontFamily: 'inherit' }}>{medicine.dose}</span>}
+                </div>
                 {medicine.schedule && (
                   <div className="flex items-center gap-1.5 text-sm text-gray-600">
                     <Clock size={14} className="text-gray-400" /> {medicine.schedule}

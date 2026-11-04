@@ -30,6 +30,9 @@ export function StatusPill({ f }) {
 export function DoneDialog({ followup, onClose, onDone }) {
   const [outcome, setOutcome] = useState(null);
   const [note, setNote] = useState('');
+  // Booked: when and where, which the patient and their caretaker are shown.
+  const [appt, setAppt] = useState({ date: '', time: '', place: '', with: '' });
+  const setA = (key) => (e) => setAppt((a) => ({ ...a, [key]: e.target.value }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -44,7 +47,8 @@ export function DoneDialog({ followup, onClose, onDone }) {
     if (!outcome) { setError('Choose what happened.'); return; }
     setBusy(true); setError(null);
     try {
-      onDone(await finishFollowUp(followup.id, { outcome, note: note.trim() || undefined }));
+      const booking = outcome === 'booked' && appt.date ? appt : undefined;
+      onDone(await finishFollowUp(followup.id, { outcome, note: note.trim() || undefined, appointment: booking }));
     } catch (err) {
       setError(err.message); setBusy(false);
     }
@@ -83,13 +87,37 @@ export function DoneDialog({ followup, onClose, onDone }) {
               );
             })}
           </fieldset>
+          {outcome === 'booked' && (
+            <fieldset className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+              <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-gray-500">The appointment</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-gray-600">Date
+                  <input type="date" value={appt.date} onChange={setA('date')} min={new Date().toISOString().slice(0, 10)}
+                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-ns-navy focus:outline-none" />
+                </label>
+                <label className="text-xs text-gray-600">Time
+                  <input type="time" value={appt.time} onChange={setA('time')}
+                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-ns-navy focus:outline-none" />
+                </label>
+                <label className="col-span-2 text-xs text-gray-600">Where
+                  <input value={appt.place} onChange={setA('place')} maxLength={120} placeholder="e.g. Cardiology clinic, 2nd floor"
+                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-ns-navy focus:outline-none" />
+                </label>
+                <label className="col-span-2 text-xs text-gray-600">With
+                  <input value={appt.with} onChange={setA('with')} maxLength={120} placeholder="e.g. Dr Michael Turner"
+                    className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm focus:border-ns-navy focus:outline-none" />
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-gray-500">Optional, but the patient and their caretaker see it as their next appointment.</p>
+            </fieldset>
+          )}
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">Note for the care team (optional)</span>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} rows={2}
-              placeholder="e.g. Tuesday clinic, 10:30"
+              placeholder="Anything else the care team should know"
               className="mt-1.5 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-ns-navy focus:outline-none focus:ring-1 focus:ring-ns-navy" />
           </label>
-          <p className="text-[11px] text-gray-500">Book the appointment in the hospital&rsquo;s own system first. This only records that it was dealt with.</p>
+          <p className="text-[11px] text-gray-500">Book the appointment in the hospital&rsquo;s own system first. This records what was arranged.</p>
           {error && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-3">
@@ -103,4 +131,11 @@ export function DoneDialog({ followup, onClose, onDone }) {
       </form>
     </div>
   );
+}
+
+/** "Thu 12 Nov, 10:30 · Cardiology clinic · with Dr Turner" */
+export function appointmentText(a) {
+  if (!a?.date) return '';
+  const day = new Date(`${a.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return [a.time ? `${day}, ${a.time}` : day, a.place, a.with && `with ${a.with}`].filter(Boolean).join(' · ');
 }

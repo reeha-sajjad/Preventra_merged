@@ -103,6 +103,11 @@ HANDLE_ROLES = ("superadmin", "hospital_admin", "case_manager")
 OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
 MAX_NOTE = 500
+# A booked follow-up can say when and where (clean_appointment). The booking
+# itself still happens in the hospital's own system; this is what the patient,
+# their caretaker and the care team are told.
+MAX_APPOINTMENT_TEXT = 120
+APPOINTMENT_DAYS_AHEAD = 366
 
 # The alert-reply actions (doctor_service.RECOMMENDED_ACTIONS) that a case
 # manager arranges. "Send to the emergency department" is not one: that is
@@ -139,6 +144,46 @@ def _aware(at: Optional[datetime]) -> Optional[datetime]:
     if at is None:
         return None
     return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def clean_appointment(raw: Optional[dict]) -> Optional[dict]:
+    """{date, time, place, with} as typed, checked: a date from today to a year
+    ahead (YYYY-MM-DD), an optional 24-hour time (HH:MM), and short free text
+    for where and with whom. None when nothing was given."""
+    if not raw or not any(str(v or "").strip() for v in raw.values()):
+        return None
+    from ingestion.scheduler import today as hospital_today
+    text = {k: " ".join(str(raw.get(k) or "").split())[:MAX_APPOINTMENT_TEXT] for k in ("date", "time", "place", "with")}
+    try:
+        day = datetime.strptime(text["date"], "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Give the appointment date (YYYY-MM-DD)")
+    today = hospital_today()
+    if day < today or day > today + timedelta(days=APPOINTMENT_DAYS_AHEAD):
+        raise HTTPException(status_code=422, detail="The appointment date must be from today to a year ahead")
+    if text["time"]:
+        try:
+            text["time"] = datetime.strptime(text["time"], "%H:%M").strftime("%H:%M")
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Give the time as HH:MM, e.g. 10:30")
+    return {"date": day.isoformat(), "time": text["time"] or None, "place": text["place"] or None,
+            "with": text["with"] or None}
+
+
+def next_appointment(db, patient_id: str, include_private: bool = False) -> Optional[dict]:
+    """The patient's next booked appointment (today or later), or None. A
+    behavioural health referral's is left out unless include_private: patients,
+    caretakers and insurers never see why such a booking was made, and its
+    date and place would say it."""
+    from ingestion.scheduler import today as hospital_today
+    query = {"patient_id": {"$in": access.id_variants([patient_id])}, "status": "done", "outcome": "booked",
+             "appointment.date": {"$gte": hospital_today().isoformat()}}
+    if not include_private:
+        query["reason"] = {"$ne": "behavioural_health"}
+    doc = _col(db).find_one(query, sort=[("appointment.date", 1), ("appointment.time", 1)])
+    if not doc:
+        return None
+    return {**doc["appointment"], "booked_by": (doc.get("done_by") or {}).get("name")}
 
 
 def _clean_note(text: Optional[str]) -> str:
@@ -198,6 +243,7 @@ def public(doc: dict, risk: Optional[dict] = None) -> dict:
         "taken_by": doc.get("taken_by"),
         "outcome": doc.get("outcome"), "outcome_label": OUTCOMES.get(doc.get("outcome")),
         "outcome_note": doc.get("outcome_note", ""), "done_by": doc.get("done_by"),
+        "appointment": doc.get("appointment"),
         "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None,
         "risk_at_request": doc.get("risk_at_request"),
         # Reported by a pharmacy: which problems, so the case manager sees why.
@@ -436,6 +482,7 @@ def patient_view(doc: dict) -> dict:
                        "at": _aware(p["at"]).isoformat()} for p in doc.get("patient_requests", [])],
             "handled_by": (doc.get("taken_by") or {}).get("name"),
             "outcome_label": OUTCOMES.get(doc.get("outcome")),
+            "appointment": doc.get("appointment") if doc.get("reason") != "behavioural_health" else None,
             "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None}
 
 
@@ -548,13 +595,17 @@ def take(db, user: dict, scope: Optional[list], followup_id: str) -> dict:
 
 
 def complete(db, user: dict, scope: Optional[list], followup_id: str,
-             outcome: str, note: Optional[str]) -> dict:
+             outcome: str, note: Optional[str], appointment: Optional[dict] = None) -> dict:
     """Done. A case manager may finish one they took, or an untaken one (which
     takes it on the way); one another case manager took is theirs to finish -
-    unless the caller is the hospital admin or superadmin, stepping in."""
+    unless the caller is the hospital admin or superadmin, stepping in. A
+    booked one may say when and where (clean_appointment)."""
     _require_handler(user)
     if outcome not in OUTCOMES:
         raise HTTPException(status_code=422, detail="Choose booked, unreachable or not needed")
+    booking = clean_appointment(appointment)
+    if booking and outcome != "booked":
+        raise HTTPException(status_code=422, detail="Only a booked follow-up has an appointment")
     doc = _load(db, user, scope, followup_id)
     if doc["status"] == "done":
         raise HTTPException(status_code=409, detail={"code": "already_done",
@@ -571,7 +622,8 @@ def complete(db, user: dict, scope: Optional[list], followup_id: str,
     told = sorted({p["pharmacy_id"] for p in doc.get("pharmacy_reports", []) if p.get("pharmacy_id")})
     result = _col(db).update_one({"_id": doc["_id"], "status": doc["status"]}, {
         "$set": {"status": "done", "outcome": outcome, "outcome_note": _clean_note(note),
-                 "done_by": who, "done_at": now, **taken, **({"pharmacy_alert": told} if told else {})},
+                 "done_by": who, "done_at": now, **taken, **({"pharmacy_alert": told} if told else {}),
+                 **({"appointment": booking} if booking else {})},
         "$unset": {"active_patient": "", "report_alert": ""},
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:

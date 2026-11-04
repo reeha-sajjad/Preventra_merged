@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Stethoscope, HeartPulse, Building, Building2, PencilLine, ClipboardList, Mail } from 'lucide-react';
+import { Users, Stethoscope, HeartPulse, Building, Building2, PencilLine, ClipboardList, Mail, PhoneCall } from 'lucide-react';
 import CareTeamDialog from './CareTeamDialog';
 
 /**
@@ -12,7 +12,7 @@ export default function CareTeamCard({ summary, onChanged }) {
   if (!summary) return null;
   // An insurer: the hospital and who to contact there (api/hospital.for_insurer).
   if (summary.viewer === 'insurer') return <HospitalContact summary={summary} />;
-  const { doctor, nurses = [], insurer } = summary;
+  const { doctor, nurses = [], insurer, case_manager: caseManager } = summary;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
@@ -27,7 +27,7 @@ export default function CareTeamCard({ summary, onChanged }) {
           </button>
         )}
       </div>
-      <dl className="grid gap-3 text-sm sm:grid-cols-3">
+      <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <dt className="flex items-center gap-1.5 text-gray-500"><Stethoscope size={14} /> Doctor</dt>
           <dd className="mt-0.5 font-medium text-gray-800">
@@ -42,6 +42,10 @@ export default function CareTeamCard({ summary, onChanged }) {
           </dd>
         </div>
         <div>
+          <dt className="flex items-center gap-1.5 text-gray-500"><PhoneCall size={14} /> Case manager</dt>
+          <dd className="mt-0.5 font-medium text-gray-800">{caseManager?.name || <span className="text-gray-400">None assigned</span>}</dd>
+        </div>
+        <div>
           <dt className="flex items-center gap-1.5 text-gray-500"><Building size={14} /> Insurer</dt>
           <dd className="mt-0.5 font-medium text-gray-800">{insurer?.name || <span className="text-gray-400">None on file</span>}</dd>
         </div>
@@ -50,7 +54,7 @@ export default function CareTeamCard({ summary, onChanged }) {
         <CareTeamDialog
           patientIds={[summary.id]}
           hospitalId={summary.hospital_id}
-          current={{ doctorId: doctor?.id || '', nurseIds: nurses.map((n) => n.id) }}
+          current={{ doctorId: doctor?.id || '', nurseIds: nurses.map((n) => n.id), caseManagerId: caseManager?.id || '' }}
           onClose={() => setEditing(false)}
           onSaved={() => { setEditing(false); onChanged?.(); }}
         />

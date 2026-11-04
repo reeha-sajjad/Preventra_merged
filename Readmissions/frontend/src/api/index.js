@@ -170,6 +170,13 @@ const RealAPI = {
   undoMedicinesGiven: (id, patient) => apiFetch(`/api/my-home/medicines/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
     { method: 'DELETE' }),
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
+  // A patient's medicines and doses (api/patient_medicines.py).
+  getPatientMedicines: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines`),
+  addPatientMedicine: (id, item) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines`, json(item)),
+  changePatientMedicine: (id, mid, item) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines/${mid}`,
+    { ...json(item), method: 'PUT' }),
+  stopPatientMedicine: (id, mid, reason) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines/${mid}/stop`,
+    json({ reason })),
   // The weekly check-in a patient or caretaker sends (api/checkins.py).
   getCheckIn: (patient) => apiFetch(`/api/my-home/checkin${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   sendCheckIn: (answers, patient, customAnswers = {}, remarks = null, moodAnswers = {}) =>
@@ -589,6 +596,10 @@ export const getMedicinesGiven   = realOnly(RealAPI.getMedicinesGiven);
 export const recordMedicinesGiven = realOnly(RealAPI.recordMedicinesGiven);
 export const undoMedicinesGiven  = realOnly(RealAPI.undoMedicinesGiven);
 export const getPatientMedicinesGiven = realOnly(RealAPI.getPatientMedicinesGiven);
+export const getPatientMedicines = realOnly(RealAPI.getPatientMedicines);
+export const addPatientMedicine = realOnly(RealAPI.addPatientMedicine);
+export const changePatientMedicine = realOnly(RealAPI.changePatientMedicine);
+export const stopPatientMedicine = realOnly(RealAPI.stopPatientMedicine);
 export const getCheckIn          = realOnly(RealAPI.getCheckIn);
 export const sendCheckIn         = realOnly(RealAPI.sendCheckIn);
 export const getDischargePlan    = realOnly(RealAPI.getDischargePlan);
