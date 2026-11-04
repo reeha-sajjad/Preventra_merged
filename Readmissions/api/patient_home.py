@@ -31,7 +31,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException
 
-from api import access, access_log, auth, followups, patient_medicines, pharmacy
+from api import access, access_log, auth, followups, patient_medicines, pharmacy, record_views
 from api.db_utils import get_latest_batch_date
 from api.hospital import care_teams
 
@@ -214,6 +214,8 @@ def home(db, user: dict, scope: Optional[list], patient_id: Optional[str] = None
         "safety": (f"If {called} has chest pain, trouble breathing, sudden confusion, or seems much worse than when "
                    "they left hospital, call 911 or go to the emergency department.") if carer else SAFETY,
         "viewer": user["role"], "caring_for": caring_for,
+        # Who has looked at this record (api/record_views.py): the patient's own, not a caretaker's.
+        "viewed_by": None if carer else record_views.viewed_by(db, pid),
         # A caretaker helps manage the recovery, so they see the care team's
         # score too; the patient reads it in words only (status).
         **({"risk": {"score": round(float(row.get("current_score", row.get("risk_score", 0)) or 0), 1),

@@ -40,6 +40,8 @@ from api import caretakers
 from api import medicines_given
 from api import member_ids
 from api import patient_insurer
+from api import patient_pharmacy
+from api import record_views  # noqa: F401  (used by api/patient_home)
 from api import patient_medicines
 from api import insurer_alerts
 from api import caretaker_home
@@ -2390,6 +2392,7 @@ class ManualPatientRecord(ManualPatientInput):
     external_ref: Optional[str] = None
     insurer: Optional[str] = None               # who pays (api/patient_insurer.py), id or name
     insurer_member_id: Optional[str] = None
+    pharmacy: Optional[str] = None              # where they fill (api/patient_pharmacy.py), id or name
     admit_date: Optional[str] = None
     primary_icd_code: Optional[str] = None
     primary_diagnosis: Optional[str] = None
@@ -2496,6 +2499,8 @@ def _add_manual_records(request: Request, records: list) -> list:
         raise HTTPException(status_code=400, detail="Pick a hospital first")
     cats = manual_patients.categories()
     payer = patient_insurer.check_new(db, records)
+    for row, errs in patient_pharmacy.check_new(db, records).items():
+        payer.setdefault(row, []).extend(errs)
     bad = [{"row": i, "errors": manual_patients.add_errors(r) + manual_patients.check(r, cats) + payer.get(i, [])}
            for i, r in enumerate(records, start=1)]
     bad = [b for b in bad if b["errors"]]
@@ -2512,6 +2517,7 @@ def _add_manual_records(request: Request, records: list) -> list:
         for i, (record, result) in enumerate(zip(records, scored), start=1):
             filed = manual_patients.add(db, request.state.user, record, hospital, scored=result)
             patient_insurer.file_new(db, request.state.user, filed["patient_id"], record)
+            patient_pharmacy.file_new(db, request.state.user, filed["patient_id"], record)
             added.append({"row": i, **filed})
     finally:
         _cache.clear()
@@ -2946,6 +2952,33 @@ def patient_insurer_history(patient_id: str, request: Request):
     return {"history": patient_insurer.history(db, request.state.user, _scope(request), patient_id)}
 
 
+# Where a patient fills prescriptions (api/patient_pharmacy.py)
+class PatientPharmacyRequest(BaseModel):
+    pharmacy: Optional[str] = None              # pharmacy id or name; empty clears it
+
+
+@app.get("/api/pharmacies")
+def list_pharmacies_for_picker(request: Request):
+    """The pharmacies billing staff can choose from."""
+    return {"pharmacies": patient_pharmacy.pharmacies_for_picker(db, request.state.user)}
+
+
+@app.get("/api/patients/{patient_id}/pharmacy")
+def get_patient_pharmacy(patient_id: str, request: Request):
+    return patient_pharmacy.current(db, request.state.user, _scope(request), patient_id)
+
+
+@app.put("/api/patients/{patient_id}/pharmacy")
+def set_patient_pharmacy(patient_id: str, body: PatientPharmacyRequest, request: Request):
+    """Set, change or clear where the patient fills. The old pharmacy loses them at once."""
+    return patient_pharmacy.set_pharmacy(db, request.state.user, _scope(request), patient_id, body.pharmacy)
+
+
+@app.get("/api/patients/{patient_id}/pharmacy-history")
+def patient_pharmacy_history(patient_id: str, request: Request):
+    return {"history": patient_pharmacy.history(db, request.state.user, _scope(request), patient_id)}
+
+
 @app.get("/api/insurer/home")
 def insurer_home(request: Request):
     """An insurer's members by hospital, their readmission cost, and who is most at risk."""
@@ -3134,9 +3167,16 @@ class StopMedicine(BaseModel):
 
 @app.get("/api/patients/{patient_id}/medicines")
 def patient_medicine_list(patient_id: str, request: Request):
-    """The patient's medicines and doses - the clinical layer."""
+    """The patient's medicines and doses - the clinical layer. A pharmacy reads
+    the current list of a patient who fills there (it dispenses them), without
+    the change history or anything else clinical."""
+    user = request.state.user
+    if user["role"] == "pharmacy":
+        _require_patient(request, patient_id)
+        out = patient_medicines.view(db, patient_id, user)
+        return {**out, "stopped": [], "history": [], "can_edit": False}
     _require_detail(request, patient_id)
-    return {**patient_medicines.view(db, patient_id, request.state.user),
+    return {**patient_medicines.view(db, patient_id, user),
             "history": patient_medicines.history(db, patient_id)}
 
 

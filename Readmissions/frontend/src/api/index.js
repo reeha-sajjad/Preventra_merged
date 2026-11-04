@@ -215,6 +215,11 @@ const RealAPI = {
   setPatientInsurer: (id, insurer, memberId) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer`,
     { ...json({ insurer, member_id: memberId || null }), method: 'PUT' }),
   getInsurerHistory: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer-history`),
+  // Where a patient fills (api/patient_pharmacy.py).
+  getPharmacies: () => apiFetch('/api/pharmacies'),
+  getPatientPharmacy: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/pharmacy`),
+  setPatientPharmacy: (id, pharmacy) => apiFetch(`/api/patients/${encodeURIComponent(id)}/pharmacy`,
+    { ...json({ pharmacy: pharmacy || null }), method: 'PUT' }),
   // Insurer alerts and hospitals' billing flags (api/insurer_alerts.py).
   getInsurerFlagsFor: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer-flags`),
   sendInsurerFlag: (id, body) => apiFetch(`/api/patients/${encodeURIComponent(id)}/insurer-flags`, json(body)),
@@ -587,6 +592,9 @@ export const findByMemberId      = realOnly(RealAPI.findByMemberId);
 export const getInsurers         = realOnly(RealAPI.getInsurers);
 export const setPatientInsurer   = realOnly(RealAPI.setPatientInsurer);
 export const getInsurerHistory   = realOnly(RealAPI.getInsurerHistory);
+export const getPharmacies       = realOnly(RealAPI.getPharmacies);
+export const getPatientPharmacy  = realOnly(RealAPI.getPatientPharmacy);
+export const setPatientPharmacy  = realOnly(RealAPI.setPatientPharmacy);
 export const getInsurerFlagsFor  = realOnly(RealAPI.getInsurerFlagsFor);
 export const sendInsurerFlag     = realOnly(RealAPI.sendInsurerFlag);
 export const getInsurerFlags     = realOnly(RealAPI.getInsurerFlags);

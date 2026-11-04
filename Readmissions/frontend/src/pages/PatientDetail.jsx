@@ -13,6 +13,7 @@ import CaretakersCard from '../components/patient/CaretakersCard';
 import MedicinesGivenCard from '../components/patient/MedicinesGivenCard';
 import MedicinesCard from '../components/patient/MedicinesCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
+import PharmacyCard from '../components/pharmacy/PharmacyCard';
 import DriverCard from '../components/shared/DriverCard';
 import AiInsightsPanel from '../components/shared/AiInsightsPanel';
 import CareCoordination from '../components/dashboard/CareCoordination';
@@ -151,6 +152,9 @@ export default function PatientDetail() {
         <CareTeamCard summary={summary} onChanged={reload} />
         {can(ASSIGN_ROLES) && <CaretakersCard patientId={summary.id} />}
         <InsuranceCard patientId={summary.id} />
+        <PharmacyCard patientId={summary.id} />
+        {/* A pharmacy reads the medicine list it dispenses (api/main.patient_medicine_list), nothing else clinical. */}
+        {summary.detail_access === 'overview_only' && <MedicinesCard patientId={summary.id} />}
         {/* A pharmacy: the refill facts and "Report a refill problem" instead of the care team's card. */}
         {summary.detail_access === 'overview_only' ? <PharmacyPatientCard summary={summary} />
           : <FollowUpCard patientId={summary.id} />}
@@ -291,6 +295,8 @@ export default function PatientDetail() {
           {can(ASSIGN_ROLES) && <CaretakersCard patientId={patient.id} />}
 
           <InsuranceCard patientId={patient.id} />
+
+          <PharmacyCard patientId={patient.id} />
 
           <MedicinesCard patientId={patient.id} />
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Gauge, Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard, MapPin, Clock, Info } from 'lucide-react';
+import { ArrowLeft, Gauge, Hospital, Stethoscope, UserRound, Store, Building2, PhoneCall, ShieldAlert, CalendarCheck, Pill, CreditCard, MapPin, Clock, Info, Eye } from 'lucide-react';
 import { getMyHome } from '../api';
 import AskDialog from '../components/patient/AskDialog';
 import CaretakersCard from '../components/patient/CaretakersCard';
@@ -236,6 +236,8 @@ export default function PatientHome() {
 
           {!caretaker && <CaretakersCard />}
 
+          {!caretaker && data.viewed_by && <ViewedByCard views={data.viewed_by} />}
+
           <aside className="flex gap-3 rounded-xl border border-red-200 bg-red-50/60 p-4">
             <ShieldAlert size={18} className="mt-0.5 shrink-0 text-red-700" />
             <p className="text-xs leading-relaxed text-gray-700">{data.safety}</p>
@@ -249,6 +251,41 @@ export default function PatientHome() {
           onDone={(out) => { setAsking(false); setSent(out); load(); }} />
       )}
     </div>
+  );
+}
+
+/** Who has looked at this record (api/record_views.py): the patient's own view of the access log. */
+function ViewedByCard({ views }) {
+  const [all, setAll] = useState(false);
+  const rows = all ? views.entries : views.entries.slice(0, 5);
+  return (
+    <Card icon={Eye} title="Who has looked at your record" id="viewed">
+      <p className="mt-1 text-xs text-gray-500">Everyone who opens your record is recorded, with the reason they gave.</p>
+      {rows.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-500">Nobody yet.</p>
+      ) : (
+        <ul className="mt-3 divide-y divide-gray-100">
+          {rows.map((v, i) => (
+            <li key={i} className="py-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-sm font-medium text-gray-900">{v.who}</span>
+                <span className="shrink-0 text-xs text-gray-500">{formatDate(v.at)}{v.times > 1 ? ` · ${v.times} times` : ''}</span>
+              </div>
+              <div className="mt-0.5 text-xs text-gray-600">
+                {[v.who !== v.role ? v.role : null, v.where].filter(Boolean).join(', ')}
+                {v.why ? `${v.who !== v.role || v.where ? ' · ' : ''}${v.why}` : ''}
+                {v.emergency && <span className="ml-1.5 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Emergency</span>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {views.entries.length > 5 && (
+        <button type="button" onClick={() => setAll((a) => !a)} className="mt-2 text-xs font-medium text-ns-navy">
+          {all ? 'Show fewer' : `Show all ${views.entries.length}`}
+        </button>
+      )}
+    </Card>
   );
 }
 
