@@ -83,6 +83,10 @@ async def _booked(idxs: list) -> dict:
     since = _now() - timedelta(days=BOOKED_DAYS)
     async for f in get_db()[followups.COLLECTION].find({"patient_idx": {"$in": idxs}, "status": "done",
                                                         "outcome": "booked", "done_at": {"$gte": since}}).sort("done_at", 1):
+        # A mood-related booking is not a caretaker's to hear about (mirrors Readmissions' caretaker_home).
+        if f.get("reason") == "behavioural_health" or any(
+                p.get("reason") in followups.PATIENT_ONLY_REASONS for p in f.get("patient_requests", [])):
+            continue
         out[int(f["patient_idx"])] = {"at": _aware(f["done_at"])}
     return out
 

@@ -15,6 +15,7 @@ import ClinicalGate from '../components/hospital/ClinicalGate';
 import PharmacyPatientCard from '../components/pharmacy/PharmacyPatientCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import DosesCard from '../components/patient/DosesCard';
+import MoodScreenCard from '../components/mood/MoodScreenCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
 
 // ── Plain-language interpretations keyed by driver label ──────────────────────
@@ -148,7 +149,7 @@ function DriverCard({ rank, driver, direction, shap }) {
 export default function PatientDetail() {
   const { id }   = useParams();
   const navigate = useNavigate();
-  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy, isInsurer, isCaretaker } = useRole();
+  const { isCostView, isPatient, canAssign, isCareTeam, isPharmacy, isInsurer, isCaretaker, seesMood } = useRole();
   const { summary, data: patientData, loading: patientLoading, reload } = usePatientRecord(id);
   const patientList = usePatients();
   const careTeamChanged = () => { reload(); patientList?.reload(); };
@@ -344,6 +345,7 @@ export default function PatientDetail() {
         <div className="mb-6">
           <MedicationCard patientIdx={patient.patient_idx} />
           <DosesCard patientIdx={patient.patient_idx} />
+          {seesMood && <MoodScreenCard patientIdx={patient.patient_idx} />}
         </div>
       )}
 

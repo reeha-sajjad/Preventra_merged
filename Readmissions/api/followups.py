@@ -50,8 +50,8 @@ Rules:
   * A doctor or nurse may also give a REASON (FOLLOWUP_REASONS: a behavioural health
     referral), on the request form or by choosing it as an alert-reply action. It
     is for the care team (api/access.py `view_mood`): other roles get the request
-    without it (_without_reason). GLP-1's twin has no staff reason; the drift is
-    accepted.
+    without it (_without_reason). GLP-1's twin has the same reason
+    (GLP1/Backend/core/followups.py FOLLOWUP_REASONS).
   * The list shows what booking needs - patient number, risk, care team, who
     asked, how soon and their note - and none of the clinical layer
     (45 CFR 164.514(d), minimum necessary).
@@ -75,7 +75,7 @@ COLLECTION = "followups"
 URGENCY = {"urgent": "Urgent - within days", "routine": "Routine - within weeks"}
 OUTCOMES = {"booked": "Booked", "unreachable": "Couldn't reach patient", "not_needed": "Not needed"}
 REQUEST_ROLES = ("doctor", "nurse")
-# Why a doctor or nurse asks, optional. Readmissions only: GLP-1's twin has none.
+# Why a doctor or nurse asks, optional. Same list as GLP1/Backend/core/followups.py FOLLOWUP_REASONS.
 FOLLOWUP_REASONS = {"behavioural_health": "Behavioural health referral"}
 # What a pharmacy can report about a patient who fills there. Same list as GLP-1's.
 PHARMACY_PROBLEMS = {
@@ -323,8 +323,8 @@ def from_alert(db, user: dict, alert: dict) -> Optional[dict]:
     note = _clean_note(("; ".join(labels) + ". " + (response.get("recommendation") or ""))[:MAX_NOTE])
     reason = "behavioural_health" if "behavioural_health" in wanted else None
     try:
-        return public(_insert(db, user, patient_id, urgency, note,
-                              source="clinical_alert", alert_id=alert.get("alert_id"), reason=reason))
+        return _for(user, public(_insert(db, user, patient_id, urgency, note,
+                                         source="clinical_alert", alert_id=alert.get("alert_id"), reason=reason)))
     except DuplicateKeyError:
         existing = _col(db).find_one({"active_patient": patient_id})
         who, now = _who(user), _now()
@@ -337,7 +337,7 @@ def from_alert(db, user: dict, alert: dict) -> Optional[dict]:
                       "history": {"action": "note", "by": who, "at": now, "alert_id": alert.get("alert_id"),
                                   **({"reason": reason} if reason else {})}},
             **({"$set": changes} if changes else {})})
-        return public(_col(db).find_one({"_id": existing["_id"]}))
+        return _for(user, public(_col(db).find_one({"_id": existing["_id"]})))
 
 
 def for_patient(db, user: dict, scope: Optional[list], patient_id: str) -> dict:
@@ -381,9 +381,16 @@ def _without_reason(item: Optional[dict]) -> Optional[dict]:
         return item
     out = dict(item)
     if out.get("reason") == "behavioural_health":
-        out.update({"note": "", "notes": [], "outcome_note": "", "alert_id": None, "source": None})
+        out.update({"note": "", "notes": [], "outcome_note": "", "alert_id": None, "source": None,
+                    "appointment": None})
     out["reason"] = out["reason_label"] = None
     return out
+
+
+def _for(user: dict, item: Optional[dict]) -> Optional[dict]:
+    """A request as `user` may be shown it: a role that may not read mood gets it
+    without its reason, whoever acted on it."""
+    return item if not item or access.sees_mood(user) else _without_reason(item)
 
 
 def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:
@@ -401,7 +408,7 @@ def add_note(db, user: dict, scope: Optional[list], followup_id: str, text: str)
     _col(db).update_one({"_id": doc["_id"]}, {
         "$push": {"notes": {"by": who, "at": now, "text": text},
                   "history": {"action": "note", "by": who, "at": now}}})
-    return public(_col(db).find_one({"_id": doc["_id"]}))
+    return _for(user, public(_col(db).find_one({"_id": doc["_id"]})))
 
 
 # --------------------------------------------------------------- pharmacy side
@@ -590,8 +597,8 @@ def take(db, user: dict, scope: Optional[list], followup_id: str) -> dict:
             "code": "already_taken" if current["status"] == "in_progress" else "already_done",
             "message": f"{holder} is already handling this" if current["status"] == "in_progress"
                        else "This request is already done",
-            "followup": public(current)})
-    return public(_col(db).find_one({"_id": doc["_id"]}))
+            "followup": _for(user, public(current))})
+    return _for(user, public(_col(db).find_one({"_id": doc["_id"]})))
 
 
 def complete(db, user: dict, scope: Optional[list], followup_id: str,
@@ -610,12 +617,12 @@ def complete(db, user: dict, scope: Optional[list], followup_id: str,
     if doc["status"] == "done":
         raise HTTPException(status_code=409, detail={"code": "already_done",
                                                      "message": "This request is already done",
-                                                     "followup": public(doc)})
+                                                     "followup": _for(user, public(doc))})
     holder = (doc.get("taken_by") or {}).get("id")
     if doc["status"] == "in_progress" and holder != str(user["_id"]) and user["role"] == "case_manager":
         raise HTTPException(status_code=409, detail={
             "code": "already_taken", "message": f"{doc['taken_by']['name']} is handling this",
-            "followup": public(doc)})
+            "followup": _for(user, public(doc))})
     who, now = _who(user), _now()
     taken = {} if doc.get("taken_by") else {"taken_by": who, "taken_at": now}
     # The pharmacies that reported on it hear it is done (bell below).
@@ -628,7 +635,7 @@ def complete(db, user: dict, scope: Optional[list], followup_id: str,
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
-    return public(_col(db).find_one({"_id": doc["_id"]}))
+    return _for(user, public(_col(db).find_one({"_id": doc["_id"]})))
 
 
 def listing(db, user: dict, status: str = "active") -> dict:
@@ -654,7 +661,7 @@ def listing(db, user: dict, status: str = "active") -> dict:
     teams = care_teams(db, ids)
     items = []
     for d in docs:
-        item = public(d, risk.get(d["patient_id"]))
+        item = _for(user, public(d, risk.get(d["patient_id"])))
         team = teams.get(d["patient_id"], {})
         item["doctors"] = [team["doctor"]["name"]] if team.get("doctor") else []
         item["nurses"] = [n["name"] for n in team.get("nurses", [])]

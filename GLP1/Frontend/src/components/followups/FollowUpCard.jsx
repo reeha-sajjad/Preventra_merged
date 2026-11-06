@@ -22,7 +22,7 @@ export default function FollowUpCard({ patientIdx }) {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState(null);          // { urgency, note } while asking
+  const [form, setForm] = useState(null);          // { urgency, note, reason } while asking
   const [noteText, setNoteText] = useState('');
   const [busy, setBusy] = useState(false);
   const [doneFor, setDoneFor] = useState(null);
@@ -42,7 +42,8 @@ export default function FollowUpCard({ patientIdx }) {
   const send = (e) => {
     e.preventDefault();
     run(async () => {
-      await api.requestFollowUp(patientIdx, { urgency: form.urgency, note: form.note.trim() || undefined });
+      await api.requestFollowUp(patientIdx, { urgency: form.urgency, note: form.note.trim() || undefined,
+                                              reason: form.reason || undefined });
       setForm(null);
     });
   };
@@ -86,6 +87,9 @@ export default function FollowUpCard({ patientIdx }) {
           <div className="flex flex-wrap items-center gap-2">
             <UrgencyPill urgency={active.urgency} />
             <StatusPill f={active} />
+            {active.reason_label && (
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-900">{active.reason_label}</span>
+            )}
             {active.overdue && <span className="text-[11px] font-semibold" style={{ color: '#C62828' }}>Open {active.days_open} days</span>}
           </div>
           <p className="text-sm text-gray-700 mt-2">
@@ -145,7 +149,7 @@ export default function FollowUpCard({ patientIdx }) {
 
       {/* Asking for one */}
       {data && !active && isCareTeam && !form && (
-        <button type="button" onClick={() => setForm({ urgency: 'routine', note: '' })}
+        <button type="button" onClick={() => setForm({ urgency: 'routine', note: '', reason: '' })}
           className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg text-white"
           style={{ background: 'var(--color-primary)' }}>
           <CalendarClock size={15} /> Request follow-up
@@ -168,6 +172,21 @@ export default function FollowUpCard({ patientIdx }) {
               ))}
             </div>
           </div>
+          {data?.followup_reasons?.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Reason (optional)</div>
+              <div className="inline-flex flex-wrap rounded-lg border border-gray-200 p-0.5" role="radiogroup" aria-label="Reason">
+                {[{ key: '', label: 'None' }, ...data.followup_reasons].map((r) => (
+                  <button key={r.key} type="button" role="radio" aria-checked={form.reason === r.key}
+                    onClick={() => setForm({ ...form, reason: r.key })}
+                    className={`text-sm px-3 py-1.5 rounded-md font-medium transition-colors ${form.reason === r.key ? '' : 'text-gray-600'}`}
+                    style={form.reason === r.key ? { background: 'var(--color-primary)', color: 'white' } : undefined}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Note (optional)</span>
             <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} maxLength={500}

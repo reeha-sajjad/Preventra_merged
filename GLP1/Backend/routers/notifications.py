@@ -31,11 +31,16 @@ class SeenRequest(BaseModel):
 
 @router.post("/notifications/seen")
 async def mark_notifications_seen(body: SeenRequest,
-                                  user: dict = Depends(require_role(*CARE_TEAM_ROLES)),
+                                  user: dict = Depends(require_role(*CARE_TEAM_ROLES, "case_manager")),
                                   scope: Optional[list] = Depends(scope_of)):
+    """Doctors and nurses dismiss their alerts. A case manager's bell is mostly
+    follow-up requests, which leave it when handled; only its mood flags are
+    dismissed here."""
     if body.all:
-        # Everything in the bell, not only the first page shown.
-        ids = [i["patient_idx"] for i in await notifications.alerts(user, scope)]
+        # Everything in the bell, not only the first page shown. A case
+        # manager's: the mood items only.
+        ids = [i["patient_idx"] for i in await notifications.alerts(user, scope)
+               if user["role"] in CARE_TEAM_ROLES or "mood" in i["kinds"]]
     elif body.patient_ids:
         ids = body.patient_ids
         for idx in ids:

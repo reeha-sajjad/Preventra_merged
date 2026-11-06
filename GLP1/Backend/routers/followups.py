@@ -16,6 +16,7 @@ router = APIRouter()
 class FollowUpRequest(BaseModel):
     urgency: Literal["urgent", "routine"]
     note: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class NoteRequest(BaseModel):
@@ -38,7 +39,7 @@ async def get_patient_followup(patient_idx: int, user: dict = Depends(actor),
 async def request_followup(patient_idx: int, body: FollowUpRequest, user: dict = Depends(actor),
                            scope: Optional[list] = Depends(scope_of)):
     """A doctor or hospital nurse asks for a follow-up. 409 if one is open."""
-    return await followups.request(user, scope, patient_idx, body.urgency, body.note)
+    return await followups.request(user, scope, patient_idx, body.urgency, body.note, body.reason)
 
 
 @router.get("/followups")

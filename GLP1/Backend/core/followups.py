@@ -34,6 +34,15 @@ Who does what (core/access.py has the role lists):
                            request, or added to the open one. Sees whether
                            someone is on it and how it ended, never the notes.
 
+A doctor or nurse may give a request the reason "Behavioural health referral"
+(FOLLOWUP_REASONS), and a patient may ask about "My mood or how I'm coping" (the
+"mood" patient reason). Both are mood-related: only doctors, nurses and case
+managers (core/access.sees_mood) see the reason, the notes and the mood ask. A
+hospital admin or the superadmin can still take or finish such a request, but
+sees it with no reason and no notes - `public` strips it for them - and a
+caretaker is never offered or shown the mood ask. Same list as
+Readmissions/api/followups.py.
+
 Rules:
   * One request at a time per patient. A second person sees the open one and
     can add a note to it instead. Enforced by the database (a unique index on
@@ -58,13 +67,17 @@ from bson.errors import InvalidId
 from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError
 
-from core.access import CARE_TEAM_ROLES, hospital_of, overview_only, require_patient, scope_query
+from core.access import CARE_TEAM_ROLES, hospital_of, overview_only, require_patient, scope_query, sees_mood
 from core.mongo import get_db, get_shared_identity_db
 
 COLLECTION = "followups"
 URGENCY = {"urgent": "Urgent - within days", "routine": "Routine - within weeks"}
 OUTCOMES = {"booked": "Booked", "unreachable": "Couldn't reach patient", "not_needed": "Not needed"}
 REQUEST_ROLES = CARE_TEAM_ROLES                                   # doctor, nurse
+# Why staff ask for a follow-up, optionally. Same list as Readmissions/api/followups.py;
+# doctors and nurses only (they are the ones who request), and mood-related, so
+# only the care team and case managers see it back.
+FOLLOWUP_REASONS = {"behavioural_health": "Behavioural health referral"}
 # What a pharmacy can report about a patient who fills there.
 PHARMACY_PROBLEMS = {
     "missed_pickup":  "Missed a refill pickup",
@@ -82,8 +95,12 @@ PATIENT_REASONS = {
     "questions":    "Questions about my treatment",
     "stopping":     "Thinking about stopping my medicine",
     "appointment":  "I'd like an appointment",
+    "mood":         "My mood or how I'm coping",
     "other":        "Something else",
 }
+# Only the patient chooses these: a caretaker is neither offered nor allowed them.
+PATIENT_ONLY_REASONS = ("mood",)
+NEUTRAL_ASK = "Asked to get in touch"       # a mood ask, to a bell that may not read mood
 HANDLE_ROLES = ("superadmin", "hospital_admin", "case_manager")
 OVERDUE_DAYS = 7
 SHOW_DONE_DAYS = 30
@@ -143,14 +160,27 @@ def _object_id(followup_id: str) -> ObjectId:
         raise HTTPException(status_code=404, detail="Follow-up request not found")
 
 
-def public(doc: dict, risk: Optional[float] = None) -> dict:
-    """A request as the screens show it."""
+def _without_mood(item: dict) -> dict:
+    """A request for someone who may not read mood (core/access.sees_mood): a
+    mood-related one loses its reason, notes and the patient's mood ask."""
+    private = item["reason"] == "behavioural_health" or any(
+        p["reason"] in PATIENT_ONLY_REASONS for p in item["patient_requests"])
+    if private:
+        item = {**item, "note": "", "notes": [], "outcome_note": "",
+                "patient_requests": [p for p in item["patient_requests"] if p["reason"] not in PATIENT_ONLY_REASONS]}
+    return {**item, "reason": None, "reason_label": None}
+
+
+def public(doc: dict, risk: Optional[float] = None, *, viewer: dict) -> dict:
+    """A request as the screens show it to `viewer`. `viewer` is required, so a
+    caller that forgets who is looking fails loudly instead of leaking mood."""
     now = _now()
     asked = _aware(doc["requested_at"])
     out = {
         "id": str(doc["_id"]), "patient_idx": doc["patient_idx"], "hospital_id": doc.get("hospital_id"),
         "status": doc["status"], "urgency": doc["urgency"], "urgency_label": URGENCY[doc["urgency"]],
         "note": doc.get("note", ""), "requested_by": doc["requested_by"], "requested_at": asked.isoformat(),
+        "reason": doc.get("reason"), "reason_label": FOLLOWUP_REASONS.get(doc.get("reason")),
         "notes": [{**n, "at": _aware(n["at"]).isoformat()} for n in doc.get("notes", [])],
         "taken_by": doc.get("taken_by"),
         "outcome": doc.get("outcome"), "outcome_label": OUTCOMES.get(doc.get("outcome")),
@@ -174,7 +204,7 @@ def public(doc: dict, risk: Optional[float] = None) -> dict:
         before = doc.get("risk_at_request")
         out["risk_went_down"] = (doc["status"] != "done" and before is not None
                                  and before >= 0.50 and risk < 0.50)
-    return out
+    return out if sees_mood(viewer) else _without_mood(out)
 
 
 async def _risk(idxs) -> dict:
@@ -185,20 +215,23 @@ async def _risk(idxs) -> dict:
 
 # ------------------------------------------------------------ care team side
 async def request(user: dict, scope: Optional[list], patient_idx: int,
-                  urgency: str, note: Optional[str]) -> dict:
+                  urgency: str, note: Optional[str], reason: Optional[str] = None) -> dict:
     if user["role"] not in REQUEST_ROLES:
         raise HTTPException(status_code=403, detail="Doctors and hospital nurses request follow-ups")
     require_patient(scope, patient_idx)
     if urgency not in URGENCY:
         raise HTTPException(status_code=422, detail="Choose urgent or routine")
+    if reason is not None and reason not in FOLLOWUP_REASONS:
+        raise HTTPException(status_code=422, detail="Not a follow-up reason")
     await ensure_indexes()
     access = await get_db().patient_access.find_one({"patient_idx": int(patient_idx)}, {"hospital_id": 1})
     who, now = await _who(user), _now()
+    why = {"reason": reason} if reason else {}
     doc = {"patient_idx": int(patient_idx), "active_patient": int(patient_idx),
            "hospital_id": (access or {}).get("hospital_id"), "status": "open", "urgency": urgency,
-           "note": _clean_note(note), "requested_by": who, "requested_at": now, "notes": [],
+           "note": _clean_note(note), "requested_by": who, "requested_at": now, "notes": [], **why,
            "risk_at_request": (await _risk([patient_idx])).get(int(patient_idx)),
-           "history": [{"action": "requested", "by": who, "at": now, "urgency": urgency}]}
+           "history": [{"action": "requested", "by": who, "at": now, "urgency": urgency, **why}]}
     try:
         result = await _collection().insert_one(doc)
     except DuplicateKeyError:
@@ -206,9 +239,9 @@ async def request(user: dict, scope: Optional[list], patient_idx: int,
         raise HTTPException(status_code=409, detail={
             "code": "already_requested",
             "message": f"{existing['requested_by']['name']} already requested a follow-up for this patient",
-            "followup": public(existing)})
+            "followup": public(existing, viewer=user)})
     doc["_id"] = result.inserted_id
-    return public(doc)
+    return public(doc, viewer=user)
 
 
 async def for_patient(user: dict, scope: Optional[list], patient_idx: int) -> dict:
@@ -222,20 +255,24 @@ async def for_patient(user: dict, scope: Optional[list], patient_idx: int) -> di
     if user["role"] in ("patient", "caretaker"):
         # The patient or their caretaker: whether someone is on it, never what
         # the care team wrote.
-        return {"active": patient_view(active) if active else None,
-                "recent": patient_view(recent[0]) if recent else None,
+        role = user["role"]
+        return {"active": patient_view(active, role) if active else None,
+                "recent": patient_view(recent[0], role) if recent else None,
                 "can_request": False, "can_handle": False, "can_ask": True,
-                "reasons": [{"key": k, "label": v} for k, v in PATIENT_REASONS.items()]}
+                "reasons": [{"key": k, "label": v} for k, v in PATIENT_REASONS.items()
+                            if role == "patient" or k not in PATIENT_ONLY_REASONS]}
     if overview_only(user):
         # A pharmacy: whether someone is on it, never what the care team wrote.
         return {"active": pharmacy_view(active, user) if active else None,
                 "recent": pharmacy_view(recent[0], user) if recent else None,
                 "can_request": False, "can_handle": False, "can_report": True,
                 "problems": [{"key": k, "label": v} for k, v in PHARMACY_PROBLEMS.items()]}
-    return {"active": public(active) if active else None,
-            "recent": public(recent[0]) if recent else None,
+    return {"active": public(active, viewer=user) if active else None,
+            "recent": public(recent[0], viewer=user) if recent else None,
             "can_request": user["role"] in REQUEST_ROLES and active is None,
-            "can_handle": user["role"] in HANDLE_ROLES}
+            "can_handle": user["role"] in HANDLE_ROLES,
+            **({"followup_reasons": [{"key": k, "label": v} for k, v in FOLLOWUP_REASONS.items()]}
+               if user["role"] in REQUEST_ROLES else {})}
 
 
 async def add_note(user: dict, scope: Optional[list], followup_id: str, text: str) -> dict:
@@ -253,7 +290,7 @@ async def add_note(user: dict, scope: Optional[list], followup_id: str, text: st
     await _collection().update_one({"_id": doc["_id"]}, {
         "$push": {"notes": {"by": who, "at": now, "text": text},
                   "history": {"action": "note", "by": who, "at": now}}})
-    return public(await _collection().find_one({"_id": doc["_id"]}))
+    return public(await _collection().find_one({"_id": doc["_id"]}), viewer=user)
 
 
 # --------------------------------------------------------------- pharmacy side
@@ -329,15 +366,18 @@ PATIENT_NAME = "The patient"        # how a patient's own request is signed on s
 CARETAKER_NAME = "The caretaker"    # ... and their caretaker's
 
 
-def patient_view(doc: dict) -> dict:
+def patient_view(doc: dict, role: str = "patient") -> dict:
     """A request as the patient sees it: whether someone is on it, who, and how
     it ended, and what they themselves asked - not the care team's notes, the
-    doctor's request or a pharmacy's report."""
+    doctor's request or a pharmacy's report. A caretaker does not see the
+    patient's mood ask, nor that there was one."""
+    asks = [p for p in doc.get("patient_requests", [])
+            if role == "patient" or p["reason"] not in PATIENT_ONLY_REASONS]
     return {"id": str(doc["_id"]), "patient_idx": doc["patient_idx"], "status": doc["status"],
             "requested_at": _aware(doc["requested_at"]).isoformat(),
-            "by_you": bool(doc.get("patient_requests")),
+            "by_you": bool(asks),
             "asked": [{"reason": p["reason"], "reason_label": PATIENT_REASONS.get(p["reason"], p["reason"]),
-                       "at": _aware(p["at"]).isoformat()} for p in doc.get("patient_requests", [])],
+                       "at": _aware(p["at"]).isoformat()} for p in asks],
             "handled_by": (doc.get("taken_by") or {}).get("name"),
             "outcome_label": OUTCOMES.get(doc.get("outcome")),
             "done_at": _aware(doc["done_at"]).isoformat() if doc.get("done_at") else None}
@@ -375,6 +415,8 @@ async def patient_request(user: dict, scope: Optional[list], reason: str, note: 
         signed = PATIENT_NAME
     if reason not in PATIENT_REASONS:
         raise HTTPException(status_code=422, detail="Choose what it's about")
+    if user["role"] == "caretaker" and reason in PATIENT_ONLY_REASONS:
+        raise HTTPException(status_code=422, detail="Only the patient can choose that one")
     note = _clean_note(note)
     if reason == "other" and len(note) < 5:
         raise HTTPException(status_code=422, detail="Say briefly what it's about")
@@ -395,7 +437,7 @@ async def patient_request(user: dict, scope: Optional[list], reason: str, note: 
                       "history": {"action": "patient_request", "by": who, "at": now, "reason": reason}},
             **({"$set": updates} if updates else {})})
         return {"added_to_open": True, "followup": patient_view(
-            await _collection().find_one({"_id": existing["_id"]}))}
+            await _collection().find_one({"_id": existing["_id"]}), user["role"])}
     access = await get_db().patient_access.find_one({"patient_idx": patient_idx}, {"hospital_id": 1})
     if not (access or {}).get("hospital_id"):
         raise HTTPException(status_code=409, detail="Your record isn't with a hospital yet, so there is no case manager to ask")
@@ -409,7 +451,7 @@ async def patient_request(user: dict, scope: Optional[list], reason: str, note: 
     except DuplicateKeyError:                           # opened at the same moment: add to it
         return await patient_request(user, scope, reason, note, patient_idx)
     doc["_id"] = result.inserted_id
-    return {"added_to_open": False, "followup": patient_view(doc)}
+    return {"added_to_open": False, "followup": patient_view(doc, user["role"])}
 
 
 async def pharmacy_reports(user: dict) -> list:
@@ -459,8 +501,8 @@ async def take(user: dict, scope: Optional[list], followup_id: str) -> dict:
             "code": "already_taken" if current["status"] == "in_progress" else "already_done",
             "message": f"{holder} is already handling this" if current["status"] == "in_progress"
                        else "This request is already done",
-            "followup": public(current)})
-    return public(await _collection().find_one({"_id": doc["_id"]}))
+            "followup": public(current, viewer=user)})
+    return public(await _collection().find_one({"_id": doc["_id"]}), viewer=user)
 
 
 async def complete(user: dict, scope: Optional[list], followup_id: str,
@@ -474,12 +516,12 @@ async def complete(user: dict, scope: Optional[list], followup_id: str,
     doc = await _load(user, scope, followup_id)
     if doc["status"] == "done":
         raise HTTPException(status_code=409, detail={"code": "already_done", "message": "This request is already done",
-                                                     "followup": public(doc)})
+                                                     "followup": public(doc, viewer=user)})
     holder = (doc.get("taken_by") or {}).get("id")
     if doc["status"] == "in_progress" and holder != user["id"] and user["role"] == "case_manager":
         raise HTTPException(status_code=409, detail={
             "code": "already_taken", "message": f"{doc['taken_by']['name']} is handling this",
-            "followup": public(doc)})
+            "followup": public(doc, viewer=user)})
     who, now = await _who(user), _now()
     taken = {} if doc.get("taken_by") else {"taken_by": who, "taken_at": now}
     # The pharmacies that reported on it hear it is done (pharmacy_done_for_bell).
@@ -491,7 +533,7 @@ async def complete(user: dict, scope: Optional[list], followup_id: str,
         "$push": {"history": {"action": "done", "by": who, "at": now, "outcome": outcome}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
-    return public(await _collection().find_one({"_id": doc["_id"]}))
+    return public(await _collection().find_one({"_id": doc["_id"]}), viewer=user)
 
 
 async def handlers(user: dict) -> list:
@@ -515,7 +557,7 @@ def _may_reassign(user: dict, doc: dict) -> None:
     if user["role"] == "case_manager" and holder != user["id"]:
         raise HTTPException(status_code=409, detail={
             "code": "not_yours", "message": f"{(doc.get('taken_by') or {}).get('name', 'Someone')} is handling this",
-            "followup": public(doc)})
+            "followup": public(doc, viewer=user)})
 
 
 async def release(user: dict, scope: Optional[list], followup_id: str) -> dict:
@@ -533,7 +575,7 @@ async def release(user: dict, scope: Optional[list], followup_id: str) -> dict:
                               "from": doc.get("taken_by")}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
-    return public(await _collection().find_one({"_id": doc["_id"]}))
+    return public(await _collection().find_one({"_id": doc["_id"]}), viewer=user)
 
 
 async def hand_over(user: dict, scope: Optional[list], followup_id: str, to_user_id: str) -> dict:
@@ -564,7 +606,7 @@ async def hand_over(user: dict, scope: Optional[list], followup_id: str, to_user
                               "from": doc.get("taken_by"), "to": to}}})
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Someone else changed this request; reload and try again")
-    return public(await _collection().find_one({"_id": doc["_id"]}))
+    return public(await _collection().find_one({"_id": doc["_id"]}), viewer=user)
 
 
 async def listing(user: dict, status: str = "active") -> dict:
@@ -589,7 +631,7 @@ async def listing(user: dict, status: str = "active") -> dict:
     teams = await care_teams([d["patient_idx"] for d in docs])
     items = []
     for d in docs:
-        item = public(d, risk.get(d["patient_idx"]))
+        item = public(d, risk.get(d["patient_idx"]), viewer=user)
         team = teams.get(d["patient_idx"], {})
         item["doctors"] = [p["name"] for p in team.get("doctors", [])]
         item["nurses"] = [p["name"] for p in team.get("nurses", [])]
@@ -652,7 +694,7 @@ async def open_for_bell(user: dict) -> list:
         docs = [d for d in docs
                 if owner.get(int(d["patient_idx"])) == user["id"] or owner.get(int(d["patient_idx"])) not in team]
     risk = await _risk([d["patient_idx"] for d in docs])
-    return [public(d, risk.get(d["patient_idx"])) for d in docs]
+    return [public(d, risk.get(d["patient_idx"]), viewer=user) for d in docs]
 
 
 async def handed_for_bell(user: dict) -> list:
@@ -662,7 +704,7 @@ async def handed_for_bell(user: dict) -> list:
     docs = await _collection().find({"hospital_id": user.get("hospital_id"), "status": "in_progress",
                                      "handover_alert.for": user["id"]}).to_list(length=None)
     risk = await _risk([d["patient_idx"] for d in docs])
-    return [{**public(d, risk.get(d["patient_idx"])),
+    return [{**public(d, risk.get(d["patient_idx"]), viewer=user),
              "handed_by": d["handover_alert"]["by"],
              "handed_at": _aware(d["handover_alert"]["at"]).isoformat()} for d in docs]
 
@@ -673,9 +715,11 @@ async def reported_for_bell(user: dict) -> list:
     docs = await _collection().find({"hospital_id": user.get("hospital_id"), "status": "in_progress",
                                      "report_alert.for": user["id"]}).to_list(length=None)
     risk = await _risk([d["patient_idx"] for d in docs])
-    return [{**public(d, risk.get(d["patient_idx"])),
+    return [{**public(d, risk.get(d["patient_idx"]), viewer=user),
              "reported_by": d["report_alert"]["by"],
-             "reported_problem": d["report_alert"].get("label")
+             "reported_problem": NEUTRAL_ASK if d["report_alert"]["problem"] in PATIENT_ONLY_REASONS
+                                                and not sees_mood(user)
+                                 else d["report_alert"].get("label")
                                  or PHARMACY_PROBLEMS.get(d["report_alert"]["problem"], d["report_alert"]["problem"]),
              "reported_at": _aware(d["report_alert"]["at"]).isoformat()} for d in docs]
 

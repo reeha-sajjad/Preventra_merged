@@ -14,7 +14,9 @@ import PageState from '../components/shared/PageState';
  * The hospital at a glance - patients on GLP-1 therapy, how many are at
  * critical risk, predicted to stop, adherent - and then the work: follow-up
  * requests, patients missing a doctor or nurse, and critical-risk patients
- * nobody is following up. Each block links to the page where it gets done.
+ * nobody is following up, and patients whose latest mood screen was flagged
+ * (Backend/core/mood.py - case managers may read it). Each block links to the
+ * page where it gets done.
  * Laid out like the Overview and My patients, so the three home pages read as
  * one product.
  *
@@ -41,7 +43,7 @@ export default function CaseManagerHome() {
 
   if (!data) return <PageState error={error} label="today's work" />;
 
-  const { stats, followups: f, gaps, unattended } = data;
+  const { stats, followups: f, gaps, unattended, mood } = data;
   const caseload = data.caseload?.patients ?? 0;
   const showingMine = !!data.caseload?.mine;
   // Links into the patient list keep to the same patients as the page.
@@ -225,8 +227,63 @@ export default function CaseManagerHome() {
           </div>
         )}
       </div>
+
+      {/* ── Latest mood screen flagged (an older backend sends none) ── */}
+      {mood && (
+        <div className="card p-0 overflow-hidden animate-fade-up stagger-4">
+          <div className="flex items-start gap-3 px-5 md:px-6 pt-5 pb-4">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-blue-50">
+              <HeartHandshake size={16} style={{ color: 'var(--color-primary)' }} />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-800" style={{ fontFamily: 'DM Serif Display, serif' }}>
+                Mood flags
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5 max-w-2xl">
+                {mood.total
+                  ? 'Patients whose latest mood screen, in the last 4 weeks, was flagged. Screening answers, not a diagnosis.'
+                  : 'No mood flags in the last 4 weeks.'}
+              </p>
+            </div>
+          </div>
+          {mood.patients.length > 0 && (
+            <div className="overflow-x-auto border-t border-gray-100">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Patient</th><th>Risk</th><th>Flag</th><th>Answered</th><th aria-label="Open" /></tr>
+                </thead>
+                <tbody>
+                  {mood.patients.map((p) => (
+                    <tr key={p.patient_idx} className="cursor-pointer group" onClick={() => open(p.patient_idx)}>
+                      <td className="font-mono text-xs font-semibold text-gray-700">#{p.patient_idx}</td>
+                      <td>{p.dropout_prob != null && <RiskBadge prob={p.dropout_prob} />}</td>
+                      <td className="text-gray-700">{p.title}{p.simulated ? ' (simulated)' : ''}</td>
+                      <td className="text-xs text-gray-600">{answeredOn(p.answered_on)}</td>
+                      <td className="text-right">
+                        <ChevronRight size={16} className="inline text-gray-300 group-hover:text-gray-500 transition-colors" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {mood.total > mood.patients.length && (
+            <p className="px-5 md:px-6 py-3 text-xs text-gray-500 border-t border-gray-100">
+              Showing the {mood.patients.length} most recent of {mood.total.toLocaleString()}.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+// "YYYY-MM-DD" as a local date, so a US time zone does not show the day before.
+function answeredOn(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /* A figure tile, styled like the Overview's hospital card. */

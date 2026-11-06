@@ -46,12 +46,17 @@ def uid(world, email):
 @pytest.mark.parametrize("email", ["admin@a.test", "cm@a.test", "claims@acme.test", "me@patient.test"])
 def test_patient_alerts_are_for_doctors_and_nurses_only(world, email):
     """Others get no patient alerts (a case manager's bell holds follow-up
-    requests only - tests/test_followups.py), and cannot dismiss any."""
+    requests and mood flags only - tests/test_followups.py, tests/test_mood.py),
+    and cannot dismiss any."""
     c = client(world, email)
     r = c.get("/api/notifications")
     assert r.status_code == 200 and r.json()["items"] == []
     assert r.json()["enabled"] is (email in ("cm@a.test", "claims@acme.test"))   # insurers: core/insurer_alerts.py
-    assert c.post("/api/notifications/seen", json={"all": True}).status_code == 403
+    # A case manager may dismiss mood flags (tests/test_mood.py); with none, nothing is marked.
+    seen = c.post("/api/notifications/seen", json={"all": True})
+    assert seen.status_code == (200 if email == "cm@a.test" else 403)
+    if email == "cm@a.test":
+        assert seen.json() == {"seen": 0}
 
 
 def test_critical_patients_not_yet_opened_are_listed(world):
@@ -146,7 +151,7 @@ def test_counts_and_order(world):
     body = client(world, "doc@a.test").get("/api/notifications").json()
     assert [i["patient_idx"] for i in body["items"]] == [1, 3, 0]       # risen, new, unreviewed
     assert body["total"] == 3 and body["counts"] == {"risk_up": 1, "new": 1, "unreviewed": 1, "followup_new": 0, "followup_done": 0, "followup_handed": 0,
-                                                 "followup_report": 0, "report_done": 0, "insurer_flag": 0,
+                                                 "followup_report": 0, "mood": 0, "report_done": 0, "insurer_flag": 0,
                                                  "turned_critical": 0, "refill_problem": 0, "dose_due": 0,
                                                  "booked": 0, "dose_missed": 0}
     assert not {"name", "email", "BMXBMI"} & set().union(*body["items"])

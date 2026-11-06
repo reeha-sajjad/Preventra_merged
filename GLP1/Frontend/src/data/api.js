@@ -157,7 +157,7 @@ export const api = {
   getMedications:       (id)     => get(`/api/patients/${id}/medications`),
   recordMedicationChange: (id, body) => post(`/api/patients/${id}/medications`, body),
   getPatientFollowUp:   (id)     => get(`/api/patients/${id}/followup`),
-  /** { urgency: 'urgent' | 'routine', note? } - doctors and hospital nurses */
+  /** { urgency: 'urgent' | 'routine', note?, reason? } - doctors and hospital nurses */
   requestFollowUp:      (id, body) => post(`/api/patients/${id}/followup`, body),
   /** status: 'active' | 'done' - case managers, hospital admins */
   getFollowUps:         (status = 'active') => get(`/api/followups?status=${status}`),
@@ -212,6 +212,12 @@ export const api = {
   doseGiven:            (note, patient) => post(`/api/zoe/doses${pq(patient)}`, { note: note || undefined }),
   undoDose:             (id, patient) => del(`/api/zoe/doses/${id}${pq(patient)}`),
   getPatientDoses:      (idx) => get(`/api/patients/${idx}/doses`),
+  // The mood screen - Backend/core/mood.py. The patient answers (every 2 weeks);
+  // doctors, nurses and case managers read it on the patient's page.
+  getMyMood:            () => get('/api/my-home/mood'),
+  /** answers: { phq_interest: 0-3, ... } */
+  sendMyMood:           (answers) => post('/api/my-home/mood', { answers }),
+  getPatientMood:       (idx) => get(`/api/patients/${idx}/mood`),
   getCaseManagerToday:  (mine = false) => get(`/api/case-manager/today${mine ? "?mine=1" : ""}`),
   finishFollowUp:       (fid, body) => post(`/api/followups/${fid}/done`, body),
 

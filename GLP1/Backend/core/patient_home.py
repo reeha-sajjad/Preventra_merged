@@ -23,6 +23,8 @@ nothing here is redacted the way it is for staff who are not on the care team
 sense: other people's notes about coordinating their care, the model's internal
 numbers (SHAP values, segment, cluster) and costs.
 
+Mood questions are not here: core/mood.py, the patient's own endpoints.
+
 Nothing is written here; the dataset is read as delivered.
 """
 from typing import Optional

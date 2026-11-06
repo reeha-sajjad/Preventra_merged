@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill, Receipt, Siren, PackageX, Syringe } from 'lucide-react';
+import { Bell, TrendingUp, UserPlus, AlertTriangle, ChevronRight, CheckCheck, CalendarClock, CalendarCheck, Forward, Pill, Receipt, Siren, PackageX, Syringe, HeartHandshake } from 'lucide-react';
 import { api } from '../../data/api';
 import { RiskBadge } from '../shared';
 
@@ -21,6 +21,11 @@ const KINDS = {
     `Follow-up done · ${i.followup?.outcome_label} (${i.followup?.done_by})` },
   risk_up:    { icon: TrendingUp,    color: '#C62828', text: (i) =>
     `Risk up from ${Math.round((i.previous_prob ?? 0) * 100)}% since you last looked`, label: () => 'risk up' },
+  // The patient's latest mood screen is flagged (Backend/core/mood.py): doctors, nurses
+  // and case managers only. #92400e is DESIGN.md --p-warning; it must be hex, as the
+  // count chip appends an alpha to it.
+  mood: { icon: HeartHandshake, color: '#92400e', label: (n) => `mood flag${n === 1 ? '' : 's'}`,
+    text: (i) => `Mood: ${i.mood?.title ?? 'screen flagged'}${i.mood?.simulated ? ' (simulated)' : ''}` },
   new:        { icon: UserPlus,      color: '#1B4F8A', text: () => 'New on your care team', label: () => 'new' },
   unreviewed: { icon: AlertTriangle, color: '#EF6C00', text: () => 'Critical risk, not reviewed yet', label: () => 'not reviewed' },
   // An insurer's bell (Backend/core/insurer_alerts.py).
@@ -45,7 +50,7 @@ const KINDS = {
  * The bell in the top bar. Doctors and hospital nurses: their own patients
  * that need a look - opening a patient clears them (the backend does that when
  * the patient page loads); "Mark all as read" clears the rest. Case managers:
- * follow-up requests, and pharmacy reports on ones they hold. Pharmacies: their
+ * follow-up requests, pharmacy reports on ones they hold, and mood flags. Pharmacies: their
  * reports that are done - opening the pharmacy page clears them. Insurers:
  * hospitals' billing flags (cleared by replying, on the Members page) and
  * members who turned critical (opening the member, or "Mark all as read").
@@ -197,7 +202,7 @@ export default function NotificationBell() {
           ) : (
             <ul className="max-h-[420px] overflow-y-auto divide-y divide-gray-100">
               {items.map((i) => (
-                <li key={i.followup_id || i.flag_id || i.patient_idx}>
+                <li key={i.followup_id || i.flag_id || `${i.patient_idx}-${i.kinds.join()}`}>
                   <button type="button" onClick={() => go(i)}
                     className="group w-full text-left flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
                     <div className="pt-0.5">{i.dropout_prob != null

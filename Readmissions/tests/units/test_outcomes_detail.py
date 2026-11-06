@@ -451,8 +451,11 @@ def test_simulated_demo_checkins_are_not_counted_as_sent(main, world, clock):
 
 
 # ------------------------------------------------------------ who may see it
-def test_outcome_roles_may_all_see_mood():
-    assert set(access.ACTIONS["view_outcomes"]) <= set(access.ACTIONS["view_mood"])
+def test_the_mood_panel_is_counts_for_every_outcome_role_not_individual_screens():
+    # The aggregate panel (counts, small cells hidden) stays on Outcomes for all its roles; a
+    # patient's own screen is the care team's only (access.ACTIONS view_mood).
+    assert {"superadmin", "hospital_admin"} <= set(access.ACTIONS["view_outcomes"])
+    assert not {"superadmin", "hospital_admin"} & set(access.ACTIONS["view_mood"])
 
 
 def test_reads_do_not_grow_with_patients(monkeypatch):

@@ -30,6 +30,9 @@ const ASSIGN_ROLES   = ['superadmin', 'hospital_admin', 'case_manager'];
 const REASON_ROLES   = ['hospital_admin', 'insurer'];
 // The people who look after patients directly.
 const CARE_TEAM_ROLES = ['doctor', 'nurse'];
+// Who reads a patient's mood screen (Backend/core/access.py MOOD_ROLES). Hiding
+// the card is a courtesy; the server refuses everyone else.
+const MOOD_ROLES = ['doctor', 'nurse', 'case_manager'];
 // Who handles follow-up requests (Backend/core/followups.py HANDLE_ROLES).
 // Case managers are the ones they are for; admins can step in.
 const FOLLOW_UP_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
@@ -61,6 +64,7 @@ export function RoleProvider({ children }) {
       isCareTeam:   CARE_TEAM_ROLES.includes(role),
       handlesFollowUps: FOLLOW_UP_ROLES.includes(role),
       isCaseManager: role === 'case_manager',
+      seesMood: MOOD_ROLES.includes(role),
       // A pharmacy's staff: their home is the pharmacy page (pages/PharmacyHome.jsx).
       isPharmacy: role === 'pharmacy',
       notPharmacy: role !== 'pharmacy',

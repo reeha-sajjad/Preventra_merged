@@ -46,8 +46,8 @@ diagnosis for a pharmacy (45 CFR 164.502(b), minimum necessary). Everyone else
 who can see a patient sees all of it.
 
 The patient's own mood screen (models/mood_screen.py) is narrower still: the
-clinical care team only, never shown back to the patient and never opened by a
-reason (`view_mood`).
+clinical care team only - not the superadmin or hospital admins - never shown
+back to the patient and never opened by a reason (`view_mood`).
 """
 from __future__ import annotations
 
@@ -111,9 +111,11 @@ ACTIONS = {
     # figures (docs/case_manager.md).
     "view_costs":     ("superadmin", "hospital_admin", "doctor", "nurse", "insurer", "patient"),
     # The patient's own mood screen (models/mood_screen.py) is for the clinical
-    # care team: not insurers, pharmacies or caretakers, and not shown back to the
-    # patient. Stripped on the server (api/main._hide_mood), not just hidden.
-    "view_mood":      ("superadmin", "hospital_admin", "doctor", "nurse", "case_manager"),
+    # care team: not the superadmin or hospital admins (they run the account and the
+    # hospital, they do not treat), insurers, pharmacies or caretakers, and not
+    # shown back to the patient. Stripped on the server (api/main._hide_mood), not
+    # just hidden. Must match MOOD_ROLES in GLP1/Backend/core/access.py.
+    "view_mood":      ("doctor", "nurse", "case_manager"),
     # The Outcomes page (api/outcomes.py): how the hospital acted on alerts,
     # follow-ups and discharge plans, and readmissions observed against
     # expected. Counts about the whole hospital and no money, so the roles that

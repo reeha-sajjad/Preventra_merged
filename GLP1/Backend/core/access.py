@@ -24,7 +24,9 @@ data reload does not orphan anyone:
     insurer                       their members, in any hospital
     pharmacy                      patients who fill at their pharmacy, in any hospital
     patient                       their own record
-    caretaker                     the patients who linked them, overview only
+    caretaker                     the patients who linked them: their home page and the staff
+                                  patient page (the clinical layer, logged as CARETAKER_REASON) -
+                                  never their mood screen (MOOD_ROLES)
     anyone without a placement    nobody
 
 The superadmin can look at one hospital at a time through the hospital picker
@@ -66,10 +68,6 @@ REASON_ROLES = ("hospital_admin", "insurer")
 # know who to call about a refill and how at risk they are, not diagnoses,
 # vitals or risk drivers (45 CFR 164.502(b), minimum necessary). Mirrors
 # Readmissions/api/access.py.
-# A caretaker (a family or home carer the patient linked) is the same: they see
-# the patient's plain-words home page (core/patient_home.py), which is what is
-# relevant to helping with their care (45 CFR 164.510(b)), not the clinical
-# layer.
 # A caretaker opens the clinical layer of the patients who linked them - the
 # patient agreed to involve them in their care (45 CFR 164.510(b)) - and every
 # first look is logged as CARETAKER_REASON (AUTOMATIC_REASONS).
@@ -107,6 +105,17 @@ SUPERADMIN_REASON = "superadmin"
 # so the list both apps share stays as it is.
 # NOT YET IN READMISSIONS: it logs only the superadmin and the reason roles.
 CARE_TEAM_ROLES = ("doctor", "nurse")
+# The patient's own mood screen (core/mood_screen.py, core/mood.py): the clinical
+# care team only - not superadmin, hospital admins, insurers, pharmacies or
+# caretakers, and never shown back to the patient. No reason opens it.
+# Must match ACTIONS["view_mood"] in Readmissions/api/access.py.
+MOOD_ROLES = ("doctor", "nurse", "case_manager")
+
+
+def sees_mood(user: dict) -> bool:
+    return user.get("role") in MOOD_ROLES
+
+
 TREATMENT_REASON = "treatment"
 COORDINATION_REASON = "case_management"
 AUTOMATIC_REASONS = {"superadmin": SUPERADMIN_REASON, "doctor": TREATMENT_REASON,

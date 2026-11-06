@@ -3,7 +3,7 @@ The bell for doctors and hospital nurses: which of their own patients need a loo
 (Case managers get follow-up requests in theirs, and pharmacies hear when a
 problem they reported is done - see the end of this docstring.)
 
-Three reasons, worked out on every call from the patients the caller may see
+Four reasons, worked out on every call from the patients the caller may see
 (core/access.patient_scope - exactly as for the patient list), so nothing here
 can mention anyone else's patient:
 
@@ -14,6 +14,11 @@ can mention anyone else's patient:
                 the caller last looked. GLP-1 has one score per patient, so this
                 fires only after the scores change (a retrained model or new
                 data); until then it stays quiet.
+    mood        the patient's latest mood screen, answered in the last 4 weeks,
+                carries a flag (core/mood.py), and the caller has not looked at
+                the patient since. Only for roles that may read mood
+                (core/access.MOOD_ROLES): never a hospital admin, the superadmin,
+                an insurer, a pharmacy or a caretaker.
 
 "Looked at" is stored per person and patient in SEEN_COLLECTION, with the risk
 at that moment: opening the patient (core/access.require_detail) or dismissing
@@ -22,7 +27,8 @@ risk rises again. Readmissions' bell (api/risk_watch.py) works the same way on
 its weekly scores.
 
 Case managers: requests handed to them, pharmacy reports on requests they
-hold, and new requests (core/followups.py). Pharmacies: their reports that
+hold, and new requests (core/followups.py), and mood flags (the patient's main
+case manager, or all of the hospital's if they have none). Pharmacies: their reports that
 were finished, with the outcome only.
 
 Only counts and patient numbers leave this module - no names, and nothing is
@@ -43,10 +49,10 @@ SEEN_COLLECTION = "notification_seen"
 CRITICAL = 0.75
 RISE = 0.10                     # 10 percentage points
 BANDS = (0.25, 0.50, 0.75)      # the same bands as the Patients page
-KIND_ORDER = {"followup_handed": 0, "followup_report": 1, "followup_new": 2, "risk_up": 3,
-              "followup_done": 4, "report_done": 5, "new": 6, "unreviewed": 7,
-              "insurer_flag": 8, "turned_critical": 9,
-              "refill_problem": 10, "dose_due": 11, "booked": 12, "dose_missed": 13}
+KIND_ORDER = {"followup_handed": 0, "followup_report": 1, "followup_new": 2, "risk_up": 3, "mood": 4,
+              "followup_done": 5, "report_done": 6, "new": 7, "unreviewed": 8,
+              "insurer_flag": 9, "turned_critical": 10,
+              "refill_problem": 11, "dose_due": 12, "booked": 13, "dose_missed": 14}
 MAX_ITEMS = 50
 
 
@@ -130,7 +136,9 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
         if user["role"] == "case_manager" and items is not None:
             # Patients whose caretaker has stopped logging doses.
             from core import caretaker_home               # avoid an import cycle
-            items = items + await caretaker_home.dose_missed_items(scope)
+            from core import mood                         # avoid an import cycle
+            items = items + await mood.case_manager_items(user, scope) \
+                + await caretaker_home.dose_missed_items(scope)
         return items
     db = get_db()
     # Their own patients only: an emergency-access patient is not theirs to watch.
@@ -147,6 +155,8 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
         {"user_id": user["id"]}, {"_id": 0}).to_list(length=None)}
     # Follow-ups finished since the caller last looked at the patient.
     done = await followups.done_since(scope)
+    from core import mood                                 # avoid an import cycle
+    moods = await mood.flagged([int(p["patient_idx"]) for p in patients])
 
     items = []
     for p in patients:
@@ -156,6 +166,9 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
         seen_at = _naive(seen.get(idx, {}).get("at"))
         if finished and (seen_at is None or seen_at < _naive(finished["done_at"])):
             kinds.insert(0, "followup_done")
+        m = moods.get(idx)
+        if m and (seen_at is None or seen_at < _naive(m["at"])):
+            kinds.append("mood")
         if not kinds:
             continue
         before = seen.get(idx, {}).get("dropout_prob")
@@ -166,6 +179,8 @@ async def alerts(user: dict, scope: Optional[list]) -> list:
             item["followup"] = {"outcome": finished["outcome"],
                                 "outcome_label": followups.OUTCOMES[finished["outcome"]],
                                 "done_by": finished["done_by"]["name"]}
+        if "mood" in kinds:
+            item["mood"] = {"title": m["title"], "answered_on": m["answered_on"], "simulated": m["simulated"]}
         items.append(item)
     items.sort(key=lambda i: (min(KIND_ORDER[k] for k in i["kinds"]), -i["dropout_prob"]))
     return items

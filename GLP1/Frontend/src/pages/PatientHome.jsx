@@ -5,6 +5,7 @@ import { api } from '../data/api';
 import PageState from '../components/shared/PageState';
 import AskDialog from '../components/patient/AskDialog';
 import ZoeCard from '../components/patient/ZoeCard';
+import MoodCard from '../components/mood/MoodCard';
 import CaretakersCard from '../components/patient/CaretakersCard';
 import InsuranceCard from '../components/insurance/InsuranceCard';
 
@@ -133,6 +134,9 @@ export default function PatientHome() {
           {/* Zoe - shared by the patient and their caretakers */}
           <ZoeCard key={data.patient_idx} patientIdx={caretaker ? data.patient_idx : null}
                    patientName={caretaker ? data.caring_for.patient_name : null} />
+
+          {/* The patient's own mood questions - never a caretaker's (Backend/core/mood.py) */}
+          {!caretaker && <MoodCard />}
 
           {/* Medicine */}
           <section className="card p-6" aria-labelledby="med-title">

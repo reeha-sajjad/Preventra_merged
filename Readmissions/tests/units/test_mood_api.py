@@ -186,7 +186,8 @@ def test_the_care_team_reads_the_week_card_and_the_patient_does_not(main, world,
         ("phq8", "13 · moderate"), ("gad2", "4 · positive screen")]
     assert {f["code"] for f in card["flags"]} == {"phq8_moderate", "gad2_positive"}
     assert mood_of(as_user(main, world, "cm@a.test")) is not None
-    assert mood_of(opened(main, world, "admin@a.test")) is not None
+    assert mood_of(opened(main, world, "admin@a.test")) is None          # runs the hospital, does not treat
+    assert mood_of(as_user(main, world, "ops@team.test")) is None
     me = as_user(main, world, "me@patient.test")
     assert mood_of(me) is None
     assert all(w["mood"] is None for w in me.get(f"/api/patients/{A4}/trend").json()["weeks"])
@@ -211,7 +212,7 @@ def test_the_patient_does_not_read_it_in_the_forecast_or_the_alerts(main, world,
     assert alert_id not in {a["alert_id"] for a in alerts}
 
 
-def test_an_insurer_never_reads_it_even_after_giving_a_reason(main, world):
+def test_an_insurer_or_hospital_admin_never_reads_it_even_after_giving_a_reason(main, world):
     db = world["db"]
     mood = mood_screen.assess(WEEK4, [], 2)
     db["weekly_monitoring"].insert_one({
@@ -231,29 +232,40 @@ def test_an_insurer_never_reads_it_even_after_giving_a_reason(main, world):
     forecast = insurer.get(f"/api/patients/{A1}/forecast").json()["forecast"]
     assert not any(t["stream"] == "mood" for t in forecast["triggers"])
     admin = opened(main, world, "admin@a.test", A1)
-    assert mood_of(admin, A1)["lines"][0]["key"] == "phq8"
-    assert "CA-MOOD" in {a["alert_id"] for a in admin.get(f"/api/patients/{A1}/clinical-alerts").json()["alerts"]}
-    seen = admin.get(f"/api/patients/{A1}/forecast").json()["forecast"]
+    assert mood_of(admin, A1) is None
+    assert "phq8_moderate" not in admin.get(f"/api/patients/{A1}/trend").text
+    assert "CA-MOOD" not in {a["alert_id"] for a in admin.get(f"/api/patients/{A1}/clinical-alerts").json()["alerts"]}
+    admin_forecast = admin.get(f"/api/patients/{A1}/forecast").json()["forecast"]
+    assert not any(t["stream"] == "mood" for t in admin_forecast["triggers"]) and admin_forecast["severity"] != "high"
+    # The care team reads all of it.
+    care = as_user(main, world, "cm@a.test")
+    assert mood_of(care, A1)["lines"][0]["key"] == "phq8"
+    assert "CA-MOOD" in {a["alert_id"] for a in care.get(f"/api/patients/{A1}/clinical-alerts").json()["alerts"]}
+    seen = care.get(f"/api/patients/{A1}/forecast").json()["forecast"]
     assert any(t["stream"] == "mood" for t in seen["triggers"]) and forecast["severity"] != "high"
 
 
 def test_the_insurers_open_alert_count_leaves_out_a_mood_only_alert(main, world):
     db = world["db"]
     insurer, admin = as_user(main, world, "claims@acme.test"), as_user(main, world, "admin@a.test")
+    care = as_user(main, world, "cm@a.test")                    # the care team's count still has it
     before = (insurer.get("/api/overview").json()["open_alerts"], admin.get("/api/overview").json()["open_alerts"])
+    care_before = care.get("/api/overview").json()["open_alerts"]
     base = {"patient_id": A1, "status": "pending", "severity": "high", "doctor_id": "DR-A",
             "created_at": "2026-04-24 10:00:00"}
     db["clinical_alerts"].insert_one({**base, "alert_id": "CA-MOOD", "week_number": 2,
                                       "forecast": {"severity": "high", "severity_without_mood": "none"}})
     after = (insurer.get("/api/overview").json()["open_alerts"], admin.get("/api/overview").json()["open_alerts"])
-    assert after == (before[0], before[1] + 1)
+    assert after == (before[0], before[1])
+    assert care.get("/api/overview").json()["open_alerts"] == care_before + 1
     # An alert the vitals raised counts for both, and so does one written before this field existed.
     db["clinical_alerts"].insert_one({**base, "alert_id": "CA-VITALS", "week_number": 3,
                                       "forecast": {"severity": "high", "severity_without_mood": "high"}})
     db["clinical_alerts"].insert_one({**base, "alert_id": "CA-OLD", "week_number": 4,
                                       "forecast": {"severity": "high"}})
     final = (insurer.get("/api/overview").json()["open_alerts"], admin.get("/api/overview").json()["open_alerts"])
-    assert final == (before[0] + 2, before[1] + 3)
+    assert final == (before[0] + 2, before[1] + 2)
+    assert care.get("/api/overview").json()["open_alerts"] == care_before + 3
 
 
 def answered_with_referral(alert_id, pid, triggers, **fields):
@@ -268,7 +280,8 @@ def answered_with_referral(alert_id, pid, triggers, **fields):
                          "urgency": "routine", "responded_at": "2026-04-24 11:00:00"}, **fields}
 
 
-@pytest.mark.parametrize("email, pid", [("me@patient.test", A4), ("claims@acme.test", A1)])
+@pytest.mark.parametrize("email, pid", [("me@patient.test", A4), ("claims@acme.test", A1),
+                                        ("admin@a.test", A1), ("ops@team.test", A1)])
 def test_an_alert_reply_that_chose_the_referral_loses_it_for_everyone_but_the_care_team(main, world, email, pid):
     db = world["db"]
     vitals = {"code": "spo2", "stream": "vitals", "severity": "high", "title": "Low oxygen"}
@@ -276,7 +289,7 @@ def test_an_alert_reply_that_chose_the_referral_loses_it_for_everyone_but_the_ca
     db["clinical_alerts"].insert_many([
         answered_with_referral("CA-VITALS", pid, [vitals], week_number=2),               # no mood trigger at all
         answered_with_referral("CA-MIXED", pid, [vitals, mood], week_number=3)])
-    client = opened(main, world, email, pid) if email.startswith("claims") else as_user(main, world, email)
+    client = opened(main, world, email, pid) if email in ("claims@acme.test", "admin@a.test") else as_user(main, world, email)
     alerts = {a["alert_id"]: a for a in client.get(f"/api/patients/{pid}/clinical-alerts").json()["alerts"]}
     assert {"CA-VITALS", "CA-MIXED"} <= set(alerts)
     for alert_id in ("CA-VITALS", "CA-MIXED"):

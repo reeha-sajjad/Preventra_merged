@@ -161,6 +161,9 @@ export default function FollowUps() {
                       <td><UrgencyPill urgency={f.urgency} /></td>
                       <td>
                         <div className="text-sm text-gray-700">{f.requested_by.pharmacy || f.requested_by.name}</div>
+                        {f.reason_label && (
+                          <span className="inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-900">{f.reason_label}</span>
+                        )}
                         {/* Reported by a pharmacy: what it saw at the counter. */}
                         {f.pharmacy_reports?.length > 0 && (
                           <div className="mt-0.5 flex flex-wrap gap-1">

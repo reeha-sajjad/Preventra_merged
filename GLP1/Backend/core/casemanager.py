@@ -1,7 +1,8 @@
 """
 "Today": the case manager's home page. What their hospital looks like on GLP-1
 therapy, and what needs doing - follow-ups, gaps in care teams, and high-risk
-patients nobody is following up.
+patients nobody is following up, and patients whose latest mood screen is
+flagged (core/mood.py - case managers may read it, core/access.MOOD_ROLES).
 
 Everything is limited to the caller's hospital (their patient scope, which for
 a case manager is the whole hospital - core/access.py). Counts and patient
@@ -17,7 +18,7 @@ from typing import Optional
 
 from fastapi import HTTPException
 
-from core import followups
+from core import followups, mood
 from core.access import doctor_ids, hospital_of, scope_query
 from core.hospital import _hospital_name, care_filter, care_teams
 from core.mongo import get_db
@@ -120,4 +121,7 @@ async def today(user: dict, scope: Optional[list], mine: bool = False) -> dict:
          "doctors": [d["name"] for d in teams.get(i, {}).get("doctors", [])],
          "nurses": [n["name"] for n in teams.get(i, {}).get("nurses", [])]}
         for i in unattended[:SHOWN]]}
+
+    # ---- patients whose latest mood screen is flagged
+    out["mood"] = await mood.today_list(list(by_idx_set), risk)
     return out

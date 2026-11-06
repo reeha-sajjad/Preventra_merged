@@ -3718,6 +3718,25 @@ def get_forecast_scans(request: Request):
 
 # ---- alerts and the doctor's inbox ---------------------------------------
 
+def _alerts_for(request: Request, alerts: list) -> list:
+    """Alerts as the caller may read them: for a role that may not see the patient's
+    mood screen (access.ACTIONS view_mood), mood triggers gone and an alert that mood
+    alone raised dropped."""
+    if access.sees_mood(request.state.user):
+        return alerts
+    return [a for a in map(doctor_service.without_mood, alerts) if a is not None]
+
+
+def _alert_for(request: Request, alert: dict) -> dict:
+    """One alert, the same way; 404 when mood alone raised it."""
+    if access.sees_mood(request.state.user):
+        return alert
+    shown = doctor_service.without_mood(alert)
+    if shown is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return shown
+
+
 @app.get("/api/doctors/{doctor_id}/alerts")
 def get_doctor_alerts(doctor_id: str, request: Request, status: Optional[str] = None,
                       limit: int = 50):
@@ -3726,7 +3745,7 @@ def get_doctor_alerts(doctor_id: str, request: Request, status: Optional[str] = 
     if not doctor_service.get_doctor(view, doctor_id):
         raise HTTPException(status_code=404, detail="Doctor not found")
     return {"doctor_id": doctor_id,
-            "alerts": doctor_service.inbox(view, doctor_id, status=status, limit=limit)}
+            "alerts": _alerts_for(request, doctor_service.inbox(view, doctor_id, status=status, limit=limit))}
 
 
 @app.get("/api/doctors/{doctor_id}/notifications")
@@ -3742,24 +3761,22 @@ def get_my_clinical_alerts(request: Request, status: Optional[str] = "open", lim
     """Alerts about the caller's patients, whichever doctor they were routed to.
     The nurse console: a nurse sees the alerts of the patients assigned to them."""
     _require(request, "read_inboxes")
-    return {"alerts": doctor_service.alerts_for_patients(_view(request), status=status,
-                                                         limit=min(max(limit, 1), 200))}
+    return {"alerts": _alerts_for(request, doctor_service.alerts_for_patients(
+        _view(request), status=status, limit=min(max(limit, 1), 200)))}
 
 
 @app.get("/api/clinical-alerts/unrouted")
 def get_unrouted_alerts(request: Request, limit: int = 50):
     """Alerts with no registered doctor to send them to. Never silently dropped."""
     _require(request, "read_inboxes")
-    return {"alerts": doctor_service.unrouted_alerts(_view(request), limit=limit)}
+    return {"alerts": _alerts_for(request, doctor_service.unrouted_alerts(_view(request), limit=limit))}
 
 
 @app.get("/api/patients/{patient_id}/clinical-alerts")
 def get_patient_clinical_alerts(patient_id: str, request: Request):
     _require_detail(request, patient_id)
-    alerts = doctor_service.patient_alerts(_view(request), patient_id)
-    if not access.sees_mood(request.state.user):
-        alerts = [a for a in map(doctor_service.without_mood, alerts) if a is not None]
-    return {"patient_id": patient_id, "alerts": alerts}
+    return {"patient_id": patient_id,
+            "alerts": _alerts_for(request, doctor_service.patient_alerts(_view(request), patient_id))}
 
 
 def _responder(request: Request) -> dict:
@@ -3774,7 +3791,11 @@ def _responder(request: Request) -> dict:
 def _require_clinical_alert(request: Request, alert_id: str) -> None:
     """404 unless the alert is about one of the caller's patients; 403 unless
     their role responds to alerts."""
-    if not _view(request)["clinical_alerts"].find_one({"alert_id": alert_id}, {"_id": 1}):
+    found = _view(request)["clinical_alerts"].find_one({"alert_id": alert_id})
+    if not found:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    # An alert mood alone raised is the care team's: the others never learn it exists.
+    if not access.sees_mood(request.state.user) and doctor_service.without_mood(found) is None:
         raise HTTPException(status_code=404, detail="Alert not found")
     _require(request, "respond_alerts")
 
@@ -3783,8 +3804,8 @@ def _require_clinical_alert(request: Request, alert_id: str) -> None:
 def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.acknowledge(db, alert_id, payload.doctor_id,
-                                          responder=_responder(request))
+        return _alert_for(request, doctor_service.acknowledge(db, alert_id, payload.doctor_id,
+                                                              responder=_responder(request)))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -3792,6 +3813,8 @@ def acknowledge_clinical_alert(alert_id: str, payload: AcknowledgeRequest, reque
 @app.post("/api/clinical-alerts/{alert_id}/respond")
 def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: Request):
     _require_clinical_alert(request, alert_id)
+    if "behavioural_health" in (payload.actions or []) and not access.sees_mood(request.state.user):
+        raise HTTPException(status_code=403, detail="The behavioural health referral is chosen by the care team")
     try:
         alert = doctor_service.respond(
             db, alert_id, payload.doctor_id, payload.recommendation,
@@ -3809,24 +3832,28 @@ def respond_to_clinical_alert(alert_id: str, payload: RespondRequest, request: R
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: follow-up from alert {alert_id} not created ({type(exc).__name__}: {exc})")
         alert["followup"] = None
-    return alert
+    return _alert_for(request, alert)
 
 
 @app.post("/api/clinical-alerts/{alert_id}/dismiss")
 def dismiss_clinical_alert(alert_id: str, payload: DismissRequest, request: Request):
     _require_clinical_alert(request, alert_id)
     try:
-        return doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason,
-                                      responder=_responder(request))
+        return _alert_for(request, doctor_service.dismiss(db, alert_id, payload.doctor_id, payload.reason,
+                                                          responder=_responder(request)))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.get("/api/clinical-alerts/actions")
-def get_recommended_actions():
-    """The structured vocabulary a doctor picks from when replying."""
+def get_recommended_actions(request: Request):
+    """The structured vocabulary a doctor picks from when replying. The behavioural
+    health referral is the care team's to choose (access.ACTIONS view_mood)."""
+    user = getattr(request.state, "user", None)
+    may_refer = bool(user) and access.sees_mood(user)
     return {
         "actions": [{"key": k, "label": v}
-                    for k, v in doctor_service.RECOMMENDED_ACTIONS.items()],
+                    for k, v in doctor_service.RECOMMENDED_ACTIONS.items()
+                    if may_refer or k != "behavioural_health"],
         "urgencies": list(doctor_service.URGENCIES),
     }
