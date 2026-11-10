@@ -33,8 +33,10 @@ STREAM = "mood"
 STEM = "Over the last 2 weeks, how often have you been bothered by any of the following problems?"
 SAFETY = "If you feel unwell or unsafe, contact your care team, or call 911 in an emergency."
 
-OPTIONS = ((0, "Not at all"), (1, "Several days"),
-           (2, "More than half the days"), (3, "Nearly every day"))
+# The validated PHQ/GAD wording, with the days of the 2-week recall each answer
+# stands for, so "Several days" is not read as a vague "a few".
+OPTIONS = ((0, "Not at all (0–1 days)"), (1, "Several days (2–6 days)"),
+           (2, "More than half the days (7–11 days)"), (3, "Nearly every day (12–14 days)"))
 
 PHQ2 = {"phq_interest": "Little interest or pleasure in doing things",
         "phq_down": "Feeling down, depressed, or hopeless"}

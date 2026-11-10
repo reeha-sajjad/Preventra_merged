@@ -47,6 +47,9 @@ def test_the_form_is_the_phq8_and_gad2_and_nothing_else():
     assert len(ms.ITEMS) == 10 and len(ms.PHQ2) + len(ms.PHQ8_MORE) == 8 and len(ms.GAD2) == 2
     assert form["followup_from"] == 3
     assert [o["value"] for o in form["options"]] == [0, 1, 2, 3]
+    assert [o["label"] for o in form["options"]] == [
+        "Not at all (0–1 days)", "Several days (2–6 days)",
+        "More than half the days (7–11 days)", "Nearly every day (12–14 days)"]
     assert form["safety"] == ms.SAFETY == (
         "If you feel unwell or unsafe, contact your care team, or call 911 in an emergency.")
 
