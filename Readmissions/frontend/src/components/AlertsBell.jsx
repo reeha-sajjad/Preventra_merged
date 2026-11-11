@@ -12,6 +12,17 @@ const RISING_IN_BELL = 8;
 
 const POLL_INTERVAL_MS = 30000;
 
+// A patient's reminders, in words (api/patient_bell.py).
+const medsLine = (meds = []) => {
+  const names = meds.map((m) => [m.drug, m.dose].filter(Boolean).join(' '));
+  return names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
+};
+const apptLine = (a = {}) => {
+  const day = a.date ? new Date(`${a.date}T00:00:00`).toLocaleDateString(undefined,
+    { weekday: 'long', day: 'numeric', month: 'long' }) : '';
+  return [day && `${day}${a.time ? ` at ${a.time}` : ''}`, a.place, a.with].filter(Boolean).join(' · ');
+};
+
 export default function AlertsBell() {
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState([]);
@@ -26,15 +37,21 @@ export default function AlertsBell() {
   const isInsurer = can(INSURER_ROLES);
   // A caretaker: refill problems, medicines due, appointments booked (api/caretaker_home.py).
   const isCarer = readClaims()?.role === 'caretaker';
-  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES) || isInsurer || isCarer;
+  // A patient: today's medicines and appointments booked - reminders, never
+  // scores (api/patient_bell.py). Staff "score went up" alerts are not theirs.
+  const isPatient = readClaims()?.role === 'patient';
+  const hasNews = can(FOLLOWUP_HANDLE_ROLES) || can(PHARMACY_ROLES) || isInsurer || isCarer || isPatient;
+  const staffAlerts = !isCarer && !isPatient;
   const [open, setOpen] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState(null);
   const containerRef = useRef(null);
 
   const load = () => {
-    getAlerts()
-      .then((data) => setAlerts(Array.isArray(data) ? data : []))
-      .catch(() => {});
+    if (staffAlerts) {
+      getAlerts()
+        .then((data) => setAlerts(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    }
     if (can(WATCH_ROLES)) getRisingRisk(50).then(setRising).catch(() => {});
     if (hasNews) getFollowUpBell().then((d) => setNews(d.items || [])).catch(() => {});
   };
@@ -46,6 +63,7 @@ export default function AlertsBell() {
   // opening the pharmacy page (both pages tell the backend).
   const openNews = (item) => {
     setOpen(false);
+    if (isPatient) { markAllPatient(); navigate('/'); return; }
     if (isCarer) { navigate(`/person/${encodeURIComponent(item.patient_id)}`); return; }
     if (item.kind === 'dose_missed') { navigate(`/patients/${encodeURIComponent(item.patient_id)}`); return; }
     if (isInsurer) {
@@ -72,6 +90,11 @@ export default function AlertsBell() {
   const markAllCarer = () => {
     markCaretakerSeen().catch(() => {});
     setNews((n) => n.filter((i) => i.kind === 'dose_due'));
+  };
+  // A patient's "mark all": today's medicines reminder until tomorrow, and bookings.
+  const markAllPatient = () => {
+    markCaretakerSeen().catch(() => {});
+    setNews([]);
   };
 
   const openRising = (item) => {
@@ -147,10 +170,16 @@ export default function AlertsBell() {
               <>
                 <div className="px-4 py-3 bg-gray-50 flex items-center justify-between gap-3">
                   <h3 className="font-semibold text-gray-800 text-sm">
-                    {isCarer ? 'The people you care for' : isInsurer ? 'Your members' : news[0].kind === 'report_done' ? 'Your reports that are done'
+                    {isPatient ? 'Your reminders' : isCarer ? 'The people you care for' : isInsurer ? 'Your members' : news[0].kind === 'report_done' ? 'Your reports that are done'
                       : news.every((i) => i.kind === 'dose_missed') ? 'Medicines not being logged'
                       : 'Follow-up news'}
                   </h3>
+                  {isPatient && (
+                    <button type="button" onClick={markAllPatient}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-ns-navy whitespace-nowrap">
+                      <CheckCheck size={13} /> Mark all as read
+                    </button>
+                  )}
                   {carerReadable && (
                     <button type="button" onClick={markAllCarer}
                       className="inline-flex items-center gap-1 text-xs font-semibold text-ns-navy whitespace-nowrap">
@@ -176,10 +205,14 @@ export default function AlertsBell() {
                       : <Pill size={16} className="mt-0.5 text-amber-700 shrink-0" />}
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm font-semibold text-ns-navy">
-                        {item.patient_name ?? (isInsurer && item.member_id ? `Member ${item.member_id}` : item.patient_id)}
+                        {item.kind === 'meds_today' ? 'Time for your medicines today'
+                          : isPatient && item.kind === 'booked' ? 'Your appointment is booked'
+                          : item.patient_name ?? (isInsurer && item.member_id ? `Member ${item.member_id}` : item.patient_id)}
                       </span>
                       <span className="block text-sm text-gray-600 mt-0.5">
-                        {item.kind === 'report_done'
+                        {item.kind === 'meds_today' ? medsLine(item.medicines)
+                          : isPatient && item.kind === 'booked' ? apptLine(item.appointment)
+                          : item.kind === 'report_done'
                           ? `${item.problem_label ? `${item.problem_label} · ` : ''}done: ${item.outcome_label}`
                           : item.kind === 'insurer_flag' ? `${item.hospital}: ${item.kind_label} · from ${item.by}`
                           : item.kind === 'refill_problem' ? `Pharmacy: ${item.label}`
@@ -217,12 +250,18 @@ export default function AlertsBell() {
                 )}
               </>
             )}
-            {(alerts.length > 0 || (!watches && news.length === 0)) && (
+            {!staffAlerts && news.length === 0 && (
+              <p className="text-sm text-gray-400 italic px-4 py-6 text-center">
+                {isPatient ? 'Nothing new. Reminders about your medicines and appointments show here.'
+                  : 'Nothing new about the people you care for.'}
+              </p>
+            )}
+            {staffAlerts && (alerts.length > 0 || (!watches && news.length === 0)) && (
               <div className="px-4 py-3 bg-gray-50">
                 <h3 className="font-semibold text-gray-800 text-sm">Score edits</h3>
               </div>
             )}
-            {alerts.length === 0 && !watches && news.length === 0 && (
+            {staffAlerts && alerts.length === 0 && !watches && news.length === 0 && (
               <p className="text-sm text-gray-400 italic px-4 py-6 text-center">No unacknowledged alerts.</p>
             )}
             {alerts.map((alert) => (

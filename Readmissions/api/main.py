@@ -45,6 +45,7 @@ from api import record_views  # noqa: F401  (used by api/patient_home)
 from api import patient_medicines
 from api import insurer_alerts
 from api import caretaker_home
+from api import patient_bell
 from api import checkins
 from api import discharge_plan
 from api import outcomes
@@ -775,8 +776,7 @@ def get_patients(request: Request,
                  sort: str = Query("score-desc", description="<column>-asc|desc"),
                  doctor: Optional[str] = Query(None, description="registry doctor_id"),
                  nurse: Optional[str] = Query(None, description="nurse account id"),
-                 unassigned: Optional[str] = Query(None, description="doctor | nurse | case_manager"),
-                 case_manager: Optional[str] = Query(None, description='case manager account id, or "me"')):
+                 unassigned: Optional[str] = Query(None, description="doctor | nurse")):
     """
     The patient worklist.
 
@@ -799,11 +799,8 @@ def get_patients(request: Request,
     # below - keyed by the query - can never hand one account another's total.
     query: dict = {"batch_date": batch_date, **access.scope_query(_scope(request))}
     # The Staff page's drill-down and the Overview's "no doctor" link.
-    # "me": the signed-in account's own patients (a case manager's "Assigned to me").
-    if case_manager == "me":
-        case_manager = str(request.state.user["_id"])
     care = hospital.care_filter(db, _scope(request), doctor=doctor, nurse=nurse,
-                                unassigned=unassigned, case_manager=case_manager)
+                                unassigned=unassigned)
     if care is not None:
         query["$and"] = query.get("$and", []) + [{"patient_id": {"$in": access.id_variants(care)}}]
     # A hospital admin or insurer sees the overview layer here. Filtering or
@@ -2708,7 +2705,11 @@ def commit_patient_update(patient_id: str, payload: UpdateCommitRequest, request
 
 @app.get("/api/alerts")
 def get_alerts(request: Request):
-    """Unacknowledged risk-increase alerts, newest first."""
+    """Unacknowledged risk-increase alerts, newest first. Staff only: a patient
+    or caretaker gets none - they show the score, which a patient never sees
+    (api/patient_home.py), and only staff can acknowledge them."""
+    if request.state.user["role"] in ("patient", "caretaker"):
+        return []
     docs = list(
         _view(request)["alerts"]
         .find({"acknowledged": False})
@@ -2846,6 +2847,9 @@ def followups_bell(request: Request):
     if user["role"] == "caretaker":
         # Refill problems, medicines due and appointments booked (api/caretaker_home.py).
         return {"items": caretaker_home.bell(db, user, _scope(request))}
+    if user["role"] == "patient":
+        # Today's medicines and appointments booked - never scores (api/patient_bell.py).
+        return {"items": patient_bell.bell(db, user, _scope(request))}
     items = followups.bell(db, user)
     if user["role"] == "case_manager":
         # Patients whose caretaker has stopped logging medicines.
@@ -3068,7 +3072,7 @@ def my_people(request: Request):
 
 @app.post("/api/my-people/seen")
 def my_people_seen(request: Request):
-    """'Mark all as read' on a caretaker's bell."""
+    """'Mark all as read' on a caretaker's or a patient's bell."""
     return caretaker_home.mark_seen(db, request.state.user)
 
 

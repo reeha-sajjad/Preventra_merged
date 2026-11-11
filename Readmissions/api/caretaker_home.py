@@ -145,8 +145,8 @@ def bell(db, user: dict, scope: Optional[list]) -> list:
 
 
 def mark_seen(db, user: dict) -> dict:
-    if user["role"] != "caretaker":
-        raise HTTPException(status_code=403, detail="For caretakers")
+    if user["role"] not in ("caretaker", "patient"):
+        raise HTTPException(status_code=403, detail="For caretakers and patients")
     db[SEEN].update_one({"user_id": str(user["_id"])}, {"$set": {"at": _now()}}, upsert=True)
     return {"ok": True}
 
