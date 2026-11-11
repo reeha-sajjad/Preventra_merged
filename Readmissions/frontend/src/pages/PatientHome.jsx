@@ -126,8 +126,7 @@ export default function PatientHome() {
       <div className="grid items-start gap-5 lg:grid-cols-3">
         <MedicineList className="lg:col-span-2" meds={data.medicines} say={say} them={them} />
         <div className="space-y-5">
-          <NextAppointment appt={data.next_appointment} say={say} them={them}
-            onAsk={followup.can_ask ? () => setAsking(true) : null} />
+          <NextAppointment appt={data.next_appointment} say={say} them={them} />
             <Card title={say('Your care team', `${them}’s care team`)} id="team">
               <ul className="mt-4 space-y-3 text-sm">
                 <TeamRow icon={Building2} role="Hospital" names={team.hospital ? [team.hospital] : []} />
@@ -387,7 +386,9 @@ function MedicineList({ meds, say, them, className = '' }) {
 }
 
 /** The next booked appointment (api/followups.next_appointment). */
-function NextAppointment({ appt, say, them, onAsk }) {
+// No button of its own: asking for one is "Ask a case manager to get in touch"
+// (Need to talk?), which files the same follow-up request.
+function NextAppointment({ appt, say, them }) {
   const day = appt?.date ? new Date(`${appt.date}T00:00:00`) : null;
   return (
     <section className="flex flex-col rounded-xl border border-gray-200 bg-white p-6 shadow-sm" aria-labelledby="appt-title">
@@ -411,17 +412,11 @@ function NextAppointment({ appt, say, them, onAsk }) {
         </div>
       ) : (
         <p className="mt-4 flex-1 text-sm text-gray-500">
-          {say('Nothing booked yet. If you need one, a case manager can arrange it.',
-               `Nothing booked for ${them} yet. If they need one, a case manager can arrange it.`)}
+          {say('Nothing booked yet. If you need one, ask a case manager to get in touch.',
+               `Nothing booked for ${them} yet. If they need one, ask a case manager to get in touch.`)}
         </p>
       )}
       {appt?.booked_by && <p className="mt-3 text-xs text-gray-400">Booked by {appt.booked_by}</p>}
-      {!day && onAsk && (
-        <button type="button" onClick={onAsk}
-          className="mt-4 rounded-lg border border-ns-navy/30 px-3 py-2 text-sm font-semibold text-ns-navy hover:bg-ns-navy/5">
-          Ask for an appointment
-        </button>
-      )}
     </section>
   );
 }
