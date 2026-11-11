@@ -775,7 +775,8 @@ def get_patients(request: Request,
                  sort: str = Query("score-desc", description="<column>-asc|desc"),
                  doctor: Optional[str] = Query(None, description="registry doctor_id"),
                  nurse: Optional[str] = Query(None, description="nurse account id"),
-                 unassigned: Optional[str] = Query(None, description="doctor | nurse")):
+                 unassigned: Optional[str] = Query(None, description="doctor | nurse | case_manager"),
+                 case_manager: Optional[str] = Query(None, description='case manager account id, or "me"')):
     """
     The patient worklist.
 
@@ -798,8 +799,11 @@ def get_patients(request: Request,
     # below - keyed by the query - can never hand one account another's total.
     query: dict = {"batch_date": batch_date, **access.scope_query(_scope(request))}
     # The Staff page's drill-down and the Overview's "no doctor" link.
+    # "me": the signed-in account's own patients (a case manager's "Assigned to me").
+    if case_manager == "me":
+        case_manager = str(request.state.user["_id"])
     care = hospital.care_filter(db, _scope(request), doctor=doctor, nurse=nurse,
-                                unassigned=unassigned)
+                                unassigned=unassigned, case_manager=case_manager)
     if care is not None:
         query["$and"] = query.get("$and", []) + [{"patient_id": {"$in": access.id_variants(care)}}]
     # A hospital admin or insurer sees the overview layer here. Filtering or

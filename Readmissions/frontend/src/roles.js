@@ -10,6 +10,9 @@ export const STAFF_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const FOLLOWUP_REQUEST_ROLES = ['doctor', 'nurse'];
 export const FOLLOWUP_HANDLE_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const ASSIGN_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
+// A case manager sees the whole hospital; "Assigned to me" narrows the Patients
+// list to the patients they are named on (api/hospital.care_filter).
+export const CASE_MANAGER_ROLES = ['case_manager'];
 // Care notes and the "Update patient" page (api/access.py ACTIONS add_notes,
 // edit_patients). Everyone else reads the notes but gets no box to type in.
 export const NOTE_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];

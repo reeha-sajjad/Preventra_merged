@@ -299,7 +299,7 @@ const RealAPI = {
     if (params.status && params.status !== 'All') qs.set('status', params.status);
     if (params.q) qs.set('q', params.q);
     // Care-team filters, from the Staff page and the Overview.
-    for (const key of ['doctor', 'nurse', 'unassigned']) {
+    for (const key of ['doctor', 'nurse', 'unassigned', 'case_manager']) {
       if (params[key]) qs.set(key, params[key]);
     }
     // Returns { page, limit, total, data } — total is what drives pagination,

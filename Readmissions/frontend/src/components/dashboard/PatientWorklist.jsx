@@ -274,7 +274,8 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
   const search       = searchParams.get('search') || '';
   // Care-team filters, from the Staff page's drill-down and the Overview.
   const care = { doctor: searchParams.get('doctor') || '', nurse: searchParams.get('nurse') || '',
-                 unassigned: searchParams.get('unassigned') || '' };
+                 unassigned: searchParams.get('unassigned') || '',
+                 case_manager: searchParams.get('case_manager') || '' };
 
   useEffect(() => {
     let cancelled = false;
@@ -296,7 +297,7 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
     // groupFilter is a fresh array every render; keying the effect on its
     // joined form stops it refetching on every unrelated state change.
   }, [groupFilter.join(','), matchMode, bandFilter, trendFilter, search, sort, currentPage, // eslint-disable-line react-hooks/exhaustive-deps
-      care.doctor, care.nurse, care.unassigned, reloadKey, refreshKey]);
+      care.doctor, care.nurse, care.unassigned, care.case_manager, reloadKey, refreshKey]);
 
   // The conditions actually present in this batch, with counts, so the filter
   // never offers an option that would return nothing.
@@ -311,7 +312,7 @@ export default function PatientWorklist({ onSelectPatient, refreshKey = 0 }) {
   useEffect(() => {
     setCurrentPage((p) => (p === 1 ? p : 1));
   }, [groupFilter.join(','), matchMode, bandFilter, trendFilter, search, sort, // eslint-disable-line react-hooks/exhaustive-deps
-      care.doctor, care.nurse, care.unassigned]);
+      care.doctor, care.nurse, care.unassigned, care.case_manager]);
 
   // The server has already filtered, sorted and paged. What arrives IS the page.
   const paginatedData = patients;

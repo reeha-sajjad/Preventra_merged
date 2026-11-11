@@ -5,7 +5,7 @@ import FilterBar from '../components/dashboard/FilterBar';
 import PatientWorklist from '../components/dashboard/PatientWorklist';
 import PatientDetailPanel from '../components/dashboard/PatientDetailPanel';
 import { getStaff } from '../api';
-import { can, STAFF_ROLES, MY_PATIENTS_ROLES, MEMBER_LOOKUP_ROLES } from '../roles';
+import { can, STAFF_ROLES, MY_PATIENTS_ROLES, MEMBER_LOOKUP_ROLES, CASE_MANAGER_ROLES } from '../roles';
 import MemberLookup from '../components/insurance/MemberLookup';
 import { EmergencyAccessButton } from '../components/emergency/EmergencyAccess';
 
@@ -20,6 +20,7 @@ export default function Patients() {
   const doctor = searchParams.get('doctor');
   const nurse = searchParams.get('nurse');
   const unassigned = searchParams.get('unassigned');
+  const caseManager = searchParams.get('case_manager');
   const [names, setNames] = useState({});
   // Bumped when the care team changes in the side panel, so the row updates.
   const [listKey, setListKey] = useState(0);
@@ -41,11 +42,21 @@ export default function Patients() {
   const careFilter = doctor ? `Doctor: ${names[doctor] || doctor}`
     : nurse ? `Hospital nurse: ${names[nurse] || nurse}`
     : unassigned === 'doctor' ? 'No doctor assigned'
-    : unassigned === 'nurse' ? 'No nurse assigned' : null;
+    : unassigned === 'nurse' ? 'No nurse assigned'
+    : unassigned === 'case_manager' ? 'No case manager assigned'
+    : caseManager === 'me' ? 'Assigned to me' : null;
 
   const clearCare = () => {
     const next = new URLSearchParams(searchParams);
-    ['doctor', 'nurse', 'unassigned'].forEach((k) => next.delete(k));
+    ['doctor', 'nurse', 'unassigned', 'case_manager'].forEach((k) => next.delete(k));
+    setSearchParams(next);
+  };
+
+  // A case manager's own patients, or the whole hospital (the default).
+  const showMine = (mine) => {
+    const next = new URLSearchParams(searchParams);
+    ['doctor', 'nurse', 'unassigned', 'case_manager'].forEach((k) => next.delete(k));
+    if (mine) next.set('case_manager', 'me');
     setSearchParams(next);
   };
 
@@ -61,6 +72,20 @@ export default function Patients() {
       {/* Billing staff and insurers: straight to a patient from a card or claim. */}
       {can(MEMBER_LOOKUP_ROLES) && (
         <div className="mb-4 flex justify-end"><MemberLookup /></div>
+      )}
+      {can(CASE_MANAGER_ROLES) && (
+        <div className="mb-4 inline-flex rounded-lg border border-gray-200 bg-white p-1 text-sm" role="group"
+          aria-label="Whose patients">
+          {[[false, 'All patients'], [true, 'Assigned to me']].map(([mine, label]) => {
+            const on = mine === (caseManager === 'me');
+            return (
+              <button key={label} type="button" onClick={() => showMine(mine)} aria-pressed={on}
+                className={`rounded-md px-3 py-1.5 font-medium ${on ? 'bg-ns-navy text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
       )}
       <FilterBar />
       {careFilter && (

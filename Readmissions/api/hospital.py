@@ -175,23 +175,31 @@ def care_teams(db, patient_ids) -> dict:
 
 
 def care_filter(db, scope: Optional[list], doctor: Optional[str] = None,
-                nurse: Optional[str] = None, unassigned: Optional[str] = None) -> Optional[list]:
+                nurse: Optional[str] = None, unassigned: Optional[str] = None,
+                case_manager: Optional[str] = None) -> Optional[list]:
     """The patient ids matching a care-team filter, within the scope, or None
-    when no filter was asked for. Drives the Staff page's drill-down and the
-    Overview's "no doctor assigned" link."""
-    if not (doctor or nurse or unassigned):
+    when no filter was asked for. Drives the Staff page's drill-down, the
+    Overview's "no doctor assigned" link and a case manager's "Assigned to me"
+    (case_manager = their own account id). Only narrows the list: a case
+    manager still sees the whole hospital without it."""
+    if not (doctor or nurse or unassigned or case_manager):
         return None
     query: dict = dict(access.scope_query(scope))
     if doctor:
         query["assigned_doctor_id"] = doctor
     if nurse:
         query["assigned_nurse_ids"] = nurse
+    if case_manager:
+        query["assigned_case_manager_id"] = case_manager
     if unassigned == "doctor":
         query["$or"] = [{"assigned_doctor_id": None}, {"assigned_doctor_id": ""},
                         {"assigned_doctor_id": {"$exists": False}}]
     elif unassigned == "nurse":
         query["$or"] = [{"assigned_nurse_ids": {"$size": 0}},
                         {"assigned_nurse_ids": {"$exists": False}}, {"assigned_nurse_ids": None}]
+    elif unassigned == "case_manager":
+        query["$or"] = [{"assigned_case_manager_id": None}, {"assigned_case_manager_id": ""},
+                        {"assigned_case_manager_id": {"$exists": False}}]
     return [r["patient_id"] for r in db["care_actions"].find(query, {"patient_id": 1})]
 
 
