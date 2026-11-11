@@ -164,9 +164,9 @@ const RealAPI = {
   markCaretakerSeen: () => apiFetch('/api/my-people/seen', { method: 'POST' }),
   getMyHome: (patient) => apiFetch(`/api/my-home${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
   askCaseManager: (body) => apiFetch('/api/my-home/ask', json(body)).then(followUpsChanged),
-  // A caretaker's daily "medicines given" tick (api/medicines_given.py).
+  // The daily "medicines given / taken" tick, by a caretaker or a patient with none (api/medicines_given.py).
   getMedicinesGiven: (patient) => apiFetch(`/api/my-home/medicines${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`),
-  recordMedicinesGiven: (patient) => apiFetch(`/api/my-home/medicines${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`, json({})),
+  recordMedicinesGiven: (patient, note = '') => apiFetch(`/api/my-home/medicines${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`, json({ note })),
   undoMedicinesGiven: (id, patient) => apiFetch(`/api/my-home/medicines/${id}${patient ? `?patient=${encodeURIComponent(patient)}` : ''}`,
     { method: 'DELETE' }),
   getPatientMedicinesGiven: (id) => apiFetch(`/api/patients/${encodeURIComponent(id)}/medicines-given`),
@@ -299,7 +299,7 @@ const RealAPI = {
     if (params.status && params.status !== 'All') qs.set('status', params.status);
     if (params.q) qs.set('q', params.q);
     // Care-team filters, from the Staff page and the Overview.
-    for (const key of ['doctor', 'nurse', 'unassigned', 'case_manager']) {
+    for (const key of ['doctor', 'nurse', 'unassigned']) {
       if (params[key]) qs.set(key, params[key]);
     }
     // Returns { page, limit, total, data } — total is what drives pagination,

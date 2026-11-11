@@ -3106,14 +3106,14 @@ def unlink_caretaker(caretaker_id: str, request: Request, patient: Optional[str]
     return caretakers.unlink(db, request.state.user, _scope(request), caretaker_id, patient)
 
 
-# Medicines given - a caretaker's daily tick (api/medicines_given.py)
+# Medicines given - a daily tick by the caretaker, or by a patient with none (api/medicines_given.py)
 class MedicinesGiven(BaseModel):
     note: Optional[str] = None
 
 
 @app.get("/api/my-home/medicines")
 def my_medicines_given(request: Request, patient: Optional[str] = None):
-    """The ticks caretakers recorded, for the patient or their caretaker."""
+    """The daily ticks, for the patient or their caretaker."""
     pid = followups.own_patient(request.state.user, _scope(request), patient)
     return medicines_given.log(db, pid, request.state.user)
 
@@ -3155,7 +3155,7 @@ def send_checkin(body: CheckIn, request: Request):
 
 @app.get("/api/patients/{patient_id}/medicines-given")
 def patient_medicines_given(patient_id: str, request: Request):
-    """The care team's view of a caretaker's ticks - the clinical layer."""
+    """The care team's view of the daily ticks - the clinical layer."""
     _require_detail(request, patient_id)
     return medicines_given.log(db, patient_id)
 

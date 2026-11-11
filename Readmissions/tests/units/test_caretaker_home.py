@@ -60,3 +60,13 @@ def test_the_case_manager_hears_when_medicines_stop_being_logged(main, world):
     item = next(i for i in cm.get("/api/followups/bell").json()["items"] if i["kind"] == "dose_missed")
     assert item["patient_id"] == A4 and item["days"] == 5 and item["by"] == "Zara"
     assert all(i.get("patient_id") != A4 for i in as_user(main, world, "admin@b.test").get("/api/followups/bell").json()["items"])
+
+def test_the_case_manager_hears_when_a_patient_with_no_caretaker_stops_logging(main, world):
+    world["db"]["care_actions"].update_one({"patient_id": A4}, {"$set": {"caretaker_ids": []}})
+    assert world["db"]["care_actions"].find_one({"patient_id": A4}).get("patient_account_id")
+    world["db"]["medicines_given"].insert_one({
+        "patient_id": A4, "given_at": datetime.now(timezone.utc) - timedelta(days=4),
+        "logged_by": {"id": "y", "name": "Sarah", "role": "patient"}})
+    items = as_user(main, world, "cm@a.test").get("/api/followups/bell").json()["items"]
+    item = next(i for i in items if i["kind"] == "dose_missed")
+    assert item["patient_id"] == A4 and item["by"] == "Sarah"

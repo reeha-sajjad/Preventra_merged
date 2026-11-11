@@ -20,8 +20,9 @@ The caretaker's bell:
     booked           the case manager booked something (a follow-up closed as
                      Booked) in the last BOOKED_DAYS.
 
-The case manager's bell (dose_missed): a patient with a caretaker whose
-medicines were last logged MISSED_AFTER_DAYS to STALE_DAYS ago.
+The case manager's bell (dose_missed): a patient whose medicines - logged by
+their caretaker, or by the patient when they have none - were last logged
+MISSED_AFTER_DAYS to STALE_DAYS ago.
 
 Reads the worklist, care_actions, medicines_given and follow-ups; writes only
 caretaker_seen. The dataset is never written to.
@@ -152,9 +153,10 @@ def mark_seen(db, user: dict) -> dict:
 
 
 def dose_missed_items(db, scope: Optional[list]) -> list:
-    """For a case manager's bell: patients with a caretaker whose medicines were
-    last logged MISSED_AFTER_DAYS to STALE_DAYS ago."""
-    query: dict = {"caretaker_ids.0": {"$exists": True}}
+    """For a case manager's bell: patients whose medicines were last logged
+    MISSED_AFTER_DAYS to STALE_DAYS ago - by their caretaker, or by the patient
+    themselves when they have none (api/medicines_given.py)."""
+    query: dict = {"$or": [{"caretaker_ids.0": {"$exists": True}}, {"patient_account_id": {"$exists": True}}]}
     if scope is not None:
         query["patient_id"] = {"$in": access.id_variants([str(i) for i in scope])}
     ids = [str(o["patient_id"]) for o in db["care_actions"].find(query, {"patient_id": 1})]
