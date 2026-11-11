@@ -666,6 +666,11 @@ def listing(db, user: dict, status: str = "active") -> dict:
         item["doctors"] = [team["doctor"]["name"]] if team.get("doctor") else []
         item["nurses"] = [n["name"] for n in team.get("nurses", [])]
         item["mine"] = (d.get("taken_by") or {}).get("id") == str(user["_id"])
+        # The patient's own case manager (Care team card), so the page can show a
+        # case manager the requests for the patients they look after.
+        case_manager = team.get("case_manager") or {}
+        item["case_manager"] = case_manager.get("name")
+        item["for_me"] = case_manager.get("id") == str(user["_id"])
         items.append(item)
     active = [i for i in items if i["status"] != "done"]
     return {"items": items, "counts": {

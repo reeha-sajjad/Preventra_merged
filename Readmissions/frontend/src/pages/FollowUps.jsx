@@ -36,6 +36,9 @@ export default function FollowUps() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
   const [doneFor, setDoneFor] = useState(null);
+  // A case manager's view of the list: everyone's, the requests for patients
+  // they are the named case manager of, or the ones they have taken.
+  const [whose, setWhose] = useState('all');
 
   const load = useCallback(() => {
     getFollowUps(tab).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
@@ -52,7 +55,10 @@ export default function FollowUps() {
   };
 
   const counts = data?.counts ?? { open: 0, in_progress: 0, overdue: 0 };
-  const items = data?.items ?? [];
+  const allItems = data?.items ?? [];
+  const forMe = allItems.filter((f) => f.for_me);
+  const takenByMe = allItems.filter((f) => f.mine);
+  const items = whose === 'mine' ? forMe : whose === 'taken' ? takenByMe : allItems;
   const open = (pid) => navigate(`/patients/${encodeURIComponent(pid)}`);
 
   return (
@@ -88,6 +94,19 @@ export default function FollowUps() {
           ))}
         </div>
 
+        {isCaseManager && data && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-2.5 text-sm" role="group"
+            aria-label="Whose requests">
+            {[['all', 'All', allItems.length], ['mine', 'My patients', forMe.length],
+              ['taken', 'Taken by me', takenByMe.length]].map(([k, label, n]) => (
+              <button key={k} type="button" onClick={() => setWhose(k)} aria-pressed={whose === k}
+                className={`rounded-full border px-3 py-1 font-medium ${whose === k
+                  ? 'border-ns-navy bg-ns-navy text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                {label} <span className={whose === k ? 'text-white/80' : 'text-gray-400'}>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {error && <p className="m-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         {!data && !error && <div className="m-4 h-32 animate-pulse rounded-lg bg-gray-100" />}
 
@@ -97,7 +116,9 @@ export default function FollowUps() {
               <CalendarClock size={18} />
             </div>
             <div className="mt-3 text-sm font-medium text-gray-700">
-              {tab === 'active' ? 'No follow-ups waiting' : 'Nothing finished in the last 30 days'}
+              {whose === 'mine' ? 'No requests for your patients'
+                : whose === 'taken' ? 'You have not taken any requests'
+                : tab === 'active' ? 'No follow-ups waiting' : 'Nothing finished in the last 30 days'}
             </div>
             <div className="mt-0.5 text-xs text-gray-400">New requests from doctors and nurses appear here.</div>
           </div>
@@ -125,6 +146,9 @@ export default function FollowUps() {
                           className="font-semibold text-gray-800 hover:underline">{f.patient_id}</button>
                         <div className="mt-0.5 max-w-[180px] truncate text-[11px] text-gray-400">
                           {[...f.doctors, ...f.nurses].join(', ') || 'No care team'}
+                        </div>
+                        <div className="mt-0.5 max-w-[180px] truncate text-[11px] text-gray-400">
+                          Case manager: {f.case_manager || 'none'}{f.for_me ? ' (you)' : ''}
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-5 py-3 align-top">
