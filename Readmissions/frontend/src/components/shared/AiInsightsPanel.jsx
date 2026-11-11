@@ -5,6 +5,7 @@ import { aiOn, useAiStatus } from '../../hooks/useAiStatus';
 import BulletList from './BulletList';
 import { Sparkles, Loader2, AlertCircle, DollarSign, Lightbulb, ChevronRight,
          ShieldCheck, TrendingUp, AlertTriangle } from 'lucide-react';
+import { CostSourceNote } from '../DemoBanner';
 
 function formatUsd(value) {
   const n = Number(value);
@@ -205,6 +206,7 @@ export default function AiInsightsPanel({ patientId, riskScore, riskBand, driver
                 </summary>
 
                 <div className="mt-3 space-y-4">
+                  <CostSourceNote />
                   <CostTable
                     title="Cost of one readmission episode"
                     items={insights.readmission_cost_items}

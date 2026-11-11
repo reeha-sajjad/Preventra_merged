@@ -2,9 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCareActions, assignCoordinator, addCareNote } from '../../api';
 import { UserCog, MessageSquarePlus, Loader2, AlertCircle, PencilLine } from 'lucide-react';
+import { can, ASSIGN_ROLES, NOTE_ROLES, EDIT_PATIENT_ROLES } from '../../roles';
 
+/**
+ * The care coordinator and the care notes. Everyone who reaches this panel
+ * reads them; only the roles the server lets change them (api/access.py
+ * ACTIONS assign, add_notes, edit_patients) get the boxes and buttons, so an
+ * insurer or pharmacy is never offered a save that will be refused.
+ */
 export default function CareCoordination({ patientId }) {
   const navigate = useNavigate();
+  const canAssign = can(ASSIGN_ROLES);
+  const canNote = can(NOTE_ROLES);
+  const canEdit = can(EDIT_PATIENT_ROLES);
   const [careActions, setCareActions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -74,6 +84,7 @@ export default function CareCoordination({ patientId }) {
           <UserCog className="text-gray-400" size={20} />
           <span>Care Coordination</span>
         </h2>
+        {canEdit && (
         <button
           type="button"
           onClick={() => navigate(`/patients/${patientId}/update`)}
@@ -82,6 +93,7 @@ export default function CareCoordination({ patientId }) {
           <PencilLine size={15} />
           <span>Update Patient</span>
         </button>
+        )}
       </div>
 
       {error && (
@@ -91,7 +103,8 @@ export default function CareCoordination({ patientId }) {
         </div>
       )}
 
-      {/* Assign coordinator */}
+      {/* Assign coordinator - read-only for the roles that do not assign */}
+      {canAssign ? (
       <form onSubmit={handleAssign} className="flex items-end gap-3">
         <div className="flex-1">
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Assigned Coordinator</label>
@@ -111,6 +124,14 @@ export default function CareCoordination({ patientId }) {
           {assigning ? <Loader2 size={16} className="animate-spin" /> : <span>Assign</span>}
         </button>
       </form>
+      ) : (
+        <div>
+          <div className="text-sm font-medium text-gray-700 mb-1.5">Assigned Coordinator</div>
+          <div className="text-sm text-gray-800">
+            {careActions?.coordinator_name || <span className="text-gray-400">None assigned yet</span>}
+          </div>
+        </div>
+      )}
       {careActions?.assigned_at && (
         <p className="text-xs text-gray-400 -mt-3">Last assigned: {careActions.assigned_at}</p>
       )}
@@ -130,6 +151,7 @@ export default function CareCoordination({ patientId }) {
           ))}
         </div>
 
+        {canNote && (
         <form onSubmit={handleAddNote} className="mt-3 flex items-end gap-3">
           <div className="flex-1">
             <textarea
@@ -148,6 +170,7 @@ export default function CareCoordination({ patientId }) {
             {addingNote ? <Loader2 size={16} className="animate-spin" /> : <MessageSquarePlus size={16} />}
           </button>
         </form>
+        )}
       </div>
     </div>
   );

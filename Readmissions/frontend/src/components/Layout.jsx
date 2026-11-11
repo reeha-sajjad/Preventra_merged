@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopNav from './TopNav';
 import Chatbot from './Chatbot';
+import DemoBanner from './DemoBanner';
 import { aiOn, useAiStatus } from '../hooks/useAiStatus';
 
 export default function Layout() {
@@ -18,6 +19,7 @@ export default function Layout() {
       <Sidebar open={navOpen} onClose={closeNav} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopNav onMenuClick={() => setNavOpen(true)} />
+        <DemoBanner />
         <main className="w-full flex-1 overflow-y-auto">
           <Outlet />
         </main>

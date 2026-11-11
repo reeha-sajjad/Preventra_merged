@@ -10,6 +10,10 @@ export const STAFF_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const FOLLOWUP_REQUEST_ROLES = ['doctor', 'nurse'];
 export const FOLLOWUP_HANDLE_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
 export const ASSIGN_ROLES = ['superadmin', 'hospital_admin', 'case_manager'];
+// Care notes and the "Update patient" page (api/access.py ACTIONS add_notes,
+// edit_patients). Everyone else reads the notes but gets no box to type in.
+export const NOTE_ROLES = ['superadmin', 'doctor', 'nurse', 'case_manager'];
+export const EDIT_PATIENT_ROLES = ['superadmin', 'hospital_admin', 'doctor', 'nurse', 'case_manager'];
 // Who finds a patient by insurance member ID (api/member_ids.py).
 // An insurer's home is its members page (pages/InsurerHome.jsx); Overview moves to /overview.
 export const INSURER_ROLES = ['insurer'];

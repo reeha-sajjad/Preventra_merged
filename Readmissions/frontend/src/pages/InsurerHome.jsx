@@ -4,6 +4,7 @@ import { Users, AlertTriangle, Wallet, ShieldCheck, Building2, ChevronRight, Cre
 import { getInsurerHome } from '../api';
 import MemberLookup from '../components/insurance/MemberLookup';
 import { InsurerInbox } from '../components/insurance/InsurerFlags';
+import { CostSourceNote } from '../components/DemoBanner';
 
 const usd = (n) => `$${Math.round(n || 0).toLocaleString()}`;
 
@@ -51,6 +52,7 @@ export default function InsurerHome() {
           <Tile icon={ShieldCheck} label="Avoidable with follow-up" value={usd(stats.avoidable)} tone="text-green-800"
                 sub="if timely follow-up prevents a quarter" />
         </div>
+        <CostSourceNote className="mt-3" />
         {stats.without_member_id > 0 && (
           <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500">
             <CreditCard size={12} /> {stats.without_member_id.toLocaleString()} member{stats.without_member_id === 1 ? ' has' : 's have'} no
